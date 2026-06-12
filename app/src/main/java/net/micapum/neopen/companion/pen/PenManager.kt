@@ -48,6 +48,11 @@ class PenManager(
     private var writeChar: BluetoothGattCharacteristic? = null
     private var reassembler: Protocol.FrameReassembler? = null
 
+    // Conexión: evita reentradas del scan y permite reintentar el clásico GATT 133.
+    private var connecting = false
+    private var target: BluetoothDevice? = null
+    private var connectAttempts = 0
+
     // --- estado de captura online ---
     private var currentSobp: Sobp? = null
     private var strokeStart = 0L
@@ -87,8 +92,14 @@ class PenManager(
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                // El scan puede entregar varios resultados (incluso tras stopScan, por la
+                // cola pendiente). Solo actuamos en el primero.
+                if (connecting) return
+                connecting = true
                 scanner.stopScan(this)
-                connect(result.device)
+                // ¡Importante! NO conectar en el hilo del callback de scan: es la causa
+                // típica del GATT error 133. Saltamos al hilo principal.
+                main.post { connect(result.device) }
             }
             override fun onScanFailed(errorCode: Int) {
                 update { it.copy(status = PenStatus.IDLE, error = "scan-failed") }
@@ -96,16 +107,41 @@ class PenManager(
         }
         scanner.startScan(filters, settings, cb)
         // timeout de scan: 15 s
-        main.postDelayed({ scanner.stopScan(cb) }, 15_000)
+        main.postDelayed({ if (!connecting) scanner.stopScan(cb) }, 15_000)
     }
 
     private fun connect(device: BluetoothDevice) {
-        update { it.copy(status = PenStatus.CONNECTING, mac = device.address) }
+        target = device
+        connectAttempts = 0
         reassembler = Protocol.FrameReassembler(::onFrame)
+        openGatt(device)
+    }
+
+    private fun openGatt(device: BluetoothDevice) {
+        connectAttempts++
+        update { it.copy(status = PenStatus.CONNECTING, mac = device.address, error = null) }
+        // autoConnect=false + TRANSPORT_LE: conexión directa, lo más rápido.
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
+    /** Cierra el GATT actual y reintenta (hasta 3 veces) ante un fallo de conexión (133). */
+    private fun retryOrFail() {
+        gatt?.close()
+        gatt = null
+        val device = target
+        if (device != null && connectAttempts < 3) {
+            // Pequeño respiro para que la pila BLE libere el slot antes de reintentar.
+            main.postDelayed({ openGatt(device) }, 600)
+        } else {
+            connecting = false
+            update { it.copy(status = PenStatus.DISCONNECTED, error = "connect-failed") }
+        }
+    }
+
     fun disconnect() {
+        connecting = false
+        target = null
+        main.removeCallbacksAndMessages(null)
         gatt?.disconnect()
         gatt?.close()
         gatt = null
@@ -126,9 +162,20 @@ class PenManager(
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                // Fallo de conexión (típicamente 133): cierra y reintenta.
+                retryOrFail()
+                return
+            }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                g.discoverServices()
+                connectAttempts = 0
+                // Descubrir servicios en el hilo principal mejora la estabilidad en
+                // algunos fabricantes; un pequeño retardo evita carreras tras conectar.
+                main.postDelayed({ g.discoverServices() }, 200)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                connecting = false
+                g.close()
+                if (gatt === g) gatt = null
                 update { it.copy(status = PenStatus.DISCONNECTED) }
             }
         }
