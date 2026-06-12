@@ -41,6 +41,10 @@ class PenManager(
     private val _state = MutableStateFlow(PenState())
     val state: StateFlow<PenState> = _state
 
+    /** Registro de diagnóstico en memoria (visible desde Ajustes → Debug). */
+    private val _logs = MutableStateFlow<List<String>>(emptyList())
+    val logs: StateFlow<List<String>> = _logs
+
     private val main = Handler(Looper.getMainLooper())
     private val adapter: BluetoothAdapter? =
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -53,6 +57,19 @@ class PenManager(
     private var connecting = false
     private var target: BluetoothDevice? = null
     private var connectAttempts = 0
+    private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
+    private var scanCb: ScanCallback? = null
+
+    private val logClock = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+
+    /** Escribe en logcat y en el buffer en memoria (cap. 300 líneas). */
+    private fun log(msg: String) {
+        Log.d(TAG, msg)
+        val line = "${logClock.format(System.currentTimeMillis())}  $msg"
+        _logs.value = (_logs.value + line).takeLast(300)
+    }
+
+    fun clearLogs() { _logs.value = emptyList() }
 
     // --- estado de captura online ---
     private var currentSobp: Sobp? = null
@@ -83,8 +100,11 @@ class PenManager(
 
     fun scanAndConnect() {
         val scanner = adapter?.bluetoothLeScanner ?: run {
+            log("Bluetooth apagado: no hay scanner")
             update { it.copy(status = PenStatus.IDLE, error = "bluetooth-off") }; return
         }
+        this.scanner = scanner
+        log("Escaneando boli (servicio 19F1)…")
         update { it.copy(status = PenStatus.SCANNING, error = null) }
         val filters = listOf(
             ScanFilter.Builder().setServiceUuid(ParcelUuid(Protocol.SERVICE_V2)).build(),
@@ -99,17 +119,31 @@ class PenManager(
                 if (connecting) return
                 connecting = true
                 scanner.stopScan(this)
+                log("Boli encontrado: ${result.device.address}")
                 // ¡Importante! NO conectar en el hilo del callback de scan: es la causa
                 // típica del GATT error 133. Saltamos al hilo principal.
                 main.post { connect(result.device) }
             }
             override fun onScanFailed(errorCode: Int) {
+                log("Scan falló (código $errorCode)")
                 update { it.copy(status = PenStatus.IDLE, error = "scan-failed") }
             }
         }
+        scanCb = cb
         scanner.startScan(filters, settings, cb)
         // timeout de scan: 15 s
-        main.postDelayed({ if (!connecting) scanner.stopScan(cb) }, 15_000)
+        main.postDelayed({
+            if (!connecting) {
+                log("Scan agotado (15 s) sin encontrar el boli")
+                stopScan()
+                update { it.copy(status = PenStatus.IDLE) }
+            }
+        }, 15_000)
+    }
+
+    private fun stopScan() {
+        scanCb?.let { runCatching { scanner?.stopScan(it) } }
+        scanCb = null
     }
 
     private fun connect(device: BluetoothDevice) {
@@ -121,6 +155,7 @@ class PenManager(
 
     private fun openGatt(device: BluetoothDevice) {
         connectAttempts++
+        log("Conectando GATT (intento $connectAttempts) a ${device.address}…")
         update { it.copy(status = PenStatus.CONNECTING, mac = device.address, error = null) }
         // autoConnect=false + TRANSPORT_LE: conexión directa, lo más rápido.
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
@@ -133,26 +168,30 @@ class PenManager(
         val device = target
         if (device != null && connectAttempts < 3) {
             // Pequeño respiro para que la pila BLE libere el slot antes de reintentar.
+            log("Reintentando conexión en 600 ms…")
             main.postDelayed({ openGatt(device) }, 600)
         } else {
+            log("✗ Conexión fallida tras $connectAttempts intentos")
             connecting = false
             update { it.copy(status = PenStatus.DISCONNECTED, error = "connect-failed") }
         }
     }
 
     fun disconnect() {
+        log("Detener / desconectar solicitado")
         connecting = false
         target = null
         main.removeCallbacksAndMessages(null)
+        stopScan()
         gatt?.disconnect()
         gatt?.close()
         gatt = null
-        update { it.copy(status = PenStatus.DISCONNECTED, offlinePhase = OfflinePhase.IDLE) }
+        update { it.copy(status = PenStatus.IDLE, offlinePhase = OfflinePhase.IDLE) }
     }
 
     private fun write(frame: ByteArray) {
         val g = gatt ?: return
-        val ch = writeChar ?: run { Log.w(TAG, "write() sin característica de escritura"); return }
+        val ch = writeChar ?: run { log("⚠ write() sin característica de escritura"); return }
         // Usa NO_RESPONSE si la característica lo soporta (lo habitual en NeoLAB);
         // si no, escritura con respuesta.
         val noResp = ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
@@ -170,16 +209,18 @@ class PenManager(
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 // Fallo de conexión (típicamente 133): cierra y reintenta.
+                log("⚠ Cambio de estado con error (status=$status, newState=$newState)")
                 retryOrFail()
                 return
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 connectAttempts = 0
-                Log.d(TAG, "GATT conectado, descubriendo servicios…")
+                log("GATT conectado, descubriendo servicios…")
                 // Descubrir servicios en el hilo principal mejora la estabilidad en
                 // algunos fabricantes; un pequeño retardo evita carreras tras conectar.
                 main.postDelayed({ g.discoverServices() }, 250)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                log("GATT desconectado")
                 connecting = false
                 g.close()
                 if (gatt === g) gatt = null
@@ -190,11 +231,12 @@ class PenManager(
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             val service = g.getService(Protocol.SERVICE_V2) ?: g.getService(Protocol.SERVICE_V5)
             if (service == null) {
-                Log.e(TAG, "Servicio 19F1/v5 no encontrado. Servicios: " +
+                log("✗ Servicio 19F1/v5 no encontrado. Servicios: " +
                     g.services.joinToString { it.uuid.toString() })
                 update { it.copy(status = PenStatus.DISCONNECTED, error = "service-not-found") }
                 return
             }
+            log("Servicio encontrado: ${service.uuid}")
 
             // Descubre las características por sus PROPIEDADES, no por UUID adivinado:
             // así funciona aunque el número exacto (19F2/19F3) varíe entre firmwares.
@@ -208,9 +250,9 @@ class PenManager(
                     BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
             } ?: service.getCharacteristic(Protocol.CHAR_NOTIFY)
 
-            Log.d(TAG, "Características → write=${writeChar?.uuid} notify=${notify?.uuid}")
+            log("Características → write=${writeChar?.uuid} notify=${notify?.uuid}")
             if (writeChar == null || notify == null) {
-                Log.e(TAG, "Faltan características. Disponibles: " +
+                log("✗ Faltan características. Disponibles: " +
                     chars.joinToString { "${it.uuid}(props=${it.properties})" })
                 update { it.copy(status = PenStatus.DISCONNECTED, error = "chars-not-found") }
                 return
@@ -226,17 +268,17 @@ class PenManager(
                 else BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
                 cccd.value = value
                 g.writeDescriptor(cccd)
-                Log.d(TAG, "Escribiendo CCCD para habilitar notificaciones…")
+                log("Escribiendo CCCD para habilitar notificaciones…")
             } else {
                 // Sin CCCD: arranca el handshake directamente.
-                Log.w(TAG, "Notify sin CCCD; arrancando handshake sin descriptor")
+                log("⚠ Notify sin CCCD; arrancando handshake sin descriptor")
                 write(Protocol.reqVersion())
             }
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             // Notificaciones habilitadas: ahora sí es seguro arrancar el handshake.
-            Log.d(TAG, "CCCD escrito (status=$status), arrancando handshake (reqVersion)")
+            log("CCCD escrito (status=$status) → enviando reqVersion (0x01)")
             write(Protocol.reqVersion())
         }
 
@@ -261,10 +303,11 @@ class PenManager(
     // ----------------------------------------------------------------------------------
 
     private fun onFrame(frame: Protocol.Frame) {
-        Log.d(TAG, "Frame recibido: cmd=0x%02X len=%d".format(frame.cmd, frame.data.size))
+        log("← Frame cmd=0x%02X len=%d".format(frame.cmd, frame.data.size))
         when (frame.cmd) {
             Protocol.VERSION_RESPONSE -> {
                 // VERIFY: extraer MAC/nombre/firmware del payload. Tras versión, autorizado.
+                log("✓ VERSION_RESPONSE → AUTORIZADO")
                 update { it.copy(status = PenStatus.AUTHORIZED, error = null) }
                 write(Protocol.reqSettingInfo())
                 write(Protocol.reqOnlineDataAll())

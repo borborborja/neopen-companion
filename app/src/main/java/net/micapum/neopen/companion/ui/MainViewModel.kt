@@ -34,9 +34,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _serverCheck = MutableStateFlow<ServerCheck>(ServerCheck.Idle)
     val serverCheck: StateFlow<ServerCheck> = _serverCheck
 
+    /** Registro de diagnóstico BLE (para el panel de debug en Ajustes). */
+    val penLogs: StateFlow<List<String>> = appCtx.pen.logs
+
     // --- conexión ---
     fun scan() = appCtx.pen.scanAndConnect()
     fun disconnect() = appCtx.pen.disconnect()
+    /** Detiene el escaneo/conexión en curso. */
+    fun stopConnecting() = appCtx.pen.disconnect()
+    fun clearLogs() = appCtx.pen.clearLogs()
 
     // --- ajustes del boli ---
     fun setAutoPowerOn(on: Boolean) = appCtx.pen.setAutoPowerOn(on)

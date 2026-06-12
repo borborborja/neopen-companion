@@ -10,10 +10,13 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -25,6 +28,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import net.micapum.neopen.companion.data.AppSettings
@@ -99,14 +105,26 @@ private fun PenScreen(pen: PenState, vm: MainViewModel, configured: Boolean) {
 
         StatusCard(pen)
 
-        Button(
-            onClick = { vm.scan() },
-            enabled = pen.status != PenStatus.SCANNING && pen.status != PenStatus.CONNECTING,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) {
-            Icon(Icons.Default.Bluetooth, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(if (pen.connected) "Reconectar" else "Conectar boli")
+        val busy = pen.status == PenStatus.SCANNING || pen.status == PenStatus.CONNECTING
+        if (busy) {
+            OutlinedButton(
+                onClick = { vm.stopConnecting() },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) {
+                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Detener conexión")
+            }
+        } else {
+            Button(
+                onClick = { vm.scan() },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Icon(Icons.Default.Bluetooth, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (pen.connected) "Reconectar" else "Conectar boli")
+            }
         }
 
         if (pen.connected) {
@@ -335,6 +353,8 @@ private fun SettingsScreen(s: AppSettings, vm: MainViewModel) {
     var mode by remember(s.syncMode) { mutableStateOf(s.syncMode) }
     var interval by remember(s.syncIntervalMin) { mutableStateOf(s.syncIntervalMin.toString()) }
     val check by vm.serverCheck.collectAsState()
+    val logs by vm.penLogs.collectAsState()
+    var showLogs by remember { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -401,7 +421,57 @@ private fun SettingsScreen(s: AppSettings, vm: MainViewModel) {
             },
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) { Text("Guardar") }
+
+        HorizontalDivider()
+        SectionHeader("Diagnóstico")
+        Text(
+            "Registro de la conexión Bluetooth con el boli. Útil para ver dónde se queda al conectar.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(onClick = { showLogs = true }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Ver registro de conexión (${logs.size})")
+        }
     }
+
+    if (showLogs) {
+        DebugLogDialog(logs, onClear = { vm.clearLogs() }, onDismiss = { showLogs = false })
+    }
+}
+
+@Composable
+private fun DebugLogDialog(logs: List<String>, onClear: () -> Unit, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    val text = if (logs.isEmpty()) "(sin registros — pulsa «Conectar boli»)" else logs.joinToString("\n")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Registro de conexión") },
+        text = {
+            Column(
+                Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { clipboard.setText(AnnotatedString(text)) }) {
+                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Copiar")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onClear) { Text("Limpiar") }
+                TextButton(onClick = onDismiss) { Text("Cerrar") }
+            }
+        },
+    )
 }
 
 // --- helpers ---
