@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
@@ -139,7 +140,7 @@ class PenManager(
             val notify = service.getCharacteristic(Protocol.CHAR_NOTIFY) ?: return
             g.setCharacteristicNotification(notify, true)
             notify.getDescriptor(Protocol.CCCD)?.let { d ->
-                d.value = BluetoothGattDescriptorEnableNotify
+                d.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                 g.writeDescriptor(d)
             }
             // Arranca el handshake.
@@ -161,9 +162,6 @@ class PenManager(
             reassembler?.feed(ch.value ?: return)
         }
     }
-
-    private val BluetoothGattDescriptorEnableNotify =
-        BluetoothGattCharacteristic.ENABLE_NOTIFICATION_VALUE // 0x01,0x00
 
     // ----------------------------------------------------------------------------------
     // Dispatch de frames
