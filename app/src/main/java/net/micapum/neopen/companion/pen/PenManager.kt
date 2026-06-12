@@ -17,6 +17,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
+import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.text.SimpleDateFormat
@@ -68,6 +69,7 @@ class PenManager(
     val isReady get() = adapter?.isEnabled == true
 
     private companion object {
+        const val TAG = "PenManager"
         // VERIFY contra SettingType del SDK; valores provisionales.
         const val SET_AUTO_POWER_ON = 0x05
         const val SET_BEEP = 0x07
@@ -150,9 +152,13 @@ class PenManager(
 
     private fun write(frame: ByteArray) {
         val g = gatt ?: return
-        val ch = writeChar ?: return
+        val ch = writeChar ?: run { Log.w(TAG, "write() sin característica de escritura"); return }
+        // Usa NO_RESPONSE si la característica lo soporta (lo habitual en NeoLAB);
+        // si no, escritura con respuesta.
+        val noResp = ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+        ch.writeType = if (noResp) BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        else BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         ch.value = frame
-        ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         g.writeCharacteristic(ch)
     }
 
@@ -169,9 +175,10 @@ class PenManager(
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 connectAttempts = 0
+                Log.d(TAG, "GATT conectado, descubriendo servicios…")
                 // Descubrir servicios en el hilo principal mejora la estabilidad en
                 // algunos fabricantes; un pequeño retardo evita carreras tras conectar.
-                main.postDelayed({ g.discoverServices() }, 200)
+                main.postDelayed({ g.discoverServices() }, 250)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 connecting = false
                 g.close()
@@ -182,15 +189,54 @@ class PenManager(
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             val service = g.getService(Protocol.SERVICE_V2) ?: g.getService(Protocol.SERVICE_V5)
-            if (service == null) { update { it.copy(error = "service-not-found") }; return }
-            writeChar = service.getCharacteristic(Protocol.CHAR_WRITE)
-            val notify = service.getCharacteristic(Protocol.CHAR_NOTIFY) ?: return
-            g.setCharacteristicNotification(notify, true)
-            notify.getDescriptor(Protocol.CCCD)?.let { d ->
-                d.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                g.writeDescriptor(d)
+            if (service == null) {
+                Log.e(TAG, "Servicio 19F1/v5 no encontrado. Servicios: " +
+                    g.services.joinToString { it.uuid.toString() })
+                update { it.copy(status = PenStatus.DISCONNECTED, error = "service-not-found") }
+                return
             }
-            // Arranca el handshake.
+
+            // Descubre las características por sus PROPIEDADES, no por UUID adivinado:
+            // así funciona aunque el número exacto (19F2/19F3) varíe entre firmwares.
+            val chars = service.characteristics
+            writeChar = chars.firstOrNull {
+                it.properties and (BluetoothGattCharacteristic.PROPERTY_WRITE or
+                    BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
+            } ?: service.getCharacteristic(Protocol.CHAR_WRITE)
+            val notify = chars.firstOrNull {
+                it.properties and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or
+                    BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+            } ?: service.getCharacteristic(Protocol.CHAR_NOTIFY)
+
+            Log.d(TAG, "Características → write=${writeChar?.uuid} notify=${notify?.uuid}")
+            if (writeChar == null || notify == null) {
+                Log.e(TAG, "Faltan características. Disponibles: " +
+                    chars.joinToString { "${it.uuid}(props=${it.properties})" })
+                update { it.copy(status = PenStatus.DISCONNECTED, error = "chars-not-found") }
+                return
+            }
+
+            g.setCharacteristicNotification(notify, true)
+            val cccd = notify.getDescriptor(Protocol.CCCD)
+            if (cccd != null) {
+                // Habilita notificaciones y ESPERA a onDescriptorWrite antes de escribir:
+                // Android solo permite una operación GATT a la vez.
+                val value = if (notify.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0)
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                else BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                cccd.value = value
+                g.writeDescriptor(cccd)
+                Log.d(TAG, "Escribiendo CCCD para habilitar notificaciones…")
+            } else {
+                // Sin CCCD: arranca el handshake directamente.
+                Log.w(TAG, "Notify sin CCCD; arrancando handshake sin descriptor")
+                write(Protocol.reqVersion())
+            }
+        }
+
+        override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            // Notificaciones habilitadas: ahora sí es seguro arrancar el handshake.
+            Log.d(TAG, "CCCD escrito (status=$status), arrancando handshake (reqVersion)")
             write(Protocol.reqVersion())
         }
 
@@ -215,6 +261,7 @@ class PenManager(
     // ----------------------------------------------------------------------------------
 
     private fun onFrame(frame: Protocol.Frame) {
+        Log.d(TAG, "Frame recibido: cmd=0x%02X len=%d".format(frame.cmd, frame.data.size))
         when (frame.cmd) {
             Protocol.VERSION_RESPONSE -> {
                 // VERIFY: extraer MAC/nombre/firmware del payload. Tras versión, autorizado.

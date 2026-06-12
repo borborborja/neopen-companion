@@ -9,7 +9,7 @@ import java.util.UUID
  *
  * Constantes y framing reconstruidos del SDK oficial (web_pen_sdk, GPL-3.0), que es
  * la implementación que ya funciona en la web de neopen:
- *  - Servicio BLE 0x19F1, write 0x2BA0, notify 0x2BA1.
+ *  - Servicio BLE 0x19F1, write 0x19F2, notify 0x19F3 (esquema 19Fx de NeoLAB).
  *  - Frame: STX, CMD, LEN(2 LE), DATA, CHECKSUM(suma de DATA & 0xFF), ETX.
  *  - Escape DLE: 0x02/0x03/0x07 → [0x07, b XOR 0x20].
  *  - Enum de comandos: dist/PenCotroller/CMD.js.
@@ -21,8 +21,8 @@ import java.util.UUID
 object Protocol {
     // --- UUIDs (servicio v2 19F1 del M1+; v5 para pens nuevos, solo fallback de scan) ---
     val SERVICE_V2: UUID = uuid16(0x19F1)
-    val CHAR_WRITE: UUID = uuid16(0x2BA0)
-    val CHAR_NOTIFY: UUID = uuid16(0x2BA1)
+    val CHAR_WRITE: UUID = uuid16(0x19F2)
+    val CHAR_NOTIFY: UUID = uuid16(0x19F3)
     val SERVICE_V5: UUID = UUID.fromString("4f99f138-9d53-5bfa-9e50-b147491afe68")
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
