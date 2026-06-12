@@ -3,15 +3,26 @@ package net.micapum.neopen.companion.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import net.micapum.neopen.companion.NeopenApp
+import net.micapum.neopen.companion.data.ApiFactory
 import net.micapum.neopen.companion.data.AppSettings
 import net.micapum.neopen.companion.pen.OfflineNote
 import net.micapum.neopen.companion.pen.PenState
 import net.micapum.neopen.companion.sync.PenService
+
+/** Resultado de la prueba de conexión con el servidor neopen. */
+sealed interface ServerCheck {
+    data object Idle : ServerCheck
+    data object Checking : ServerCheck
+    data object Ok : ServerCheck
+    data object BadAuth : ServerCheck
+    data class Unreachable(val detail: String) : ServerCheck
+}
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val appCtx = app as NeopenApp
@@ -19,6 +30,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val penState: StateFlow<PenState> = appCtx.pen.state
     val settings: StateFlow<AppSettings> =
         appCtx.settings.flow.stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
+
+    private val _serverCheck = MutableStateFlow<ServerCheck>(ServerCheck.Idle)
+    val serverCheck: StateFlow<ServerCheck> = _serverCheck
 
     // --- conexión ---
     fun scan() = appCtx.pen.scanAndConnect()
@@ -44,6 +58,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             appCtx.pen.importAllOffline()
         }
     }
+
+    /**
+     * Prueba la conexión con el servidor usando la URL y contraseña indicadas
+     * (sin necesidad de guardarlas antes). Comprueba que responde (`/api/health`)
+     * y que la contraseña es válida (`/api/capabilities`).
+     */
+    fun testServer(url: String, password: String) {
+        if (url.isBlank()) {
+            _serverCheck.value = ServerCheck.Unreachable("Falta la URL del servidor")
+            return
+        }
+        _serverCheck.value = ServerCheck.Checking
+        viewModelScope.launch {
+            val api = runCatching { ApiFactory.create(url) }.getOrElse {
+                _serverCheck.value = ServerCheck.Unreachable("URL no válida"); return@launch
+            }
+            // 1) ¿responde el servidor?
+            val reachable = runCatching { api.health() }
+            if (reachable.isFailure) {
+                _serverCheck.value =
+                    ServerCheck.Unreachable(reachable.exceptionOrNull()?.message ?: "Sin respuesta")
+                return@launch
+            }
+            // 2) ¿es válida la contraseña?
+            _serverCheck.value = runCatching { api.capabilities(password) }.fold(
+                onSuccess = { resp ->
+                    when (resp.code()) {
+                        in 200..299 -> ServerCheck.Ok
+                        401, 403 -> ServerCheck.BadAuth
+                        else -> ServerCheck.Unreachable("HTTP ${resp.code()}")
+                    }
+                },
+                onFailure = { ServerCheck.Unreachable(it.message ?: "Error de red") },
+            )
+        }
+    }
+
+    fun resetServerCheck() { _serverCheck.value = ServerCheck.Idle }
 
     // --- ajustes de la app ---
     fun saveSettings(s: AppSettings) {

@@ -3,9 +3,11 @@ package net.micapum.neopen.companion.data
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
+import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
@@ -34,8 +36,18 @@ data class RegisterPenInput(val mac: String, val name: String? = null, val firmw
 
 data class PenInfoDto(val mac: String, val alias: String? = null)
 
+data class HealthDto(val status: String? = null)
+
 /** Cliente del servidor neopen. La contraseña va en la cabecera por petición. */
 interface NeopenApi {
+    /** Healthcheck público (sin auth): comprueba que el servidor responde. */
+    @GET("api/health")
+    suspend fun health(): HealthDto
+
+    /** Endpoint con auth: sirve para validar la contraseña (200 ok / 401 incorrecta). */
+    @GET("api/capabilities")
+    suspend fun capabilities(@Header("X-Auth-Password") password: String): Response<Unit>
+
     @POST("api/captures")
     suspend fun createCapture(
         @Header("X-Auth-Password") password: String,

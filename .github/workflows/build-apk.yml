@@ -41,8 +41,23 @@ jobs:
           path: neopen-companion-debug.apk
           if-no-files-found: error
 
+      # Release versionada cuando se empuja un tag v* (p. ej. v0.2.0).
       - name: Publicar release en tags v*
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          files: neopen-companion-debug.apk
+          generate_release_notes: true
+
+      # Release "rolling" siempre actualizada con la última build de main.
+      - name: Actualizar release «latest» en cada push a main
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Última build (main)
+          prerelease: true
+          body: |
+            APK de depuración generado automáticamente desde la última build de `main`.
+            Para una versión estable, descarga una release con etiqueta `v*`.
           files: neopen-companion-debug.apk
