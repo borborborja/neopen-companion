@@ -12,3 +12,6 @@ app/build/
 /app/release
 *.keystore
 *.jks
+# Excepción: keystore de depuración fijo y compartido (firma estable de las
+# builds debug/CI; no es una clave de producción sensible).
+!app/signing/neopen.keystore

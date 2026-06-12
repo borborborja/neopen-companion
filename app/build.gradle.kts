@@ -11,9 +11,21 @@ android {
         applicationId = "net.micapum.neopen.companion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.2.1"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    signingConfigs {
+        // Clave de firma fija y versionada: garantiza que todas las builds (local y
+        // CI) se firmen igual, de modo que las actualizaciones se instalen sin tener
+        // que desinstalar la versión anterior.
+        getByName("debug") {
+            storeFile = file("signing/neopen.keystore")
+            storePassword = "neopenpen"
+            keyAlias = "neopen"
+            keyPassword = "neopenpen"
+        }
     }
 
     buildTypes {
