@@ -69,6 +69,18 @@ Marcado con **`VERIFY`** en el código (necesita el boli real o leer
 de Android de NeoLAB** (GPL-3.0) y dejar que él haga el BLE; `PenManager` se
 reescribe como un wrapper de su API y el resto de la app no cambia.
 
+## APK (GitHub Actions)
+
+El workflow `.github/workflows/build-apk.yml` compila un **APK debug** (instalable)
+en cada push a `main`, en cada PR y a demanda:
+
+- **Artifact**: pestaña *Actions* → run → `neopen-companion-debug`.
+- **Release**: al crear un tag `vX.Y.Z`, el APK se adjunta a la release.
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0   # genera una release con el APK
+```
+
 ## Licencia
 
 Las constantes del protocolo se reconstruyeron a partir de los SDK GPL-3.0 de NeoLAB
