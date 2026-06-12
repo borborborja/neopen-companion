@@ -1,0 +1,360 @@
+openapi: 3.1.0
+info:
+  title: neopen API
+  version: "0.2.0"
+  description: |
+    Contrato de la API del servidor neopen, pensado como **fuente de verdad para
+    clientes nativos** (companion Android/iOS) además del frontend web.
+
+    El cometido de un companion es: conectar por BLE al Neo smartpen M1+, captar
+    los trazos (live u offline) y **subirlos en crudo** a `POST /api/captures`.
+    El **servidor archiva** automáticamente cada hoja en su cuaderno (por SOBP):
+    el cliente NO necesita conocer la lógica de cuadernos ni de formato.
+
+    Mantén esta versión en sync con `packages/shared/src/index.ts` y los esquemas
+    zod de `apps/server/src/routes/`.
+servers:
+  - url: http://localhost:3000
+    description: Desarrollo
+  - url: https://neopen.example.net
+    description: Instancia autoalojada
+security:
+  - PenPassword: []
+tags:
+  - name: captures
+    description: Subida de la escritura del boli (lo esencial para un companion)
+  - name: pens
+    description: Registro del boli
+  - name: notebooks
+    description: Cuadernos (solo lectura para un companion)
+  - name: meta
+    description: Salud y capacidades
+
+paths:
+  /api/health:
+    get:
+      tags: [meta]
+      summary: Healthcheck (público, sin auth)
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /api/capabilities:
+    get:
+      tags: [meta]
+      summary: Conectores activos y estado del OCR
+      responses:
+        "200":
+          description: Capacidades del servidor
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capabilities" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/captures:
+    get:
+      tags: [captures]
+      summary: Lista todas las capturas (orden por última edición)
+      responses:
+        "200":
+          description: Lista de capturas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  captures:
+                    type: array
+                    items: { $ref: "#/components/schemas/Capture" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [captures]
+      summary: Sube una hoja del boli (el servidor la archiva en su cuaderno)
+      description: |
+        El cliente sube la captura **en crudo**: basta con `sobp`, `source`,
+        `capturedAt`, `name` y `strokes`. Si NO se envía `notebookId`, el servidor
+        resuelve el cuaderno por SOBP (lo crea si no existe) y enruta a la pila
+        "Sin clasificar" si esa libreta está marcada así.
+
+        - `paper` (formato físico, p. ej. de NeoLAB) es opcional y **solo siembra
+          el formato de un cuaderno nuevo**; las hojas heredan el formato de su
+          cuaderno.
+        - Re-subir la misma hoja (mismo SOBP) **fusiona** los trazos nuevos
+          (append-only con dedupe por `startTime`+nº de dots); nunca duplica ni
+          borra. Idempotente para reintentos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateCaptureInput" }
+      responses:
+        "201":
+          description: Captura creada o fusionada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/captures/{id}:
+    delete:
+      tags: [captures]
+      summary: Borra una captura
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Borrada }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/pens:
+    get:
+      tags: [pens]
+      summary: Lista los bolis registrados
+      responses:
+        "200":
+          description: Bolis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pens:
+                    type: array
+                    items: { $ref: "#/components/schemas/PenInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [pens]
+      summary: Alta/refresco del boli al conectarse (upsert por MAC)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mac]
+              properties:
+                mac: { type: string, example: "9C:7B:D2:..." }
+                name: { type: string, description: Nombre Bluetooth }
+                firmware: { type: string }
+      responses:
+        "201":
+          description: Boli registrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PenInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/pens/{mac}:
+    patch:
+      tags: [pens]
+      summary: Cambia el alias del boli
+      parameters:
+        - { name: mac, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [alias]
+              properties:
+                alias: { type: string }
+      responses:
+        "200":
+          description: Boli actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PenInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/notebooks:
+    get:
+      tags: [notebooks]
+      summary: Lista los cuadernos (un companion normalmente solo los lee)
+      responses:
+        "200":
+          description: Cuadernos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notebooks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Notebook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    PenPassword:
+      type: apiKey
+      in: header
+      name: X-Auth-Password
+      description: Contraseña única del servidor (env `APP_PASSWORD`). Exigida en todo `/api/*` salvo `/api/health`.
+
+  responses:
+    Unauthorized:
+      description: Falta o es incorrecta la cabecera X-Auth-Password
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Cuerpo inválido (fallo de validación)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No existe
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    Sobp:
+      type: object
+      description: Identidad Ncode de la página física (Section.Owner.Book.Page).
+      required: [section, owner, book, page]
+      properties:
+        section: { type: integer, minimum: 0 }
+        owner: { type: integer, minimum: 0 }
+        book: { type: integer, minimum: 0 }
+        page: { type: integer, minimum: 0 }
+
+    Dot:
+      type: object
+      required: [x, y, f]
+      properties:
+        x: { type: number, description: Coordenada X en celdas Ncode }
+        y: { type: number, description: Coordenada Y en celdas Ncode }
+        f: { type: number, description: Presión 0.0–1.0 }
+        t: { type: integer, description: Timestamp absoluto en ms (epoch), si está }
+
+    Stroke:
+      type: object
+      description: Trazo continuo (PEN_DOWN, N×PEN_MOVE, PEN_UP).
+      required: [startTime, endTime, dots]
+      properties:
+        startTime: { type: integer, description: ms epoch del primer dot }
+        endTime: { type: integer, description: ms epoch del último dot }
+        dots:
+          type: array
+          items: { $ref: "#/components/schemas/Dot" }
+
+    PaperSize:
+      type: object
+      description: Geometría de la página física en celdas Ncode.
+      required: [x0, y0, width, height]
+      properties:
+        x0: { type: number }
+        y0: { type: number }
+        width: { type: number }
+        height: { type: number }
+        source: { type: string, description: '"neolab" | id de preset | "manual"' }
+
+    CreateCaptureInput:
+      type: object
+      required: [sobp, source, capturedAt, name, strokes]
+      properties:
+        sobp: { $ref: "#/components/schemas/Sobp" }
+        notebook:
+          type: string
+          description: Nombre legible de la libreta (si el cliente lo conoce). Se usa como nombre del cuaderno auto-creado.
+        source: { type: string, enum: [realtime, offline] }
+        capturedAt: { type: string, format: date-time }
+        name: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+          default: []
+        strokes:
+          type: array
+          items: { $ref: "#/components/schemas/Stroke" }
+        paper:
+          allOf: [{ $ref: "#/components/schemas/PaperSize" }]
+          description: Opcional. Solo siembra el formato de un cuaderno nuevo.
+        destination:
+          type: string
+          enum: [inbox, notebook, loose]
+          description: Normalmente OMITIR — el servidor archiva en "notebook".
+        notebookId:
+          type: string
+          description: Normalmente OMITIR — el servidor resuelve el cuaderno por SOBP.
+
+    Capture:
+      allOf:
+        - $ref: "#/components/schemas/CreateCaptureInput"
+        - type: object
+          required: [id, importedAt, destination, position]
+          properties:
+            id: { type: string }
+            importedAt: { type: string, format: date-time }
+            destination: { type: string, enum: [inbox, notebook, loose] }
+            notebookId: { type: string }
+            position: { type: integer }
+            kind: { type: string, description: "Tipo detectado: [TODO], [AGENDA]…" }
+            transcription:
+              type: object
+              description: Resultado del OCR/HTR, si la hoja se ha transcrito.
+
+    PenInfo:
+      type: object
+      required: [mac, firstSeen, lastSeen]
+      properties:
+        mac: { type: string }
+        alias: { type: string }
+        name: { type: string }
+        firmware: { type: string }
+        firstSeen: { type: string, format: date-time }
+        lastSeen: { type: string, format: date-time }
+
+    Notebook:
+      type: object
+      required: [id, name, color, tags, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        color: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        paper:
+          oneOf: [{ $ref: "#/components/schemas/PaperSize" }, { type: "null" }]
+          description: Formato del cuaderno; null = sin definir.
+        paperSource: { type: string }
+        bookKey: { type: string, description: '"section.owner.book" (solo cuadernos por SOBP)' }
+        coverUrl: { type: string, description: Ruta pública de la portada (/covers/...) }
+        unclassified: { type: boolean, description: Pila "Sin clasificar" (sus hojas no aplican formato) }
+
+    Capabilities:
+      type: object
+      properties:
+        connectors:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              configured: { type: boolean }
+        ocr:
+          type: object
+          properties:
+            enabled: { type: boolean }
+            model: { type: string }
