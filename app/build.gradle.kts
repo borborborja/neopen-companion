@@ -11,8 +11,8 @@ android {
         applicationId = "net.micapum.neopen.companion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.5.0"
+        versionCode = 9
+        versionName = "0.6.0"
         vectorDrawables { useSupportLibrary = true }
     }
 

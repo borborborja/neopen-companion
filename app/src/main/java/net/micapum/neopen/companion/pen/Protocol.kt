@@ -7,30 +7,29 @@ import java.util.UUID
 /**
  * Protocolo v2 del Neo smartpen M1+ (NWP-F51).
  *
- * Constantes y framing reconstruidos del SDK oficial (web_pen_sdk, GPL-3.0), que es
- * la implementación que ya funciona en la web de neopen:
- *  - Servicio BLE 0x19F1, write 0x19F2, notify 0x19F3 (esquema 19Fx de NeoLAB).
- *  - Frame: STX, CMD, LEN(2 LE), DATA, CHECKSUM(suma de DATA & 0xFF), ETX.
- *  - Escape DLE: 0x02/0x03/0x07 → [0x07, b XOR 0x20].
- *  - Enum de comandos: dist/PenCotroller/CMD.js.
- *
- * ⚠️ Los PAYLOADS exactos de algunos comandos (VERSION_REQUEST, el layout interno
- * de los paquetes offline) deben verificarse contra PenRequestV2.js /
- * PenClientParserV2.js con el boli real. Marcado con "VERIFY".
+ * Reconstruido fielmente del SDK oficial `web_pen_sdk` (el que usa la web de
+ * neopen, que conecta correctamente). Puntos clave que difieren de versiones
+ * anteriores de este archivo:
+ *  - Servicio BLE 0x19F1, write 0x2BA0, notify 0x2BA1.
+ *  - Frame: STX(0xC0) CMD LEN(2 LE) DATA ETX(0xC1).  **SIN checksum.**
+ *  - Escape DLE(0x7D): 0xC0/0xC1/0x7D → [0x7D, b XOR 0x20].
+ *  - Las RESPUESTAS del boli traen un byte `result` tras el CMD (salvo eventos
+ *    0x6X, 0x73, 0x24, 0x32).
+ *  - reqVersion lleva 42 bytes (no vacío) o el boli cierra la conexión.
  */
 object Protocol {
     // --- UUIDs (servicio v2 19F1 del M1+; v5 para pens nuevos, solo fallback de scan) ---
     val SERVICE_V2: UUID = uuid16(0x19F1)
-    val CHAR_WRITE: UUID = uuid16(0x19F2)
-    val CHAR_NOTIFY: UUID = uuid16(0x19F3)
+    val CHAR_WRITE: UUID = uuid16(0x2BA0)
+    val CHAR_NOTIFY: UUID = uuid16(0x2BA1)
     val SERVICE_V5: UUID = UUID.fromString("4f99f138-9d53-5bfa-9e50-b147491afe68")
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-    const val STX = 0x02
-    const val ETX = 0x03
-    const val DLE = 0x07
+    const val STX = 0xC0
+    const val ETX = 0xC1
+    const val DLE = 0x7D
 
-    // --- Comandos host → pen (CMD.js) ---
+    // --- Comandos host → pen ---
     const val VERSION_REQUEST = 0x01
     const val PASSWORD_RESPONSE = 0x82
     const val SETTING_INFO_REQUEST = 0x04
@@ -42,7 +41,7 @@ object Protocol {
     const val OFFLINE_PACKET_RESPONSE = 0xa4
     const val OFFLINE_DATA_DELETE_REQUEST = 0x25
 
-    // --- Eventos pen → host (CMD.js) ---
+    // --- Eventos pen → host ---
     const val VERSION_RESPONSE = 0x81
     const val PASSWORD_REQUEST = 0x02
     const val SETTING_INFO_RESPONSE = 0x84
@@ -60,6 +59,17 @@ object Protocol {
     const val OFFLINE_PACKET_REQUEST = 0x24
     const val OFFLINE_DATA_DELETE_RESPONSE = 0xa5
 
+    // --- SettingType (para SETTING_CHANGE_REQUEST), del SDK ---
+    const val SET_TIMESTAMP = 1
+    const val SET_AUTO_POWER_OFF_TIME = 2
+    const val SET_PEN_CAP_OFF = 3
+    const val SET_AUTO_POWER_ON = 4
+    const val SET_BEEP = 5
+    const val SET_HOVER = 6
+    const val SET_OFFLINE_DATA = 7
+    const val SET_LED_COLOR = 8
+    const val SET_SENSITIVITY = 9
+
     // Tipos de dot
     const val DOT_DOWN = 0
     const val DOT_MOVE = 1
@@ -73,16 +83,14 @@ object Protocol {
     // Framing
     // ----------------------------------------------------------------------------------
 
-    /** Construye un frame v2 (con escape DLE). */
+    /** Construye un frame v2: STX, CMD, LEN(2 LE), DATA, ETX. STX/ETX sin escapar. */
     fun buildFrame(cmd: Int, data: ByteArray): ByteArray {
-        val checksum = data.fold(0) { acc, b -> acc + (b.toInt() and 0xff) } and 0xff
         val out = ArrayList<Byte>(data.size + 8)
         out.add(STX.toByte())
         putEscaped(out, cmd)
         putEscaped(out, data.size and 0xff)
         putEscaped(out, (data.size shr 8) and 0xff)
         for (b in data) putEscaped(out, b.toInt() and 0xff)
-        putEscaped(out, checksum)
         out.add(ETX.toByte())
         return out.toByteArray()
     }
@@ -94,12 +102,16 @@ object Protocol {
         } else out.add(v.toByte())
     }
 
-    /** Un frame ya des-escapado y troceado. */
-    data class Frame(val cmd: Int, val data: ByteArray)
+    /** Un frame ya des-escapado: cmd, result (o -1) y data (sin result ni longitud). */
+    data class Frame(val cmd: Int, val result: Int, val data: ByteArray)
+
+    /** ¿El comando entrante incluye byte `result` tras el CMD? (regla del SDK). */
+    private fun hasResult(cmd: Int): Boolean =
+        (cmd shr 4) != 0x6 && cmd != 0x73 && cmd != 0x24 && cmd != 0x32
 
     /**
-     * Reensambla frames a partir del stream de notificaciones BLE. Mantén una
-     * instancia por conexión: las notificaciones pueden venir partidas o agrupadas.
+     * Reensambla frames del stream de notificaciones BLE. Mantén una instancia por
+     * conexión. Detecta STX/ETX, des-escapa DLE y extrae cmd/result/longitud/data.
      */
     class FrameReassembler(private val onFrame: (Frame) -> Unit) {
         private val buf = ArrayList<Byte>()
@@ -121,137 +133,205 @@ object Protocol {
         }
 
         private fun emit() {
-            // buf = CMD, LEN(2 LE), DATA, CHECKSUM
-            if (buf.size < 4) return
+            if (buf.isEmpty()) return
             val cmd = buf[0].toInt() and 0xff
-            val len = (buf[1].toInt() and 0xff) or ((buf[2].toInt() and 0xff) shl 8)
-            val end = 3 + len
-            if (end > buf.size) return // frame incompleto/corrupto
-            val data = ByteArray(len) { buf[3 + it] }
-            onFrame(Frame(cmd, data))
+            var idx = 1
+            val result = if (hasResult(cmd)) {
+                if (buf.size <= idx) return
+                (buf[idx++].toInt() and 0xff)
+            } else -1
+            if (buf.size < idx + 2) return
+            val len = (buf[idx].toInt() and 0xff) or ((buf[idx + 1].toInt() and 0xff) shl 8)
+            idx += 2
+            val end = minOf(idx + len, buf.size)
+            val data = ByteArray(end - idx) { buf[idx + it] }
+            onFrame(Frame(cmd, result, data))
         }
     }
 
     // ----------------------------------------------------------------------------------
-    // Builders de comandos (host → pen)
+    // Builders de comandos (host → pen) — fieles a PenRequestV2 del SDK
     // ----------------------------------------------------------------------------------
 
-    /**
-     * Pide versión/identidad. El SDK v2 envía un payload de 42 bytes que identifica
-     * al cliente (no vacío): el boli cierra la conexión si recibe un version-request
-     * mal formado. Estructura aproximada (VERIFY contra PenRequestV2):
-     *   [0..15]  reservado (0)
-     *   [16..31] nombre de la app (ASCII, null-padded)
-     *   [32..41] versión de la app (ASCII, null-padded)
-     */
+    /** reqVersion: 42 bytes (16 nulos, 0xF0, 0x01, appVer[16], protoVer[8]). */
     fun reqVersion(): ByteArray {
         val data = ByteArray(42)
-        val name = "neopen_companion".toByteArray(Charsets.US_ASCII)
-        System.arraycopy(name, 0, data, 16, minOf(name.size, 16))
-        val ver = "0.5.0".toByteArray(Charsets.US_ASCII)
-        System.arraycopy(ver, 0, data, 32, minOf(ver.size, 10))
+        data[16] = 0xF0.toByte()
+        data[17] = 0x01
+        putAscii(data, 18, "0.0.0.0", 16)   // versión de app
+        putAscii(data, 34, "2.18", 8)       // versión de protocolo soportada
         return buildFrame(VERSION_REQUEST, data)
     }
 
-    /** Responde a la petición de contraseña (M1+ por defecto NO tiene). */
     fun resPassword(password: String): ByteArray {
-        val pw = password.toByteArray(Charsets.US_ASCII)
         val data = ByteArray(16)
-        System.arraycopy(pw, 0, data, 0, minOf(pw.size, 16))
+        putAscii(data, 0, password, 16)
         return buildFrame(PASSWORD_RESPONSE, data)
     }
 
+    /** ReqPenStatus: pide ajustes/estado (batería, memoria…). Payload vacío. */
     fun reqSettingInfo(): ByteArray = buildFrame(SETTING_INFO_REQUEST, ByteArray(0))
 
-    /** Cambia un ajuste. type: ver SETTING_TYPE; value LE. VERIFY layout. */
-    fun reqSettingChange(type: Int, value: ByteArray): ByteArray =
-        buildFrame(SETTING_CHANGE_REQUEST, byteArrayOf(type.toByte()) + value)
+    /** Activa la escritura en tiempo real de TODAS las libretas: data = [0xFF,0xFF]. */
+    fun reqOnlineDataAll(): ByteArray =
+        buildFrame(ONLINE_DATA_REQUEST, byteArrayOf(0xFF.toByte(), 0xFF.toByte()))
 
-    /** Activa la recepción de escritura en tiempo real de todas las libretas. */
-    fun reqOnlineDataAll(): ByteArray {
-        // VERIFY: el SDK envía la lista de notebooks permitidos; aquí "todos".
-        return buildFrame(ONLINE_DATA_REQUEST, byteArrayOf(0x00))
-    }
+    /** Cambio de ajuste on/off: data = [type, 0|1]. */
+    fun reqSettingOnOff(type: Int, on: Boolean): ByteArray =
+        buildFrame(SETTING_CHANGE_REQUEST, byteArrayOf(type.toByte(), if (on) 1 else 0))
 
-    fun reqOfflineNoteList(section: Int = 0, owner: Int = 0): ByteArray {
-        val bb = le(8).putInt(section).putInt(owner)
-        return buildFrame(OFFLINE_NOTE_LIST_REQUEST, bb.array())
-    }
+    /** Cambio de ajuste con valor short LE: data = [type, lo, hi]. */
+    fun reqSettingShort(type: Int, value: Int): ByteArray =
+        buildFrame(SETTING_CHANGE_REQUEST, byteArrayOf(type.toByte(), (value and 0xff).toByte(), ((value shr 8) and 0xff).toByte()))
+
+    fun reqOfflineNoteList(): ByteArray =
+        buildFrame(OFFLINE_NOTE_LIST_REQUEST, byteArrayOf(0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte()))
 
     fun reqOfflinePageList(section: Int, owner: Int, note: Int): ByteArray {
-        val bb = le(12).putInt(section).putInt(owner).putInt(note)
+        val bb = le(8)
+        bb.put(sectionOwner(section, owner)).putInt(note)
         return buildFrame(OFFLINE_PAGE_LIST_REQUEST, bb.array())
     }
 
-    /** Descarga datos offline de una libreta. deleteOnFinished SIEMPRE false en el companion. */
-    fun reqOfflineData(section: Int, owner: Int, note: Int): ByteArray {
-        // VERIFY layout: section,owner,note (LE) + flags (compress/delete) + pageCount(0=todas).
-        val bb = le(16)
-            .putInt(section).putInt(owner).putInt(note)
-            .put(1).put(0) // [compress=1][deleteOnFinished=0]
-            .putShort(0)   // pageCount 0 = todas
+    /** Descarga datos offline. deleteOnFinished SIEMPRE false en el companion. */
+    fun reqOfflineData(section: Int, owner: Int, note: Int, pages: IntArray = IntArray(0)): ByteArray {
+        val bb = le(14 + pages.size * 4)
+        bb.put(if (false) 1 else 2)     // delete=2 (no borrar)
+            .put(0x01)
+            .put(sectionOwner(section, owner))
+            .putInt(note)
+            .putInt(pages.size)
+        pages.forEach { bb.putInt(it) }
         return buildFrame(OFFLINE_DATA_REQUEST, bb.array())
     }
 
-    /** ACK de un chunk offline (APP→PEN). VERIFY: índice del paquete. */
+    /** ACK de un chunk offline (APP→PEN). */
     fun resOfflinePacket(index: Int): ByteArray =
         buildFrame(OFFLINE_PACKET_RESPONSE, le(4).putInt(index).array())
 
     fun reqOfflineDelete(section: Int, owner: Int, notes: IntArray): ByteArray {
-        val bb = le(9 + notes.size * 4)
-            .putInt(section).putInt(owner).put(notes.size.toByte())
+        val bb = le(5 + notes.size * 4)
+        bb.put(sectionOwner(section, owner)).put(notes.size.toByte())
         notes.forEach { bb.putInt(it) }
         return buildFrame(OFFLINE_DATA_DELETE_REQUEST, bb.array())
     }
 
+    /** Empaqueta (section, owner) en 4 bytes: owner(3 LE) + section. */
+    private fun sectionOwner(section: Int, owner: Int): ByteArray = byteArrayOf(
+        (owner and 0xff).toByte(),
+        ((owner shr 8) and 0xff).toByte(),
+        ((owner shr 16) and 0xff).toByte(),
+        (section and 0xff).toByte(),
+    )
+
     // ----------------------------------------------------------------------------------
-    // Parsers (pen → host)
+    // Parsers (pen → host) — offsets del SDK
     // ----------------------------------------------------------------------------------
 
-    /** Parsea un dot de 17 bytes (online) dado el SOBP actual y el t base del stroke. */
-    fun parseDot(data: ByteArray, offset: Int, baseTime: Long): Pair<Dot, Int> {
-        val bb = ByteBuffer.wrap(data, offset, 17).order(ByteOrder.LITTLE_ENDIAN)
-        val timeDelta = bb.short.toInt() and 0xffff
-        val force = bb.float
-        val x = bb.float
-        val y = bb.float
-        bb.get(); bb.get(); bb.get() // tilt x, tilt y, rotation (no usados)
-        val t = baseTime + timeDelta
-        // El tipo lo marca el flujo DOWN/MOVE/UP del parser, no el propio dot.
-        return Dot(x, y, force, t, DOT_MOVE) to timeDelta
+    /** Un dot online ya parseado (coordenadas Ncode combinadas, tiempo relativo). */
+    data class DotEvent(val timeAdd: Int, val x: Float, val y: Float, val force: Float)
+
+    /** Parsea un dot de evento (0x65/0x6c). isNew omite el byte de count inicial. */
+    fun parseDotEvent(data: ByteArray, isNew: Boolean): DotEvent {
+        var o = if (isNew) 1 else 0
+        val timeAdd = u8(data, o); o += 1
+        val force = u16(data, o); o += 2
+        val xi = u16(data, o); o += 2
+        val yi = u16(data, o); o += 2
+        val fx = u8(data, o); o += 1
+        val fy = u8(data, o); o += 1
+        // tx, ty, twist a continuación (no usados)
+        val x = xi + fx * 0.01f
+        val y = yi + fy * 0.01f
+        return DotEvent(timeAdd, x, y, force.toFloat())
     }
 
-    /** SETTING_INFO_RESPONSE → ajustes. VERIFY offsets exactos contra PenClientParserV2. */
+    /** Tiempo absoluto (ms) de un PEN_DOWN. isNew = evento 0x69 (con count). */
+    fun parsePenDownTime(data: ByteArray, cmd: Int): Long {
+        // 0x69 (NEW): [count(1)][time(8)]. 0x63 (viejo): [isDown(1)][time(8)] solo si down.
+        val o = if (cmd == ONLINE_NEW_PEN_DOWN) 1 else 1
+        return u64(data, o)
+    }
+
+    /** ¿El evento 0x63 es un PEN_DOWN? (data[0]==0). */
+    fun isUpDownDown(data: ByteArray): Boolean = u8(data, 0) == 0x00
+
+    /** Parsea la info de papel (0x64/0x6b) → SOBP. isNew omite el count inicial. */
+    fun parsePaperInfo(data: ByteArray, isNew: Boolean): Sobp {
+        var o = if (isNew) 1 else 0
+        val section = u8(data, o + 3)
+        val owner = u8(data, o) or (u8(data, o + 1) shl 8) or (u8(data, o + 2) shl 16)
+        o += 4
+        val book = i32(data, o); o += 4
+        val page = i32(data, o)
+        return Sobp(section, owner, book, page)
+    }
+
+    /** SETTING_INFO_RESPONSE → ajustes (offsets del SDK: SettingInfo). */
     fun parseSettingInfo(data: ByteArray): PenSettings {
-        // Layout aproximado: el primer byte suele ser batería; memoria usada un byte;
-        // resto de flags. Se ajusta con el boli real.
-        fun byteAt(i: Int) = if (i < data.size) data[i].toInt() and 0xff else 0
-        val battery = byteAt(0)
+        // lock(1) pwdMax(1) pwdRetry(1) time(8) autoOff(2) maxForce(2) usedMem(1)
+        // capOff(1) autoPowerOn(1) beep(1) hover(1) battery(1) useOffline(1) fsr(1)
+        val battery = u8(data, 20)
         return PenSettings(
             battery = if (battery == 128) 100 else battery,
             charging = battery == 128,
-            usedMem = byteAt(1),
+            usedMem = u8(data, 15),
+            autoShutdownTime = u16(data, 11),
+            autoPowerOn = u8(data, 17) == 1,
+            beep = u8(data, 18) == 1,
+            offlineData = u8(data, 21) == 1,
         )
+    }
+
+    /** VERSION_RESPONSE → identidad (nombre, firmware, MAC). */
+    fun parseVersionInfo(data: ByteArray): Triple<String, String, String> {
+        val name = ascii(data, 0, 16)
+        val firmware = ascii(data, 16, 16)
+        // protocol(8)@32, deviceType(2)@40, mac(6)@42
+        val mac = (42 until 48).joinToString(":") { "%02X".format(u8(data, it)) }
+        return Triple(name, firmware, mac)
     }
 
     /** OFFLINE_NOTE_LIST_RESPONSE → lista de (section, owner, note). */
     fun parseNoteList(data: ByteArray): List<OfflineNote> {
-        val bb = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
-        if (bb.remaining() < 2) return emptyList()
-        val count = bb.short.toInt() and 0xffff
+        if (data.size < 2) return emptyList()
+        val count = u16(data, 0)
         val out = ArrayList<OfflineNote>(count)
+        var o = 2
         repeat(count) {
-            if (bb.remaining() < 8) return out
-            val rb = ByteArray(4); bb.get(rb)
-            val section = rb[3].toInt() and 0xff
-            val owner = (rb[0].toInt() and 0xff) or
-                ((rb[1].toInt() and 0xff) shl 8) or ((rb[2].toInt() and 0xff) shl 16)
-            val note = bb.int
+            if (o + 8 > data.size) return out
+            val section = u8(data, o + 3)
+            val owner = u8(data, o) or (u8(data, o + 1) shl 8) or (u8(data, o + 2) shl 16)
+            val note = i32(data, o + 4)
             out.add(OfflineNote(section, owner, note))
+            o += 8
         }
         return out
     }
 
+    // --- helpers de lectura LE / escritura ---
+
     private fun le(size: Int): ByteBuffer =
         ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
+
+    private fun u8(d: ByteArray, i: Int) = if (i < d.size) d[i].toInt() and 0xff else 0
+    private fun u16(d: ByteArray, i: Int) = u8(d, i) or (u8(d, i + 1) shl 8)
+    private fun i32(d: ByteArray, i: Int) =
+        u8(d, i) or (u8(d, i + 1) shl 8) or (u8(d, i + 2) shl 16) or (u8(d, i + 3) shl 24)
+    private fun u64(d: ByteArray, i: Int): Long {
+        var v = 0L
+        for (k in 0 until 8) v = v or ((d.getOrElse(i + k) { 0 }.toLong() and 0xff) shl (8 * k))
+        return v
+    }
+
+    private fun ascii(d: ByteArray, off: Int, len: Int): String {
+        if (off >= d.size) return ""
+        return String(d, off, minOf(len, d.size - off), Charsets.US_ASCII)
+            .takeWhile { it.code != 0 }.trim()
+    }
+
+    private fun putAscii(d: ByteArray, off: Int, s: String, max: Int) {
+        val b = s.toByteArray(Charsets.US_ASCII)
+        System.arraycopy(b, 0, d, off, minOf(b.size, max))
+    }
 }

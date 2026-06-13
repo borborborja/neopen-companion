@@ -76,6 +76,7 @@ class PenManager(
     // --- estado de captura online ---
     private var currentSobp: Sobp? = null
     private var strokeStart = 0L
+    private var penTime = 0L // tiempo absoluto (ms) acumulado del boli durante un stroke
     private val strokeDots = ArrayList<Dot>()
     private val pageStrokes = ArrayList<Stroke>()
     private var pageSobp: Sobp? = null
@@ -89,11 +90,6 @@ class PenManager(
 
     private companion object {
         const val TAG = "PenManager"
-        // VERIFY contra SettingType del SDK; valores provisionales.
-        const val SET_AUTO_POWER_ON = 0x05
-        const val SET_BEEP = 0x07
-        const val SET_OFFLINE = 0x09
-        const val SET_AUTO_SHUTDOWN = 0x04
     }
 
     // ----------------------------------------------------------------------------------
@@ -309,23 +305,42 @@ class PenManager(
     // ----------------------------------------------------------------------------------
 
     private fun onFrame(frame: Protocol.Frame) {
-        log("← Frame cmd=0x%02X len=%d".format(frame.cmd, frame.data.size))
+        log("← Frame cmd=0x%02X result=%d len=%d".format(frame.cmd, frame.result, frame.data.size))
         when (frame.cmd) {
             Protocol.VERSION_RESPONSE -> {
-                // VERIFY: extraer MAC/nombre/firmware del payload. Tras versión, autorizado.
-                log("✓ VERSION_RESPONSE → AUTORIZADO")
-                update { it.copy(status = PenStatus.AUTHORIZED, error = null) }
-                write(Protocol.reqSettingInfo())
-                write(Protocol.reqOnlineDataAll())
+                val (name, fw, mac) = Protocol.parseVersionInfo(frame.data)
+                log("✓ VERSION_RESPONSE name=$name fw=$fw mac=$mac → ReqPenStatus")
+                update {
+                    it.copy(
+                        name = name.ifBlank { it.name },
+                        firmware = fw.ifBlank { it.firmware },
+                        mac = mac.ifBlank { it.mac },
+                    )
+                }
+                write(Protocol.reqSettingInfo()) // ReqPenStatus: la respuesta autoriza
             }
-            Protocol.PASSWORD_REQUEST -> write(Protocol.resPassword("")) // M1+ sin contraseña
-            Protocol.SETTING_INFO_RESPONSE ->
-                update { it.copy(settings = Protocol.parseSettingInfo(frame.data)) }
+            Protocol.PASSWORD_REQUEST -> {
+                log("PASSWORD_REQUEST → enviando contraseña vacía (M1+ por defecto)")
+                write(Protocol.resPassword(""))
+            }
+            Protocol.SETTING_INFO_RESPONSE -> {
+                val settings = Protocol.parseSettingInfo(frame.data)
+                val firstTime = _state.value.status != PenStatus.AUTHORIZED
+                update { it.copy(status = PenStatus.AUTHORIZED, error = null, settings = settings) }
+                if (firstTime) {
+                    log("✓ AUTORIZADO (batería ${settings.battery}%) → pido datos en tiempo real")
+                    write(Protocol.reqOnlineDataAll())
+                }
+            }
 
-            Protocol.ONLINE_PAPER_INFO, Protocol.ONLINE_NEW_PAPER_INFO ->
-                currentSobp = parsePaperInfo(frame.data)
-            Protocol.ONLINE_PEN_UPDOWN, Protocol.ONLINE_NEW_PEN_DOWN -> beginStroke()
-            Protocol.ONLINE_PEN_DOT, Protocol.ONLINE_NEW_PEN_DOT -> appendDots(frame.data)
+            Protocol.ONLINE_PAPER_INFO -> currentSobp = Protocol.parsePaperInfo(frame.data, false)
+            Protocol.ONLINE_NEW_PAPER_INFO -> currentSobp = Protocol.parsePaperInfo(frame.data, true)
+            Protocol.ONLINE_PEN_UPDOWN ->
+                if (Protocol.isUpDownDown(frame.data)) beginStroke(Protocol.parsePenDownTime(frame.data, frame.cmd))
+                else endStroke()
+            Protocol.ONLINE_NEW_PEN_DOWN -> beginStroke(Protocol.parsePenDownTime(frame.data, frame.cmd))
+            Protocol.ONLINE_PEN_DOT -> appendDot(frame.data, false)
+            Protocol.ONLINE_NEW_PEN_DOT -> appendDot(frame.data, true)
             Protocol.ONLINE_NEW_PEN_UP -> endStroke()
 
             Protocol.OFFLINE_NOTE_LIST_RESPONSE -> {
@@ -344,29 +359,29 @@ class PenManager(
     // Captura online → strokes → páginas
     // ----------------------------------------------------------------------------------
 
-    private fun beginStroke() {
-        strokeStart = System.currentTimeMillis()
+    private fun beginStroke(downTime: Long) {
+        penTime = if (downTime > 0) downTime else System.currentTimeMillis()
+        strokeStart = penTime
         strokeDots.clear()
     }
 
-    private fun appendDots(data: ByteArray) {
-        // VERIFY: cabecera del evento + N×17 bytes de dot. Aquí asumimos dots crudos de 17B.
-        var off = 0
-        while (off + 17 <= data.size) {
-            val (dot, _) = Protocol.parseDot(data, off, strokeStart)
-            strokeDots.add(dot)
-            off += 17
-        }
-        val sobp = currentSobp ?: return
-        if (pageSobp != null && pageSobp != sobp) flushPage()
-        pageSobp = sobp
-        update { it.copy(capturedPages = pageStrokes.size) }
+    private fun appendDot(data: ByteArray, isNew: Boolean) {
+        val d = Protocol.parseDotEvent(data, isNew)
+        penTime += d.timeAdd
+        if (strokeDots.isEmpty() && strokeStart == 0L) strokeStart = penTime
+        strokeDots.add(Dot(d.x, d.y, d.force, penTime, Protocol.DOT_MOVE))
     }
 
     private fun endStroke() {
         if (strokeDots.isEmpty()) return
+        val sobp = currentSobp
+        // Cambio de página → cierra la anterior antes de acumular en la nueva.
+        if (sobp != null && pageSobp != null && pageSobp != sobp) flushPage()
+        if (sobp != null) pageSobp = sobp
         pageStrokes.add(Stroke(strokeStart, strokeDots.last().t, strokeDots.toList()))
         strokeDots.clear()
+        strokeStart = 0L
+        update { it.copy(capturedPages = pageStrokes.size) }
         // Cierra la página tras 8 s sin escribir (igual que la web).
         main.removeCallbacks(idleFlush)
         main.postDelayed(idleFlush, 8_000)
@@ -378,18 +393,7 @@ class PenManager(
         onPage(StrokePage(sobp, "realtime", iso.format(System.currentTimeMillis()), pageStrokes.toList()))
         pageStrokes.clear()
         pageSobp = null
-    }
-
-    private fun parsePaperInfo(data: ByteArray): Sobp {
-        // VERIFY offsets. Estructura típica: section(1) owner(3) book(4) page(4) LE.
-        val bb = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
-        val rb = ByteArray(4); if (bb.remaining() >= 4) bb.get(rb)
-        val section = rb[3].toInt() and 0xff
-        val owner = (rb[0].toInt() and 0xff) or ((rb[1].toInt() and 0xff) shl 8) or
-            ((rb[2].toInt() and 0xff) shl 16)
-        val book = if (bb.remaining() >= 4) bb.int else 0
-        val page = if (bb.remaining() >= 4) bb.int else 0
-        return Sobp(section, owner, book, page)
+        update { it.copy(capturedPages = 0) }
     }
 
     // ----------------------------------------------------------------------------------
@@ -401,27 +405,26 @@ class PenManager(
     // El estado se actualiza de forma optimista para que la UI responda.
     // ----------------------------------------------------------------------------------
 
-    fun setAutoPowerOn(on: Boolean) = setSetting(SET_AUTO_POWER_ON, if (on) 1 else 0) {
-        it.copy(settings = it.settings.copy(autoPowerOn = on))
+    fun setAutoPowerOn(on: Boolean) {
+        write(Protocol.reqSettingOnOff(Protocol.SET_AUTO_POWER_ON, on))
+        update { it.copy(settings = it.settings.copy(autoPowerOn = on)) }
     }
-    fun setBeep(on: Boolean) = setSetting(SET_BEEP, if (on) 1 else 0) {
-        it.copy(settings = it.settings.copy(beep = on))
+    fun setBeep(on: Boolean) {
+        write(Protocol.reqSettingOnOff(Protocol.SET_BEEP, on))
+        update { it.copy(settings = it.settings.copy(beep = on)) }
     }
-    fun setOfflineData(on: Boolean) = setSetting(SET_OFFLINE, if (on) 1 else 0) {
-        it.copy(settings = it.settings.copy(offlineData = on))
+    fun setOfflineData(on: Boolean) {
+        write(Protocol.reqSettingOnOff(Protocol.SET_OFFLINE_DATA, on))
+        update { it.copy(settings = it.settings.copy(offlineData = on)) }
     }
-    fun setAutoShutdown(minutes: Int) = setSetting(SET_AUTO_SHUTDOWN, minutes) {
-        it.copy(settings = it.settings.copy(autoShutdownTime = minutes))
-    }
-
-    private fun setSetting(type: Int, value: Int, optimistic: (PenState) -> PenState) {
-        write(Protocol.reqSettingChange(type, byteArrayOf(value.toByte())))
-        update(optimistic)
+    fun setAutoShutdown(minutes: Int) {
+        write(Protocol.reqSettingShort(Protocol.SET_AUTO_POWER_OFF_TIME, minutes))
+        update { it.copy(settings = it.settings.copy(autoShutdownTime = minutes)) }
     }
 
     fun listOffline() {
         update { it.copy(offlinePhase = OfflinePhase.LISTING, error = null) }
-        write(Protocol.reqOfflineNoteList(0, 0))
+        write(Protocol.reqOfflineNoteList())
     }
 
     fun importOffline(note: OfflineNote) {
