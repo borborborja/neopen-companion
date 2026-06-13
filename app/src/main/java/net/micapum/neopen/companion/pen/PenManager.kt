@@ -54,6 +54,11 @@ class PenManager(
     private var notifyChar: BluetoothGattCharacteristic? = null
     private var reassembler: Protocol.FrameReassembler? = null
 
+    // Cola de escritura: Android sólo admite UNA operación GATT a la vez; sin cola,
+    // dos write() seguidos hacen que el segundo falle (ok=false).
+    private val txQueue = ArrayDeque<ByteArray>()
+    private var txBusy = false
+
     // Conexión: evita reentradas del scan y permite reintentar el clásico GATT 133.
     private var connecting = false
     private var target: BluetoothDevice? = null
@@ -71,6 +76,9 @@ class PenManager(
     }
 
     fun clearLogs() { _logs.value = emptyList() }
+
+    /** Permite a otros componentes (p. ej. la subida al servidor) escribir en el registro. */
+    fun pushLog(msg: String) = log(msg)
 
     private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
 
@@ -182,23 +190,37 @@ class PenManager(
         target = null
         main.removeCallbacksAndMessages(null)
         stopScan()
+        txQueue.clear()
+        txBusy = false
         gatt?.disconnect()
         gatt?.close()
         gatt = null
         update { it.copy(status = PenStatus.IDLE, offlinePhase = OfflinePhase.IDLE) }
     }
 
+    /** Encola un frame para escribir. Se serializa en el hilo principal. */
     private fun write(frame: ByteArray) {
-        val g = gatt ?: return
-        val ch = writeChar ?: run { log("⚠ write() sin característica de escritura"); return }
-        // Usa NO_RESPONSE si la característica lo soporta (lo habitual en NeoLAB);
-        // si no, escritura con respuesta.
+        main.post { txQueue.addLast(frame); pumpTx() }
+    }
+
+    /** Envía el siguiente frame de la cola si no hay otra escritura en curso. */
+    private fun pumpTx() {
+        if (txBusy) return
+        val g = gatt ?: run { txQueue.clear(); return }
+        val ch = writeChar ?: run { log("⚠ pumpTx sin característica de escritura"); txQueue.clear(); return }
+        val frame = if (txQueue.isEmpty()) return else txQueue.removeFirst()
+        txBusy = true
         val noResp = ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
         ch.writeType = if (noResp) BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         else BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         ch.value = frame
         val ok = g.writeCharacteristic(ch)
         log("→ TX (${if (noResp) "noRsp" else "rsp"}, ok=$ok): ${frame.toHex()}")
+        if (!ok) {
+            // No se pudo encolar en la pila: reintenta el bombeo tras un respiro.
+            txBusy = false
+            main.postDelayed({ pumpTx() }, 60)
+        }
     }
 
     // ----------------------------------------------------------------------------------
@@ -304,6 +326,11 @@ class PenManager(
             write(Protocol.reqVersion())
         }
 
+        override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
+            // Escritura completada → libera la cola y manda el siguiente frame.
+            main.post { txBusy = false; pumpTx() }
+        }
+
         // Android 13+ (API 33): entrega el valor por parámetro.
         override fun onCharacteristicChanged(
             g: BluetoothGatt,
@@ -331,14 +358,12 @@ class PenManager(
         log("← Frame cmd=0x%02X result=%d len=%d".format(frame.cmd, frame.result, frame.data.size))
         when (frame.cmd) {
             Protocol.VERSION_RESPONSE -> {
-                val (name, fw, mac) = Protocol.parseVersionInfo(frame.data)
-                log("✓ VERSION_RESPONSE name=$name fw=$fw mac=$mac → ReqPenStatus")
+                val (name, fw, _) = Protocol.parseVersionInfo(frame.data)
+                log("✓ VERSION_RESPONSE name=$name fw=$fw → ReqPenStatus")
+                // La MAC se mantiene la del escaneo (device.address); la del payload varía
+                // de offset entre firmwares y aquí no es fiable.
                 update {
-                    it.copy(
-                        name = name.ifBlank { it.name },
-                        firmware = fw.ifBlank { it.firmware },
-                        mac = mac.ifBlank { it.mac },
-                    )
+                    it.copy(name = name.ifBlank { it.name }, firmware = fw.ifBlank { it.firmware })
                 }
                 write(Protocol.reqSettingInfo()) // ReqPenStatus: la respuesta autoriza
             }
@@ -402,6 +427,7 @@ class PenManager(
         if (sobp != null && pageSobp != null && pageSobp != sobp) flushPage()
         if (sobp != null) pageSobp = sobp
         pageStrokes.add(Stroke(strokeStart, strokeDots.last().t, strokeDots.toList()))
+        log("✏ Trazo: ${strokeDots.size} dots (página ${pageStrokes.size}, sobp ${sobp?.section}.${sobp?.owner}.${sobp?.book}.${sobp?.page})")
         strokeDots.clear()
         strokeStart = 0L
         update { it.copy(capturedPages = pageStrokes.size) }
@@ -413,6 +439,7 @@ class PenManager(
     private fun flushPage() {
         val sobp = pageSobp ?: return
         if (pageStrokes.isEmpty()) return
+        log("📄 Página completa sobp ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}: ${pageStrokes.size} trazos → subiendo al servidor…")
         onPage(StrokePage(sobp, "realtime", iso.format(System.currentTimeMillis()), pageStrokes.toList()))
         pageStrokes.clear()
         pageSobp = null

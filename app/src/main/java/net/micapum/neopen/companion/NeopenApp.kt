@@ -53,7 +53,13 @@ class NeopenApp : Application() {
                 // Llegó una página del boli → sync con el boli.
                 syncStatus.markPenSync(now)
                 // Subida correcta → sync con el servidor.
-                if (uploader.upload(page)) syncStatus.markServerSync(System.currentTimeMillis())
+                val ok = uploader.upload(page)
+                if (ok) {
+                    syncStatus.markServerSync(System.currentTimeMillis())
+                    pen.pushLog("✓ Subida OK al servidor (${page.strokes.size} trazos)")
+                } else {
+                    pen.pushLog("✗ Subida FALLÓ (¿servidor/contraseña configurados?)")
+                }
                 SyncWidget.refresh(this@NeopenApp)
             }
         }
