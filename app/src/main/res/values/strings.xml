@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">neopen companion</string>
     <string name="channel_name">Conexión del boli</string>
+    <string name="widget_desc">Fuerza la lectura del boli y la subida al servidor, y muestra la última sincronización.</string>
 </resources>

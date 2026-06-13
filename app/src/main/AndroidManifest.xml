@@ -43,5 +43,17 @@
             android:name=".sync.PenService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Widget de pantalla de inicio: fuerza la sync y muestra el estado -->
+        <receiver
+            android:name=".widget.SyncWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/sync_widget_info" />
+        </receiver>
     </application>
 </manifest>

@@ -15,9 +15,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import net.micapum.neopen.companion.data.SettingsStore
 import net.micapum.neopen.companion.data.SyncMode
+import net.micapum.neopen.companion.data.SyncStatusStore
 import net.micapum.neopen.companion.pen.PenManager
 import net.micapum.neopen.companion.sync.SyncWorker
 import net.micapum.neopen.companion.sync.Uploader
+import net.micapum.neopen.companion.widget.SyncWidget
 
 /**
  * Singletons de la app: ajustes, el PenManager (una sola conexión BLE) y el uploader.
@@ -26,6 +28,8 @@ import net.micapum.neopen.companion.sync.Uploader
  */
 class NeopenApp : Application() {
     lateinit var settings: SettingsStore
+        private set
+    lateinit var syncStatus: SyncStatusStore
         private set
     lateinit var uploader: Uploader
         private set
@@ -37,8 +41,18 @@ class NeopenApp : Application() {
     override fun onCreate() {
         super.onCreate()
         settings = SettingsStore(this)
+        syncStatus = SyncStatusStore(this)
         uploader = Uploader(settings)
-        pen = PenManager(this) { page -> scope.launch { uploader.upload(page) } }
+        pen = PenManager(this) { page ->
+            scope.launch {
+                val now = System.currentTimeMillis()
+                // Llegó una página del boli → sync con el boli.
+                syncStatus.markPenSync(now)
+                // Subida correcta → sync con el servidor.
+                if (uploader.upload(page)) syncStatus.markServerSync(System.currentTimeMillis())
+                SyncWidget.refresh(this@NeopenApp)
+            }
+        }
         createChannel()
     }
 

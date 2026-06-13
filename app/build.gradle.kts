@@ -11,8 +11,8 @@ android {
         applicationId = "net.micapum.neopen.companion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.3.0"
+        versionCode = 7
+        versionName = "0.4.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -60,6 +60,10 @@ dependencies {
 
     // Trabajo en segundo plano (sincronización por intervalo)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Widget de pantalla de inicio (Jetpack Glance — Compose para widgets)
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
 
     // Red: cliente del servidor neopen (contrato docs/openapi.yaml)
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
