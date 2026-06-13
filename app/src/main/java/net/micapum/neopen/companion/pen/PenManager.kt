@@ -51,6 +51,7 @@ class PenManager(
 
     private var gatt: BluetoothGatt? = null
     private var writeChar: BluetoothGattCharacteristic? = null
+    private var notifyChar: BluetoothGattCharacteristic? = null
     private var reassembler: Protocol.FrameReassembler? = null
 
     // Conexión: evita reentradas del scan y permite reintentar el clásico GATT 133.
@@ -204,6 +205,29 @@ class PenManager(
     // GATT callback
     // ----------------------------------------------------------------------------------
 
+    /** Habilita las notificaciones (CCCD) y, al confirmarse, arranca el handshake. */
+    private fun enableNotifications(g: BluetoothGatt) {
+        val notify = notifyChar ?: run {
+            log("⚠ enableNotifications sin característica notify")
+            return
+        }
+        g.setCharacteristicNotification(notify, true)
+        val cccd = notify.getDescriptor(Protocol.CCCD)
+        if (cccd != null) {
+            // Espera a onDescriptorWrite antes de escribir: Android sólo permite una
+            // operación GATT a la vez.
+            val value = if (notify.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0)
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            else BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+            cccd.value = value
+            g.writeDescriptor(cccd)
+            log("Escribiendo CCCD para habilitar notificaciones…")
+        } else {
+            log("⚠ Notify sin CCCD; arrancando handshake sin descriptor")
+            write(Protocol.reqVersion())
+        }
+    }
+
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
@@ -256,23 +280,22 @@ class PenManager(
                 update { it.copy(status = PenStatus.DISCONNECTED, error = "chars-not-found") }
                 return
             }
+            notifyChar = notify
 
-            g.setCharacteristicNotification(notify, true)
-            val cccd = notify.getDescriptor(Protocol.CCCD)
-            if (cccd != null) {
-                // Habilita notificaciones y ESPERA a onDescriptorWrite antes de escribir:
-                // Android solo permite una operación GATT a la vez.
-                val value = if (notify.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0)
-                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                else BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
-                cccd.value = value
-                g.writeDescriptor(cccd)
-                log("Escribiendo CCCD para habilitar notificaciones…")
-            } else {
-                // Sin CCCD: arranca el handshake directamente.
-                log("⚠ Notify sin CCCD; arrancando handshake sin descriptor")
-                write(Protocol.reqVersion())
+            // ¡CLAVE! El MTU por defecto de Android es 23 (máx. 20 bytes por escritura), pero
+            // el frame reqVersion mide 51 bytes y se truncaría → el boli nunca vería un frame
+            // completo y cerraría la conexión (status 19). Web Bluetooth (la webapp) negocia
+            // el MTU solo; en Android hay que pedirlo a mano ANTES del handshake.
+            log("Solicitando MTU 247…")
+            if (!g.requestMtu(247)) {
+                log("⚠ requestMtu devolvió false; continúo con MTU por defecto")
+                enableNotifications(g)
             }
+        }
+
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            log("MTU negociado: $mtu (status=$status)")
+            enableNotifications(g)
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
