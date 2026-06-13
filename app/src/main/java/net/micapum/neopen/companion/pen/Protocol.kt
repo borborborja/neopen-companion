@@ -136,8 +136,22 @@ object Protocol {
     // Builders de comandos (host → pen)
     // ----------------------------------------------------------------------------------
 
-    /** Pide versión/identidad. VERIFY: el SDK incluye nombre de app/dispositivo en el payload. */
-    fun reqVersion(): ByteArray = buildFrame(VERSION_REQUEST, ByteArray(0))
+    /**
+     * Pide versión/identidad. El SDK v2 envía un payload de 42 bytes que identifica
+     * al cliente (no vacío): el boli cierra la conexión si recibe un version-request
+     * mal formado. Estructura aproximada (VERIFY contra PenRequestV2):
+     *   [0..15]  reservado (0)
+     *   [16..31] nombre de la app (ASCII, null-padded)
+     *   [32..41] versión de la app (ASCII, null-padded)
+     */
+    fun reqVersion(): ByteArray {
+        val data = ByteArray(42)
+        val name = "neopen_companion".toByteArray(Charsets.US_ASCII)
+        System.arraycopy(name, 0, data, 16, minOf(name.size, 16))
+        val ver = "0.5.0".toByteArray(Charsets.US_ASCII)
+        System.arraycopy(ver, 0, data, 32, minOf(ver.size, 10))
+        return buildFrame(VERSION_REQUEST, data)
+    }
 
     /** Responde a la petición de contraseña (M1+ por defecto NO tiene). */
     fun resPassword(password: String): ByteArray {

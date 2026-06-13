@@ -71,6 +71,8 @@ class PenManager(
 
     fun clearLogs() { _logs.value = emptyList() }
 
+    private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
+
     // --- estado de captura online ---
     private var currentSobp: Sobp? = null
     private var strokeStart = 0L
@@ -198,7 +200,8 @@ class PenManager(
         ch.writeType = if (noResp) BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         else BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         ch.value = frame
-        g.writeCharacteristic(ch)
+        val ok = g.writeCharacteristic(ch)
+        log("→ TX (${if (noResp) "noRsp" else "rsp"}, ok=$ok): ${frame.toHex()}")
     }
 
     // ----------------------------------------------------------------------------------
@@ -288,13 +291,16 @@ class PenManager(
             ch: BluetoothGattCharacteristic,
             value: ByteArray,
         ) {
+            if (_state.value.status != PenStatus.AUTHORIZED) log("← RX crudo: ${value.toHex()}")
             reassembler?.feed(value)
         }
 
         // Android ≤ 12: el valor va en ch.value.
         @Deprecated("Compat <33", ReplaceWith(""))
         override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
-            reassembler?.feed(ch.value ?: return)
+            val value = ch.value ?: return
+            if (_state.value.status != PenStatus.AUTHORIZED) log("← RX crudo: ${value.toHex()}")
+            reassembler?.feed(value)
         }
     }
 

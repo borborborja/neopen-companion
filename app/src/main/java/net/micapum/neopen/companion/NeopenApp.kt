@@ -38,6 +38,10 @@ class NeopenApp : Application() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Scope ligado a la Application (no a la Activity): para escrituras que NO deben
+     *  cancelarse si la pantalla se cierra (p. ej. guardar ajustes). */
+    val appScope: CoroutineScope get() = scope
+
     override fun onCreate() {
         super.onCreate()
         settings = SettingsStore(this)

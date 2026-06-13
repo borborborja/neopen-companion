@@ -91,7 +91,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _serverCheck.value = runCatching { api.capabilities(password) }.fold(
                 onSuccess = { resp ->
                     when (resp.code()) {
-                        in 200..299 -> ServerCheck.Ok
+                        in 200..299 -> {
+                            // Credenciales válidas → persístelas (red de seguridad por si
+                            // el usuario no pulsa Guardar).
+                            appCtx.appScope.launch {
+                                appCtx.settings.update(settings.value.copy(serverUrl = url, password = password))
+                            }
+                            ServerCheck.Ok
+                        }
                         401, 403 -> ServerCheck.BadAuth
                         else -> ServerCheck.Unreachable("HTTP ${resp.code()}")
                     }
@@ -105,7 +112,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- ajustes de la app ---
     fun saveSettings(s: AppSettings) {
-        viewModelScope.launch {
+        // Se guarda en el scope de la Application: aunque el usuario cierre la pantalla
+        // (o la app) justo después de pulsar Guardar, la escritura en disco se completa.
+        appCtx.appScope.launch {
             appCtx.settings.update(s)
             appCtx.applySyncSchedule(s.syncMode, s.syncIntervalMin)
             if (s.backgroundEnabled) PenService.start(appCtx) else PenService.stop(appCtx)
