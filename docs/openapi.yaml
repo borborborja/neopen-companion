@@ -89,6 +89,9 @@ paths:
         - Re-subir la misma hoja (mismo SOBP) **fusiona** los trazos nuevos
           (append-only con dedupe por `startTime`+nº de dots); nunca duplica ni
           borra. Idempotente para reintentos.
+        - Cabecera opcional `X-Neopen-Device`: nombre del dispositivo companion
+          (p. ej. "Google Pixel 7"). El servidor anota la última subida y la web
+          muestra "Actualizado desde &lt;dispositivo&gt;".
       requestBody:
         required: true
         content:

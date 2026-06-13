@@ -1,5 +1,6 @@
 package net.micapum.neopen.companion.data
 
+import android.os.Build
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
@@ -62,12 +63,33 @@ interface NeopenApi {
 }
 
 object ApiFactory {
+    /** Nombre legible del dispositivo (p. ej. "Google Pixel 7") para X-Neopen-Device. */
+    val deviceName: String by lazy {
+        val maker = Build.MANUFACTURER?.replaceFirstChar { it.uppercase() }.orEmpty()
+        val model = Build.MODEL.orEmpty()
+        val name = when {
+            model.isBlank() -> maker
+            model.startsWith(maker, ignoreCase = true) -> model
+            else -> "$maker $model".trim()
+        }
+        name.ifBlank { "Android" }
+    }
+
     fun create(serverUrl: String): NeopenApi {
         val base = serverUrl.trim().let { if (it.endsWith("/")) it else "$it/" }
         val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
         val client = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            // Identifica el dispositivo companion en cada petición; el servidor
+            // anota el último sync (X-Neopen-Device) al recibir capturas/bolis.
+            .addInterceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder()
+                        .header("X-Neopen-Device", deviceName)
+                        .build(),
+                )
+            }
             .build()
         return Retrofit.Builder()
             .baseUrl(base)
