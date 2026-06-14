@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">neopen</string>
+    <string name="sync_widget_desc">Fuerza la lectura del boli y la sincronización con el servidor, y muestra la última sincronización.</string>
+    <string name="notebooks_widget_desc">Muestra tus cuadernos y abre la app en la pestaña Cuadernos.</string>
 </resources>

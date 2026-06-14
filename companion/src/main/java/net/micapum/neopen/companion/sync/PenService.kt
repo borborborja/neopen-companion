@@ -19,8 +19,15 @@ class PenService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification())
         val app = NeopenApp.from(this)
+        // En segundo plano queremos que el boli se reconecte solo si se cae el BLE.
+        app.pen.autoReconnect = true
         if (!app.pen.state.value.connected) app.pen.scanAndConnect()
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        NeopenApp.from(this).pen.autoReconnect = false
+        super.onDestroy()
     }
 
     private fun buildNotification(): Notification =

@@ -6,6 +6,7 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -20,6 +21,7 @@ import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 import java.util.concurrent.TimeUnit
 
 // --- Modelos del contrato (docs/openapi.yaml del repo neopen) ---
@@ -105,6 +107,7 @@ data class NotebookDto(
     val coverUrl: String? = null,
     val unclassified: Boolean = false,
     val custom: Boolean = false,
+    val category: String? = null,
 )
 
 data class DeletionDto(val id: String, val kind: String, val rev: Long)
@@ -138,12 +141,14 @@ data class NotebookCreateDto(
     val name: String,
     val color: String,
     val tags: List<String> = emptyList(),
+    val category: String? = null,
 )
 
 data class NotebookPatchDto(
     val name: String? = null,
     val color: String? = null,
     val tags: List<String>? = null,
+    val category: String? = null,
 )
 
 data class ReorderDto(val order: List<String>)
@@ -238,6 +243,20 @@ interface NeopenApi {
         @Header("X-Auth-Password") password: String,
         @Body body: RegisterPenInput,
     ): PenInfoDto
+
+    // --- Backup (copia completa del contenido del servidor) ---
+
+    /** Descarga toda la copia (captures + notebooks + covers) como JSON. */
+    @Streaming
+    @GET("api/export")
+    suspend fun exportData(@Header("X-Auth-Password") password: String): ResponseBody
+
+    /** Restaura una copia: REEMPLAZA todo el contenido del servidor. */
+    @POST("api/import")
+    suspend fun importData(
+        @Header("X-Auth-Password") password: String,
+        @Body body: RequestBody,
+    ): Response<Unit>
 }
 
 object ApiFactory {

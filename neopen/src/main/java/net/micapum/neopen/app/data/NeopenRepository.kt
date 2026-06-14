@@ -52,6 +52,10 @@ class NeopenRepository(private val db: NeopenDb) {
     fun inbox(): Flow<List<Capture>> =
         db.captures().observeInbox().map { rows -> rows.map { it.toDomain() } }
 
+    /** Todas las capturas por última edición (equivalente a "últimas ediciones"). */
+    fun recent(): Flow<List<Capture>> =
+        db.captures().observeAll().map { rows -> rows.map { it.toDomain() } }
+
     fun capturesIn(notebookId: String): Flow<List<Capture>> =
         db.captures().observeByNotebook(notebookId).map { rows -> rows.map { it.toDomain() } }
 
@@ -133,7 +137,12 @@ class NeopenRepository(private val db: NeopenDb) {
         enqueue(OutboxKind.REORDER_NOTEBOOK, notebookId, Json.reorder.toJson(ReorderDto(orderedIds)))
     }
 
-    suspend fun createNotebook(name: String, color: String, tags: List<String> = emptyList()): String {
+    suspend fun createNotebook(
+        name: String,
+        color: String,
+        tags: List<String> = emptyList(),
+        category: String? = null,
+    ): String {
         val tempId = "local-" + UUID.randomUUID()
         val now = nowIso()
         db.notebooks().upsertOne(
@@ -145,26 +154,42 @@ class NeopenRepository(private val db: NeopenDb) {
                 tagsJson = Json.tagsJson(tags),
                 createdAt = now,
                 updatedAt = now,
+                category = category,
             ),
         )
-        enqueue(OutboxKind.CREATE_NOTEBOOK, tempId, Json.notebookCreate.toJson(NotebookCreateDto(name, color, tags)))
+        enqueue(
+            OutboxKind.CREATE_NOTEBOOK,
+            tempId,
+            Json.notebookCreate.toJson(NotebookCreateDto(name, color, tags, category?.ifBlank { null })),
+        )
         return tempId
     }
 
-    suspend fun editNotebook(id: String, name: String?, color: String?, tags: List<String>?) {
+    /**
+     * Edita un cuaderno. `category` null = no tocar la categoría; una cadena
+     * (incluida "") = fijarla (el servidor normaliza "" → sin categoría).
+     */
+    suspend fun editNotebook(
+        id: String,
+        name: String? = null,
+        color: String? = null,
+        tags: List<String>? = null,
+        category: String? = null,
+    ) {
         val e = db.notebooks().getById(id) ?: return
         db.notebooks().upsertOne(
             e.copy(
                 name = name ?: e.name,
                 color = color ?: e.color,
                 tagsJson = if (tags != null) Json.tagsJson(tags) else e.tagsJson,
+                category = if (category != null) category.ifBlank { null } else e.category,
                 updatedAt = nowIso(),
             ),
         )
         enqueue(
             OutboxKind.PATCH_NOTEBOOK,
             id,
-            Json.notebookPatch.toJson(NotebookPatchDto(name = name, color = color, tags = tags)),
+            Json.notebookPatch.toJson(NotebookPatchDto(name = name, color = color, tags = tags, category = category)),
         )
     }
 

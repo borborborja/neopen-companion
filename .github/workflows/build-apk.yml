@@ -28,21 +28,18 @@ jobs:
       - name: Set up Gradle (con caché)
         uses: gradle/actions/setup-gradle@v4
 
-      # Dos apps desde un mismo repo: el companion (fino) y neopen (completa).
-      - name: Build debug APKs (companion + neopen)
-        run: ./gradlew :companion:assembleDebug :neopen:assembleDebug --stacktrace
+      # App unificada (completa, con modo "solo puente" integrado).
+      - name: Build debug APK (neopen)
+        run: ./gradlew :neopen:assembleDebug --stacktrace
 
-      - name: Renombrar APKs
-        run: |
-          cp companion/build/outputs/apk/debug/companion-debug.apk neopen-companion-debug.apk
-          cp neopen/build/outputs/apk/debug/neopen-debug.apk neopen-debug.apk
+      - name: Renombrar APK
+        run: cp neopen/build/outputs/apk/debug/neopen-debug.apk neopen-debug.apk
 
-      - name: Subir APKs como artifacts
+      - name: Subir APK como artifact
         uses: actions/upload-artifact@v4
         with:
           name: neopen-apks-debug
           path: |
-            neopen-companion-debug.apk
             neopen-debug.apk
           if-no-files-found: error
 
@@ -52,7 +49,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            neopen-companion-debug.apk
             neopen-debug.apk
           generate_release_notes: true
 
@@ -65,12 +61,10 @@ jobs:
           name: Última build (main)
           prerelease: true
           body: |
-            APKs de depuración generados automáticamente desde la última build de `main`.
+            APK de depuración generado automáticamente desde la última build de `main`.
 
-            - **neopen-companion-debug.apk** — app companion (captura del boli → subida).
-            - **neopen-debug.apk** — app completa neopen (cuadernos offline + sincronización).
+            - **neopen-debug.apk** — app neopen unificada (puente + cuadernos + sincronización).
 
             Para una versión estable, descarga una release con etiqueta `v*`.
           files: |
-            neopen-companion-debug.apk
             neopen-debug.apk

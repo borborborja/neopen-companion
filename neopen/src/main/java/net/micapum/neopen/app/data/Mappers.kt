@@ -44,6 +44,7 @@ fun NotebookDto.toEntity(): NotebookEntity = NotebookEntity(
     coverUrl = coverUrl,
     unclassified = unclassified,
     custom = custom,
+    category = category,
 )
 
 // --- Entity (Room) → dominio (UI) ---
@@ -84,5 +85,6 @@ fun NotebookEntity.toDomain(pageCount: Int = 0): Notebook = Notebook(
     coverUrl = coverUrl,
     unclassified = unclassified,
     custom = custom,
+    category = category,
     pageCount = pageCount,
 )

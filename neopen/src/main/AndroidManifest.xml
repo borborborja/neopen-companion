@@ -13,6 +13,12 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
 
+    <!-- Servicio en primer plano para mantener el boli conectado en 2.º plano. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Android 13+: notificaciones (servicio + estado de subida). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application
@@ -32,6 +38,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Mantiene la conexión BLE viva en segundo plano (modo puente y completo). -->
+        <service
+            android:name=".sync.PenService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- Widget de sincronización (estado + forzar sync). -->
+        <receiver
+            android:name=".widget.SyncWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/sync_widget_info" />
+        </receiver>
+
+        <!-- Widget de acceso a los cuadernos. -->
+        <receiver
+            android:name=".widget.NotebooksWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/notebooks_widget_info" />
+        </receiver>
 
         <!-- Comparte ficheros exportados (PDF/PNG/SVG) desde la caché. -->
         <provider

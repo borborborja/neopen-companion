@@ -16,12 +16,15 @@ import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.app.render.ExportFormat
+import net.micapum.neopen.app.sync.PenService
 import net.micapum.neopen.app.render.rasterizePng
 import net.micapum.neopen.app.render.renderNotebookPdf
 import net.micapum.neopen.app.render.renderPagePdf
 import net.micapum.neopen.app.render.renderSvg
 import net.micapum.neopen.core.data.ApiFactory
+import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.pen.OfflineNote
 import net.micapum.neopen.core.pen.PenState
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -39,6 +42,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val inbox: StateFlow<List<Capture>> =
         graph.repo.inbox().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Últimas ediciones: todas las capturas por fecha (para la pestaña Bandeja). */
+    val recent: StateFlow<List<Capture>> =
+        graph.repo.recent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val pending: StateFlow<Int> =
         graph.repo.pendingCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
@@ -47,6 +54,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _status = MutableStateFlow<String?>(null)
     val status: StateFlow<String?> = _status.asStateFlow()
+
+    private val _serverCheck = MutableStateFlow<ServerCheck>(ServerCheck.Idle)
+    val serverCheck: StateFlow<ServerCheck> = _serverCheck.asStateFlow()
 
     fun capturesIn(notebookId: String) = graph.repo.capturesIn(notebookId)
 
@@ -63,23 +73,89 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Valida la conexión, guarda los ajustes y lanza una sincronización inicial. */
-    fun connect(url: String, password: String, onResult: (Boolean, String?) -> Unit) {
+    /**
+     * Prueba la conexión (sin guardar): comprueba que el servidor responde
+     * (`/api/health`) y que la contraseña es válida (`/api/capabilities`).
+     * El resultado se publica en [serverCheck].
+     */
+    fun testServer(url: String, password: String) {
+        if (url.isBlank()) {
+            _serverCheck.value = ServerCheck.Unreachable("Falta la URL del servidor")
+            return
+        }
+        _serverCheck.value = ServerCheck.Checking
         viewModelScope.launch {
-            val clean = url.trim()
-            val ok = runCatching {
-                ApiFactory.create(clean).capabilities(password).isSuccessful
-            }.getOrDefault(false)
-            if (!ok) {
-                onResult(false, "No se pudo conectar o la contraseña es incorrecta")
+            val api = runCatching { ApiFactory.create(url.trim()) }.getOrElse {
+                _serverCheck.value = ServerCheck.Unreachable("URL no válida"); return@launch
+            }
+            val reachable = runCatching { api.health() }
+            if (reachable.isFailure) {
+                _serverCheck.value = ServerCheck.Unreachable(reachable.exceptionOrNull()?.message ?: "Sin respuesta")
                 return@launch
             }
-            graph.settings.update(
-                settings.value.copy(serverUrl = clean, password = password),
+            _serverCheck.value = runCatching { api.capabilities(password) }.fold(
+                onSuccess = { resp ->
+                    when (resp.code()) {
+                        in 200..299 -> ServerCheck.Ok
+                        401, 403 -> ServerCheck.BadAuth
+                        else -> ServerCheck.Unreachable("HTTP ${resp.code()}")
+                    }
+                },
+                onFailure = { ServerCheck.Unreachable(it.message ?: "Error de red") },
             )
-            onResult(true, null)
+        }
+    }
+
+    fun resetServerCheck() { _serverCheck.value = ServerCheck.Idle }
+
+    /** Finaliza el wizard: persiste servidor, contraseña y modo, y sincroniza. */
+    fun completeSetup(url: String, password: String, mode: AppMode, onDone: () -> Unit) {
+        viewModelScope.launch {
+            graph.settings.update(
+                settings.value.copy(
+                    serverUrl = url.trim(),
+                    password = password,
+                    appMode = mode,
+                    setupComplete = true,
+                ),
+            )
+            onDone()
             syncNow()
         }
+    }
+
+    /** Cambia el modo de la app (Ajustes). */
+    fun setAppMode(mode: AppMode) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(appMode = mode)) }
+    }
+
+    /** Guarda los ajustes, aplica el calendario de sync y arranca/para el servicio BLE. */
+    fun saveSettings(s: AppSettings) {
+        viewModelScope.launch {
+            graph.settings.update(s)
+            graph.applySyncSchedule(s.syncMode, s.syncIntervalMin)
+            val ctx = getApplication<Application>()
+            if (s.backgroundEnabled) PenService.start(ctx) else PenService.stop(ctx)
+        }
+    }
+
+    // --- Backup (copia completa del servidor) ---
+
+    /** Descarga la copia completa del servidor (JSON) como bytes. */
+    suspend fun exportBackup(): ByteArray? = runCatching {
+        val s = settings.value
+        withContext(Dispatchers.IO) { ApiFactory.create(s.serverUrl).exportData(s.password).bytes() }
+    }.getOrNull()
+
+    /** Restaura una copia (REEMPLAZA el contenido del servidor) y resincroniza. */
+    suspend fun restoreBackup(bytes: ByteArray): Boolean {
+        val s = settings.value
+        val ok = runCatching {
+            val body = bytes.toRequestBody("application/json".toMediaType())
+            withContext(Dispatchers.IO) { ApiFactory.create(s.serverUrl).importData(s.password, body).isSuccessful }
+        }.getOrDefault(false)
+        if (ok) syncNow()
+        return ok
     }
 
     fun logout() {
@@ -103,10 +179,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun moveCapture(id: String, notebookId: String, position: Int) =
         mutate { graph.repo.moveCapture(id, notebookId, position) }
 
-    fun createNotebook(name: String, color: String, tags: List<String> = emptyList()) =
-        mutate { graph.repo.createNotebook(name, color, tags) }
-    fun editNotebook(id: String, name: String, color: String, tags: List<String>) =
-        mutate { graph.repo.editNotebook(id, name, color, tags) }
+    fun createNotebook(name: String, color: String, tags: List<String> = emptyList(), category: String? = null) =
+        mutate { graph.repo.createNotebook(name, color, tags, category) }
+    fun editNotebook(id: String, name: String, color: String, tags: List<String>, category: String) =
+        mutate { graph.repo.editNotebook(id, name, color, tags, category) }
     fun deleteNotebook(id: String) = mutate { graph.repo.deleteNotebook(id) }
     fun setTags(id: String, tags: List<String>) = mutate { graph.repo.setCaptureTags(id, tags) }
 
@@ -114,11 +190,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val penState: StateFlow<PenState> = graph.pen.state
     val online: StateFlow<Boolean> = graph.online
+    /** Registro de diagnóstico BLE (panel de debug). */
+    val penLogs: StateFlow<List<String>> = graph.pen.logs
 
     fun penReady(): Boolean = graph.pen.isReady
     fun connectPen() = graph.pen.scanAndConnect()
     fun disconnectPen() = graph.pen.disconnect()
+    fun stopConnecting() = graph.pen.disconnect()
+    fun clearLogs() = graph.pen.clearLogs()
+
+    // Ajustes del boli
+    fun setAutoPowerOn(on: Boolean) = graph.pen.setAutoPowerOn(on)
+    fun setBeep(on: Boolean) = graph.pen.setBeep(on)
+    fun setOfflineData(on: Boolean) = graph.pen.setOfflineData(on)
+    fun setAutoShutdown(min: Int) = graph.pen.setAutoShutdown(min)
+
+    // Memoria offline
+    fun listOffline() = graph.pen.listOffline()
+    fun importNote(n: OfflineNote) = graph.pen.importOffline(n)
     fun importOffline() = graph.pen.importAllOffline()
+    fun clearOffline() = graph.pen.clearOffline(penState.value.notes ?: emptyList())
 
     // --- OCR (solo online) ---
 
@@ -169,3 +260,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
 /** Fichero exportado listo para compartir o guardar. */
 class ExportFile(val filename: String, val mime: String, val bytes: ByteArray)
+
+/** Resultado de la prueba de conexión con el servidor neopen. */
+sealed interface ServerCheck {
+    data object Idle : ServerCheck
+    data object Checking : ServerCheck
+    data object Ok : ServerCheck
+    data object BadAuth : ServerCheck
+    data class Unreachable(val detail: String) : ServerCheck
+}
