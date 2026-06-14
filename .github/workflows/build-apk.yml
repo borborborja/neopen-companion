@@ -28,17 +28,22 @@ jobs:
       - name: Set up Gradle (con caché)
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      # Dos apps desde un mismo repo: el companion (fino) y neopen (completa).
+      - name: Build debug APKs (companion + neopen)
+        run: ./gradlew :companion:assembleDebug :neopen:assembleDebug --stacktrace
 
-      - name: Renombrar APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk neopen-companion-debug.apk
+      - name: Renombrar APKs
+        run: |
+          cp companion/build/outputs/apk/debug/companion-debug.apk neopen-companion-debug.apk
+          cp neopen/build/outputs/apk/debug/neopen-debug.apk neopen-debug.apk
 
-      - name: Subir APK como artifact
+      - name: Subir APKs como artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: neopen-companion-debug
-          path: neopen-companion-debug.apk
+          name: neopen-apks-debug
+          path: |
+            neopen-companion-debug.apk
+            neopen-debug.apk
           if-no-files-found: error
 
       # Release versionada cuando se empuja un tag v* (p. ej. v0.2.0).
@@ -46,7 +51,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: neopen-companion-debug.apk
+          files: |
+            neopen-companion-debug.apk
+            neopen-debug.apk
           generate_release_notes: true
 
       # Release "rolling" siempre actualizada con la última build de main.
@@ -58,6 +65,12 @@ jobs:
           name: Última build (main)
           prerelease: true
           body: |
-            APK de depuración generado automáticamente desde la última build de `main`.
+            APKs de depuración generados automáticamente desde la última build de `main`.
+
+            - **neopen-companion-debug.apk** — app companion (captura del boli → subida).
+            - **neopen-debug.apk** — app completa neopen (cuadernos offline + sincronización).
+
             Para una versión estable, descarga una release con etiqueta `v*`.
-          files: neopen-companion-debug.apk
+          files: |
+            neopen-companion-debug.apk
+            neopen-debug.apk

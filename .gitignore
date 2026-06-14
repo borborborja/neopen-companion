@@ -8,10 +8,11 @@
 .externalNativeBuild
 .cxx
 local.properties
-app/build/
-/app/release
+**/build/
+**/release
 *.keystore
 *.jks
-# Excepción: keystore de depuración fijo y compartido (firma estable de las
-# builds debug/CI; no es una clave de producción sensible).
-!app/signing/neopen.keystore
+# Excepción: keystores de depuración fijos y compartidos (firma estable de las
+# builds debug/CI; no son claves de producción sensibles).
+!companion/signing/neopen.keystore
+!neopen/signing/neopen-full.keystore
