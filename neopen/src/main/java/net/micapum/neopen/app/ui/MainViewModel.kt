@@ -3,16 +3,23 @@ package net.micapum.neopen.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.graph
+import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.rasterizePng
+import net.micapum.neopen.app.render.renderNotebookPdf
+import net.micapum.neopen.app.render.renderPagePdf
+import net.micapum.neopen.app.render.renderSvg
 import net.micapum.neopen.core.data.ApiFactory
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.pen.PenState
@@ -42,6 +49,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val status: StateFlow<String?> = _status.asStateFlow()
 
     fun capturesIn(notebookId: String) = graph.repo.capturesIn(notebookId)
+
+    fun captureFlow(id: String) = graph.repo.captureFlow(id)
 
     fun serverUrl(): String = settings.value.serverUrl
 
@@ -94,9 +103,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun moveCapture(id: String, notebookId: String, position: Int) =
         mutate { graph.repo.moveCapture(id, notebookId, position) }
 
-    fun createNotebook(name: String, color: String) = mutate { graph.repo.createNotebook(name, color) }
-    fun renameNotebook(id: String, name: String) = mutate { graph.repo.renameNotebook(id, name, null) }
+    fun createNotebook(name: String, color: String, tags: List<String> = emptyList()) =
+        mutate { graph.repo.createNotebook(name, color, tags) }
+    fun editNotebook(id: String, name: String, color: String, tags: List<String>) =
+        mutate { graph.repo.editNotebook(id, name, color, tags) }
     fun deleteNotebook(id: String) = mutate { graph.repo.deleteNotebook(id) }
+    fun setTags(id: String, tags: List<String>) = mutate { graph.repo.setCaptureTags(id, tags) }
 
     // --- Boli (BLE) ---
 
@@ -127,4 +139,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (dto != null) graph.repo.applyServerCapture(dto) else _status.value = "El OCR falló"
         }
     }
+
+    // --- Exportar (genera los bytes; la UI los comparte o guarda) ---
+
+    suspend fun exportPage(captureId: String, format: ExportFormat): ExportFile? {
+        val cap = graph.repo.capture(captureId) ?: return null
+        val bytes = withContext(Dispatchers.IO) {
+            when (format) {
+                ExportFormat.PDF -> renderPagePdf(cap.strokes, cap.paper)
+                ExportFormat.PNG -> rasterizePng(cap.strokes, cap.paper)
+                ExportFormat.SVG -> renderSvg(cap.strokes, cap.paper).toByteArray()
+            }
+        }
+        return ExportFile("${fileBaseName(cap.name)}.${format.ext}", format.mime, bytes)
+    }
+
+    suspend fun exportNotebookPdf(notebookId: String): ExportFile? {
+        val nb = graph.repo.notebook(notebookId) ?: return null
+        val pages = graph.repo.capturesIn(notebookId).first()
+        val bytes = withContext(Dispatchers.IO) { renderNotebookPdf(pages) }
+        return ExportFile("${fileBaseName(nb.name)}.pdf", ExportFormat.PDF.mime, bytes)
+    }
+
+    private fun fileBaseName(name: String): String {
+        val cleaned = name.trim().replace(Regex("[^\\p{L}\\p{N} _-]"), "").replace(' ', '_').take(60)
+        return cleaned.ifBlank { "neopen" }
+    }
 }
+
+/** Fichero exportado listo para compartir o guardar. */
+class ExportFile(val filename: String, val mime: String, val bytes: ByteArray)

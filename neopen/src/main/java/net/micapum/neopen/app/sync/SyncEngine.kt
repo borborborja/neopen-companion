@@ -51,6 +51,8 @@ class SyncEngine(
                 if (!resp.hasMore) break
                 if (resp.cursor == cursor && !resp.reset) break // guardia anti-bucle
             }
+            // Garantiza que "Sin clasificar" exista en local (se muestra aunque esté vacío).
+            runCatching { repo.applyServerNotebook(api.unclassifiedNotebook(s.password)) }
             Result(ok = true, pulled = pulled)
         } catch (e: Exception) {
             Result(ok = false, pulled = pulled, error = e.message ?: e.javaClass.simpleName)
