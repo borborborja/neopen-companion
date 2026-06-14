@@ -16,8 +16,11 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "ne
 /** Modo de sincronización de la escritura offline guardada en el boli. */
 enum class SyncMode { MANUAL, INTERVAL }
 
-/** Modo de la app: solo puente (boli→servidor) o versión completa (cuadernos). */
-enum class AppMode { BRIDGE, FULL }
+/**
+ * Modo de la app: solo puente (boli→servidor), versión completa (cuadernos con
+ * servidor), o local (cuadernos sin servidor; se puede vincular uno más tarde).
+ */
+enum class AppMode { BRIDGE, FULL, LOCAL }
 
 data class AppSettings(
     val serverUrl: String = "",

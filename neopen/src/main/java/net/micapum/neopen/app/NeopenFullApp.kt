@@ -29,6 +29,7 @@ import net.micapum.neopen.app.data.NeopenRepository
 import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.sync.SyncWorker
+import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.SettingsStore
 import net.micapum.neopen.core.data.SyncMode
 import net.micapum.neopen.core.data.SyncStatusStore
@@ -71,12 +72,21 @@ class Graph(app: Application) {
     private val workManager = WorkManager.getInstance(app)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Conexión BLE al boli (una sola, compartida). Cada página → Room + outbox. */
+    /** Modo local activo (sin servidor): el archivado se hace en el dispositivo. */
+    @Volatile
+    var localMode = false
+
+    /** Conexión BLE al boli (una sola, compartida). Cada página → Room (+ sync si hay servidor). */
     val pen = PenManager(app) { page ->
         scope.launch {
-            repo.ingestPenPage(page)
-            syncStatus.markPenSync(System.currentTimeMillis())
-            syncNow()
+            if (localMode) {
+                repo.ingestPenPageLocal(page)
+                syncStatus.markPenSync(System.currentTimeMillis())
+            } else {
+                repo.ingestPenPage(page)
+                syncStatus.markPenSync(System.currentTimeMillis())
+                syncNow()
+            }
         }
     }
 
@@ -85,8 +95,13 @@ class Graph(app: Application) {
     val online: StateFlow<Boolean> = _online
 
     init {
-        // Mantén el flag de auto-volcado del PenManager al día con el ajuste.
-        scope.launch { settings.flow.collect { pen.autoImportOnConnect = it.importOnConnect } }
+        // Mantén al día el flag de auto-volcado y el modo local desde los ajustes.
+        scope.launch {
+            settings.flow.collect {
+                pen.autoImportOnConnect = it.importOnConnect
+                localMode = it.appMode == AppMode.LOCAL
+            }
+        }
         val cm = app.getSystemService(ConnectivityManager::class.java)
         _online.value = cm?.activeNetwork != null
         cm?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {

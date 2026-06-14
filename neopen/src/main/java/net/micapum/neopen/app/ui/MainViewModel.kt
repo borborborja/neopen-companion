@@ -131,6 +131,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.settings.update(settings.value.copy(appMode = mode)) }
     }
 
+    /**
+     * Vincula un servidor a una base LOCAL: valida, migra todo el contenido al
+     * servidor (sin perder datos; el servidor deduplica por bookKey/SOBP) y pasa
+     * a modo completo. Si la validación o la migración fallan, no toca lo local.
+     */
+    fun linkServer(url: String, password: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            val clean = url.trim()
+            val api = runCatching { ApiFactory.create(clean) }.getOrNull()
+            if (api == null) { onResult(false, "URL no válida"); return@launch }
+            val code = runCatching { api.capabilities(password).code() }.getOrElse {
+                onResult(false, "No se pudo conectar al servidor"); return@launch
+            }
+            if (code !in 200..299) {
+                onResult(false, if (code == 401 || code == 403) "Contraseña incorrecta" else "Error del servidor ($code)")
+                return@launch
+            }
+            val migrated = runCatching { graph.repo.linkAndMerge(api, password) }
+            if (migrated.isFailure) {
+                onResult(false, "No se pudieron migrar los datos: ${migrated.exceptionOrNull()?.message}")
+                return@launch
+            }
+            graph.settings.update(settings.value.copy(serverUrl = clean, password = password, appMode = AppMode.FULL))
+            graph.syncNow()
+            onResult(true, null)
+        }
+    }
+
     /** Guarda los ajustes, aplica el calendario de sync y arranca/para el servicio BLE. */
     fun saveSettings(s: AppSettings) {
         viewModelScope.launch {

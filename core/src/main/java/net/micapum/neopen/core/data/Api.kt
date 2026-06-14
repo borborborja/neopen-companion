@@ -42,7 +42,12 @@ data class CreateCaptureInput(
     val strokes: List<StrokeDto>,
     // Formato detectado (NeoLAB) para sembrar el del cuaderno nuevo en el servidor.
     val paper: PaperDto? = null,
-    // notebookId/destination se OMITEN: el servidor archiva por SOBP.
+    // Nombre legible de la libreta física (para nombrar el cuaderno auto-creado).
+    val notebook: String? = null,
+    // Archivado explícito (lo usa la migración local→servidor). Normalmente null:
+    // el servidor archiva por SOBP.
+    val notebookId: String? = null,
+    val destination: String? = null,
 )
 
 data class RegisterPenInput(val mac: String, val name: String? = null, val firmware: String? = null)
@@ -148,6 +153,11 @@ data class NotebookCreateDto(
     val color: String,
     val tags: List<String> = emptyList(),
     val category: String? = null,
+    // Para la migración local→servidor: el servidor deduplica físicos por bookKey.
+    val bookKey: String? = null,
+    val paper: PaperDto? = null,
+    val custom: Boolean? = null,
+    val unclassified: Boolean? = null,
 )
 
 data class NotebookPatchDto(

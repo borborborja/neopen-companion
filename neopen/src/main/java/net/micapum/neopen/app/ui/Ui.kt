@@ -318,11 +318,36 @@ private fun SetupWizard(vm: MainViewModel) {
     ) {
         Spacer(Modifier.size(24.dp))
         Text("neopen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("Configuración inicial · paso ${step + 1} de 2", style = MaterialTheme.typography.bodyMedium,
+        Text("Configuración inicial", style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.size(8.dp))
 
         if (step == 0) {
+            Text("¿Cómo quieres usar la app?", style = MaterialTheme.typography.titleMedium)
+            ModeCard(
+                selected = mode == AppMode.FULL,
+                title = "Versión completa",
+                desc = "Captura, cuadernos, bandeja, transcripción y sincronización con un servidor.",
+                onClick = { mode = AppMode.FULL },
+            )
+            ModeCard(
+                selected = mode == AppMode.LOCAL,
+                title = "Local (sin servidor)",
+                desc = "Todo en el móvil, sin servidor. Podrás vincular uno más tarde sin perder nada.",
+                onClick = { mode = AppMode.LOCAL },
+            )
+            ModeCard(
+                selected = mode == AppMode.BRIDGE,
+                title = "Solo puente",
+                desc = "Solo conecta el boli y sube lo que escribes a un servidor. Sin cuadernos en el móvil.",
+                onClick = { mode = AppMode.BRIDGE },
+            )
+            Spacer(Modifier.size(8.dp))
+            Button(
+                onClick = { if (mode == AppMode.LOCAL) vm.completeSetup("", "", AppMode.LOCAL) {} else step = 1 },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (mode == AppMode.LOCAL) "Empezar" else "Siguiente") }
+        } else {
             Text("Conecta con tu servidor neopen", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = url,
@@ -353,31 +378,13 @@ private fun SetupWizard(vm: MainViewModel) {
             }
             ServerCheckResult(check)
             Spacer(Modifier.size(8.dp))
-            Button(
-                onClick = { step = 1 },
-                enabled = check == ServerCheck.Ok,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Siguiente") }
-        } else {
-            Text("¿Cómo quieres usar la app?", style = MaterialTheme.typography.titleMedium)
-            ModeCard(
-                selected = mode == AppMode.FULL,
-                title = "Versión completa",
-                desc = "Captura, cuadernos, bandeja, transcripción y sincronización con el servidor.",
-                onClick = { mode = AppMode.FULL },
-            )
-            ModeCard(
-                selected = mode == AppMode.BRIDGE,
-                title = "Solo puente",
-                desc = "Solo conecta el boli y sube lo que escribes al servidor. Sin navegar cuadernos en el móvil.",
-                onClick = { mode = AppMode.BRIDGE },
-            )
-            Spacer(Modifier.size(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { step = 0 }, modifier = Modifier.weight(1f)) { Text("Atrás") }
-                Button(onClick = { vm.completeSetup(url, pw, mode) {} }, modifier = Modifier.weight(1f)) {
-                    Text("Empezar")
-                }
+                Button(
+                    onClick = { vm.completeSetup(url, pw, mode) {} },
+                    enabled = check == ServerCheck.Ok,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Empezar") }
             }
         }
     }
@@ -1066,13 +1073,18 @@ private fun SettingsScreen(vm: MainViewModel) {
     var background by rememberSaveable(settings.backgroundEnabled) { mutableStateOf(settings.backgroundEnabled) }
     var importOnConnect by rememberSaveable(settings.importOnConnect) { mutableStateOf(settings.importOnConnect) }
     var backupMsg by rememberSaveable { mutableStateOf<String?>(null) }
+    var linking by rememberSaveable { mutableStateOf(false) }
+    var linkMsg by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun persist() {
+        val isLocal = settings.appMode == AppMode.LOCAL
         vm.saveSettings(
             AppSettings(
-                serverUrl = url, password = pw, backgroundEnabled = background,
+                serverUrl = if (isLocal) "" else url, password = if (isLocal) "" else pw,
+                backgroundEnabled = background,
                 syncMode = syncMode, syncIntervalMin = interval.toIntOrNull() ?: 30,
-                appMode = mode, setupComplete = true, importOnConnect = importOnConnect,
+                appMode = if (isLocal) AppMode.LOCAL else mode, setupComplete = true,
+                importOnConnect = importOnConnect,
             ),
         )
     }
@@ -1100,25 +1112,52 @@ private fun SettingsScreen(vm: MainViewModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // --- Servidor ---
-        Text("Servidor neopen", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text("URL del servidor") },
-            singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text("Contraseña") },
-            visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedButton(onClick = { vm.testServer(url, pw) }, enabled = check != ServerCheck.Checking,
-            modifier = Modifier.fillMaxWidth()) {
-            if (check == ServerCheck.Checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-            else Text("Probar conexión")
-        }
-        ServerCheckResult(check)
+        if (settings.appMode == AppMode.LOCAL) {
+            // --- Modo local: vincular un servidor (migra los datos sin perderlos) ---
+            Text("Modo local (sin servidor)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Text(
+                "Tus cuadernos viven solo en este móvil. Si vinculas un servidor se subirá todo (sin perder nada) y a partir de entonces se sincronizará.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(url, { url = it }, label = { Text("URL del servidor") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(pw, { pw = it }, label = { Text("Contraseña") },
+                visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+            Button(
+                onClick = {
+                    linking = true; linkMsg = null
+                    vm.linkServer(url, pw) { ok, err ->
+                        linking = false
+                        linkMsg = if (ok) "Servidor vinculado y datos migrados." else (err ?: "No se pudo vincular")
+                    }
+                },
+                enabled = !linking && url.isNotBlank() && pw.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (linking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text("Vincular servidor y migrar")
+            }
+            linkMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        } else {
+            // --- Servidor ---
+            Text("Servidor neopen", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text("URL del servidor") },
+                singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text("Contraseña") },
+                visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedButton(onClick = { vm.testServer(url, pw) }, enabled = check != ServerCheck.Checking,
+                modifier = Modifier.fillMaxWidth()) {
+                if (check == ServerCheck.Checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text("Probar conexión")
+            }
+            ServerCheckResult(check)
 
-        HorizontalDivider()
-        // --- Modo de la app ---
-        Text("Modo de la app", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(mode == AppMode.FULL, { mode = AppMode.FULL }, label = { Text("Completo") })
-            FilterChip(mode == AppMode.BRIDGE, { mode = AppMode.BRIDGE }, label = { Text("Solo puente") })
+            HorizontalDivider()
+            // --- Modo de la app ---
+            Text("Modo de la app", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(mode == AppMode.FULL, { mode = AppMode.FULL }, label = { Text("Completo") })
+                FilterChip(mode == AppMode.BRIDGE, { mode = AppMode.BRIDGE }, label = { Text("Solo puente") })
+            }
         }
 
         HorizontalDivider()
