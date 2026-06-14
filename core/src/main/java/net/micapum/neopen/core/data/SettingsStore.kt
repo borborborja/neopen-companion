@@ -31,6 +31,8 @@ data class AppSettings(
     val appMode: AppMode = AppMode.FULL,
     /** El wizard de primer arranque ya se completó. */
     val setupComplete: Boolean = false,
+    /** Volcar la memoria offline del boli automáticamente al conectar. */
+    val importOnConnect: Boolean = true,
 ) {
     val configured get() = serverUrl.isNotBlank() && password.isNotBlank()
 }
@@ -44,6 +46,7 @@ class SettingsStore(private val context: Context) {
         val interval = intPreferencesKey("sync_interval")
         val appMode = stringPreferencesKey("app_mode")
         val setup = booleanPreferencesKey("setup_complete")
+        val importOnConnect = booleanPreferencesKey("import_on_connect")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -58,6 +61,7 @@ class SettingsStore(private val context: Context) {
             appMode = runCatching { AppMode.valueOf(p[Keys.appMode] ?: "FULL") }.getOrDefault(AppMode.FULL),
             // Migración: quien ya tenía servidor+contraseña no debe pasar por el wizard.
             setupComplete = p[Keys.setup] ?: (url.isNotBlank() && pw.isNotBlank()),
+            importOnConnect = p[Keys.importOnConnect] ?: true,
         )
     }
 
@@ -70,6 +74,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.interval] = s.syncIntervalMin
             p[Keys.appMode] = s.appMode.name
             p[Keys.setup] = s.setupComplete
+            p[Keys.importOnConnect] = s.importOnConnect
         }
     }
 }

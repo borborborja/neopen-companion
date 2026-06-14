@@ -69,6 +69,9 @@ class PenManager(
      * usuario). La activa el servicio en primer plano para mantener el boli vivo.
      */
     var autoReconnect = false
+
+    /** Volcar la memoria offline automáticamente al autorizar (ajuste del usuario). */
+    var autoImportOnConnect = false
     private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
     private var scanCb: ScanCallback? = null
 
@@ -394,6 +397,12 @@ class PenManager(
                 if (firstTime) {
                     log("✓ AUTORIZADO (batería ${settings.battery}%) → pido datos en tiempo real")
                     write(Protocol.reqOnlineDataAll())
+                    if (autoImportOnConnect) {
+                        // Vuelca la memoria offline al conectar: lista y luego importa.
+                        log("Auto-volcado al conectar: leyendo memoria offline…")
+                        main.postDelayed({ listOffline() }, 1_500)
+                        main.postDelayed({ importAllOffline() }, 4_000)
+                    }
                 }
             }
 
