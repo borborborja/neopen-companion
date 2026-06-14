@@ -89,6 +89,12 @@ class PenManager(
     /** Permite a otros componentes (p. ej. la subida al servidor) escribir en el registro. */
     fun pushLog(msg: String) = log(msg)
 
+    // --- Herramienta "Leer SOBP": captura puntual del SOBP del próximo trazo. ---
+    private var sobpRequest: ((Sobp) -> Unit)? = null
+    /** Entrega (una sola vez) el SOBP del siguiente dot que escriba el usuario. */
+    fun captureNextSobp(cb: (Sobp) -> Unit) { sobpRequest = cb }
+    fun cancelSobpCapture() { sobpRequest = null }
+
     private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
 
     // --- estado de captura online ---
@@ -446,6 +452,13 @@ class PenManager(
         penTime += d.timeAdd
         if (strokeDots.isEmpty() && strokeStart == 0L) strokeStart = penTime
         strokeDots.add(Dot(d.x, d.y, d.force, penTime, Protocol.DOT_MOVE))
+        // Herramienta "Leer SOBP": entrega el SOBP actual una sola vez.
+        val req = sobpRequest
+        val s = currentSobp
+        if (req != null && s != null) {
+            sobpRequest = null
+            main.post { req(s) }
+        }
     }
 
     private fun endStroke() {

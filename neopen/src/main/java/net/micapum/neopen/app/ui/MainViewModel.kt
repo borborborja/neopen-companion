@@ -24,10 +24,14 @@ import net.micapum.neopen.app.render.renderSvg
 import net.micapum.neopen.core.data.ApiFactory
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.data.CreateSobpScanInput
 import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.PaperDto
+import net.micapum.neopen.core.data.SobpDto
+import net.micapum.neopen.core.data.SobpScanDto
 import net.micapum.neopen.core.pen.OfflineNote
 import net.micapum.neopen.core.pen.PenState
+import net.micapum.neopen.core.pen.Sobp
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -264,6 +268,67 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun importNote(n: OfflineNote) = graph.pen.importOffline(n)
     fun importOffline() = graph.pen.importAllOffline()
     fun clearOffline() = graph.pen.clearOffline(penState.value.notes ?: emptyList())
+
+    // --- Leer SOBP (herramienta del boli) + historial ---
+
+    private val _detectedSobp = MutableStateFlow<Sobp?>(null)
+    val detectedSobp: StateFlow<Sobp?> = _detectedSobp.asStateFlow()
+
+    private val _sobpScans = MutableStateFlow<List<SobpScanDto>>(emptyList())
+    val sobpScans: StateFlow<List<SobpScanDto>> = _sobpScans.asStateFlow()
+
+    /** Empieza a esperar una marca; el SOBP detectado se publica en [detectedSobp]. */
+    fun startReadSobp() {
+        _detectedSobp.value = null
+        graph.pen.captureNextSobp { _detectedSobp.value = it }
+    }
+
+    fun cancelReadSobp() {
+        graph.pen.cancelSobpCapture()
+        _detectedSobp.value = null
+    }
+
+    /** Guarda el SOBP detectado con su identificador en el servidor. */
+    fun saveSobpScan(label: String, onResult: (Boolean) -> Unit) {
+        val sobp = _detectedSobp.value ?: run { onResult(false); return }
+        viewModelScope.launch {
+            val s = settings.value
+            val pen = penState.value.name ?: penState.value.mac
+            val ok = runCatching {
+                ApiFactory.create(s.serverUrl).createSobpScan(
+                    s.password,
+                    CreateSobpScanInput(
+                        label = label.ifBlank { "${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}" },
+                        sobp = SobpDto(sobp.section, sobp.owner, sobp.book, sobp.page),
+                        pen = pen,
+                    ),
+                )
+            }.isSuccess
+            if (ok) {
+                _detectedSobp.value = null
+                loadSobpScans()
+            } else {
+                _status.value = "No se pudo guardar el SOBP (¿sin conexión?)"
+            }
+            onResult(ok)
+        }
+    }
+
+    fun loadSobpScans() {
+        viewModelScope.launch {
+            val s = settings.value
+            runCatching { ApiFactory.create(s.serverUrl).listSobpScans(s.password) }
+                .onSuccess { _sobpScans.value = it }
+        }
+    }
+
+    fun deleteSobpScan(id: String) {
+        viewModelScope.launch {
+            val s = settings.value
+            runCatching { ApiFactory.create(s.serverUrl).deleteSobpScan(s.password, id) }
+            loadSobpScans()
+        }
+    }
 
     // --- OCR (solo online) ---
 
