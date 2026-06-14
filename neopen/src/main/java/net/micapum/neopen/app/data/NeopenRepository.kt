@@ -12,9 +12,11 @@ import net.micapum.neopen.core.data.CapturePatchDto
 import net.micapum.neopen.core.data.CaptureDto
 import net.micapum.neopen.core.data.ChangesResponseDto
 import net.micapum.neopen.core.data.CreateCaptureInput
+import net.micapum.neopen.core.data.NeopenApi
 import net.micapum.neopen.core.data.NotebookCreateDto
 import net.micapum.neopen.core.data.DotDto
 import net.micapum.neopen.core.data.NotebookDto
+import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.NotebookPatchDto
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.ReorderDto
@@ -269,6 +271,110 @@ class NeopenRepository(private val db: NeopenDb) {
             destination = "inbox",
         )
         enqueueCreateCapture(input, entity)
+    }
+
+    // --- Modo LOCAL: archivado en el propio dispositivo (sin servidor) ---------
+
+    /**
+     * Ingesta una página en modo local: resuelve/crea el cuaderno por bookKey,
+     * deduplica por SOBP (append-only por startTime + nº de dots) y archiva la
+     * hoja en su cuaderno. NO usa outbox ni servidor.
+     */
+    suspend fun ingestPenPageLocal(page: StrokePage) {
+        val s = page.sobp
+        val bookKey = "${s.section}.${s.owner}.${s.book}"
+        val detected = PaperLookup.lookup(s.section, s.owner, s.book, s.page)
+        val nb = db.notebooks().findByBookKey(bookKey) ?: createLocalNotebook(bookKey, detected)
+        val incoming = page.strokes.map { st ->
+            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) })
+        }
+        val now = nowIso()
+        val existing = db.captures().findBySobp(s.section, s.owner, s.book, s.page)
+        if (existing != null) {
+            val cur = Json.strokes(existing.strokesJson)
+            val fresh = incoming.filter { n -> cur.none { it.startTime == n.startTime && it.dots.size == n.dots.size } }
+            if (fresh.isEmpty()) return
+            db.captures().upsertOne(existing.copy(strokesJson = Json.strokesJson(cur + fresh), updatedAt = now))
+        } else {
+            db.captures().upsertOne(
+                CaptureEntity(
+                    id = "local-" + UUID.randomUUID(),
+                    rev = 0,
+                    section = s.section, owner = s.owner, book = s.book, page = s.page,
+                    notebook = nb.name,
+                    source = page.source,
+                    capturedAt = page.capturedAt,
+                    importedAt = now,
+                    updatedAt = now,
+                    name = "Nota ${s.section}.${s.owner}.${s.book}.${s.page}",
+                    strokesJson = Json.strokesJson(incoming),
+                    destination = "notebook",
+                    notebookId = nb.id,
+                    paperJson = nb.paperJson ?: Json.paperJson(detected),
+                ),
+            )
+        }
+    }
+
+    private suspend fun createLocalNotebook(bookKey: String, paper: PaperDto?): NotebookEntity {
+        val now = nowIso()
+        val nb = NotebookEntity(
+            id = "local-" + UUID.randomUUID(),
+            rev = 0,
+            name = "Ncode $bookKey",
+            color = "#5b8cff",
+            createdAt = now,
+            updatedAt = now,
+            bookKey = bookKey,
+            paperJson = Json.paperJson(paper),
+            paperSource = paper?.source,
+        )
+        db.notebooks().upsertOne(nb)
+        return nb
+    }
+
+    /**
+     * Vincula un servidor a una base local: sube TODO al servidor (cuadernos →
+     * mapa de ids; capturas con su notebookId mapeado; el servidor deduplica por
+     * bookKey/SOBP) y, SOLO si todo subió bien, limpia el estado local + outbox y
+     * resetea el cursor para que el caller baje el estado unificado. Si algún POST
+     * falla, propaga la excepción ANTES de limpiar (local intacto, reintentable).
+     */
+    suspend fun linkAndMerge(api: NeopenApi, password: String) {
+        val idMap = HashMap<String, String>()
+        for (nb in db.notebooks().getAll()) {
+            if (nb.unclassified) continue // el servidor resuelve su propia pila
+            val dto = api.createNotebook(
+                password,
+                NotebookCreateDto(
+                    name = nb.name, color = nb.color, tags = Json.tags(nb.tagsJson), category = nb.category,
+                    bookKey = nb.bookKey, paper = Json.paperOf(nb.paperJson), custom = nb.custom,
+                ),
+            )
+            idMap[nb.id] = dto.id
+            // createNotebook puede devolver uno existente sin formato: asegúralo.
+            Json.paperOf(nb.paperJson)?.let { p ->
+                api.setNotebookPaper(password, dto.id, NotebookPaperBody(p, p.source))
+            }
+        }
+        for (c in db.captures().getAll()) {
+            val nbId = c.notebookId?.let { idMap[it] }
+            api.createCapture(
+                password,
+                CreateCaptureInput(
+                    sobp = SobpDto(c.section, c.owner, c.book, c.page),
+                    source = c.source, capturedAt = c.capturedAt, name = c.name,
+                    tags = Json.tags(c.tagsJson), strokes = Json.strokes(c.strokesJson),
+                    paper = Json.paperOf(c.paperJson), notebook = c.notebook,
+                    notebookId = nbId, destination = if (nbId != null) "notebook" else null,
+                ),
+            )
+        }
+        // Todo subido sin error → limpia local para repoblar desde el servidor.
+        db.outbox().clear()
+        db.captures().clear()
+        db.notebooks().clear()
+        db.syncMeta().upsert(SyncMetaEntity())
     }
 
     private suspend fun enqueue(kind: String, targetId: String?, payloadJson: String) {

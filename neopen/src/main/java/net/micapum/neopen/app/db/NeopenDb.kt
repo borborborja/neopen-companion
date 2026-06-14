@@ -109,6 +109,12 @@ interface CaptureDao {
     @Query("SELECT * FROM captures WHERE notebookId = :notebookId")
     suspend fun getByNotebook(notebookId: String): List<CaptureEntity>
 
+    @Query("SELECT * FROM captures WHERE section = :s AND owner = :o AND book = :b AND page = :p LIMIT 1")
+    suspend fun findBySobp(s: Int, o: Int, b: Int, p: Int): CaptureEntity?
+
+    @Query("SELECT * FROM captures")
+    suspend fun getAll(): List<CaptureEntity>
+
     @Query("UPDATE captures SET notebookId = :newId WHERE notebookId = :oldId")
     suspend fun repointNotebook(oldId: String, newId: String)
 
@@ -132,6 +138,12 @@ interface NotebookDao {
 
     @Query("SELECT * FROM notebooks WHERE id = :id")
     suspend fun getById(id: String): NotebookEntity?
+
+    @Query("SELECT * FROM notebooks WHERE bookKey = :bookKey LIMIT 1")
+    suspend fun findByBookKey(bookKey: String): NotebookEntity?
+
+    @Query("SELECT * FROM notebooks")
+    suspend fun getAll(): List<NotebookEntity>
 
     @Query("SELECT * FROM notebooks ORDER BY unclassified ASC, updatedAt DESC")
     fun observeAll(): Flow<List<NotebookEntity>>
