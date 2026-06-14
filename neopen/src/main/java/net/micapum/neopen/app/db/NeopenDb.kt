@@ -106,6 +106,9 @@ interface CaptureDao {
     @Query("SELECT * FROM captures WHERE notebookId = :notebookId ORDER BY position ASC, importedAt ASC")
     fun observeByNotebook(notebookId: String): Flow<List<CaptureEntity>>
 
+    @Query("SELECT * FROM captures WHERE notebookId = :notebookId")
+    suspend fun getByNotebook(notebookId: String): List<CaptureEntity>
+
     @Query("UPDATE captures SET notebookId = :newId WHERE notebookId = :oldId")
     suspend fun repointNotebook(oldId: String, newId: String)
 

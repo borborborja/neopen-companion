@@ -24,6 +24,8 @@ import net.micapum.neopen.app.render.renderSvg
 import net.micapum.neopen.core.data.ApiFactory
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.data.NotebookPaperBody
+import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.pen.OfflineNote
 import net.micapum.neopen.core.pen.PenState
 import okhttp3.MediaType.Companion.toMediaType
@@ -185,6 +187,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         mutate { graph.repo.editNotebook(id, name, color, tags, category) }
     fun deleteNotebook(id: String) = mutate { graph.repo.deleteNotebook(id) }
     fun setTags(id: String, tags: List<String>) = mutate { graph.repo.setCaptureTags(id, tags) }
+
+    // --- Formato de página (proporciones) ---
+
+    /** Formato de una hoja individual (override). Vía outbox (offline-capable). */
+    fun setCapturePaper(id: String, paper: PaperDto?) = mutate { graph.repo.setCapturePaper(id, paper) }
+
+    /**
+     * Formato del cuaderno: PUT directo al servidor (re-sella sus hojas, mismo
+     * endpoint que la web), copia optimista local y resync. Requiere conexión.
+     */
+    fun setNotebookPaper(id: String, paper: PaperDto, source: String?) {
+        viewModelScope.launch {
+            val s = settings.value
+            val ok = runCatching {
+                ApiFactory.create(s.serverUrl).setNotebookPaper(s.password, id, NotebookPaperBody(paper, source))
+            }.isSuccess
+            if (ok) {
+                graph.repo.applyNotebookPaperLocal(id, paper)
+                graph.syncNow()
+            } else {
+                _status.value = "No se pudo fijar el formato del cuaderno (¿sin conexión?)"
+            }
+        }
+    }
 
     // --- Boli (BLE) ---
 

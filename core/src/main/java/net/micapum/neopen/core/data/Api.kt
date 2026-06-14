@@ -40,6 +40,8 @@ data class CreateCaptureInput(
     val name: String,
     val tags: List<String> = emptyList(),
     val strokes: List<StrokeDto>,
+    // Formato detectado (NeoLAB) para sembrar el del cuaderno nuevo en el servidor.
+    val paper: PaperDto? = null,
     // notebookId/destination se OMITEN: el servidor archiva por SOBP.
 )
 
@@ -135,7 +137,11 @@ data class CapturePatchDto(
     val notebookId: String? = null,
     val position: Int? = null,
     val kind: String? = null,
+    val paper: PaperDto? = null,
 )
+
+/** Cuerpo de PUT /api/notebooks/{id}/paper (formato del cuaderno; re-sella sus hojas). */
+data class NotebookPaperBody(val paper: PaperDto, val source: String? = null)
 
 data class NotebookCreateDto(
     val name: String,
@@ -228,6 +234,14 @@ interface NeopenApi {
         @Path("id") id: String,
         @Body body: ReorderDto,
     ): Response<Unit>
+
+    /** Fija el formato del cuaderno y re-sella todas sus hojas (proporciones). */
+    @PUT("api/notebooks/{id}/paper")
+    suspend fun setNotebookPaper(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+        @Body body: NotebookPaperBody,
+    ): NotebookDto
 
     @Multipart
     @POST("api/captures/{id}/transcribe")

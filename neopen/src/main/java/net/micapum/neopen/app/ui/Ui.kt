@@ -41,6 +41,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Delete
@@ -113,6 +114,10 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
+import net.micapum.neopen.app.data.PAPER_PRESETS
+import net.micapum.neopen.app.data.PaperPreset
+import net.micapum.neopen.app.data.paperFromPreset
+import net.micapum.neopen.app.data.paperLabel
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.InkCanvas
 import net.micapum.neopen.core.data.AppMode
@@ -502,6 +507,15 @@ private fun NotebookCard(vm: MainViewModel, nb: Notebook, onOpen: (String) -> Un
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (nb.paper == null && !nb.unclassified && !nb.custom) {
+                    Text(
+                        "⚠ Sin formato — proporciones aproximadas",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else paperLabel(nb.paper)?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
         }
@@ -532,10 +546,12 @@ private fun NotebookMenu(vm: MainViewModel, nb: Notebook, onEdit: (String) -> Un
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var formatting by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "Acciones") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("Editar") }, onClick = { open = false; onEdit(nb.id) })
+            DropdownMenuItem(text = { Text("Formato de página…") }, onClick = { open = false; formatting = true })
             DropdownMenuItem(text = { Text("Compartir (PDF)") }, onClick = {
                 open = false
                 scope.launch { vm.exportNotebookPdf(nb.id)?.let { shareExport(context, it) } }
@@ -546,6 +562,13 @@ private fun NotebookMenu(vm: MainViewModel, nb: Notebook, onEdit: (String) -> Un
             })
             DropdownMenuItem(text = { Text("Borrar") }, onClick = { open = false; deleting = true })
         }
+    }
+    if (formatting) {
+        PaperPickerDialog(
+            current = nb.paper?.source,
+            onPick = { p -> vm.setNotebookPaper(nb.id, paperFromPreset(p), p.id); formatting = false },
+            onDismiss = { formatting = false },
+        )
     }
     if (deleting) {
         ConfirmDialog("¿Borrar «${nb.name}»?", "Sus hojas pasarán a «Sin clasificar».",
@@ -637,6 +660,9 @@ private fun PageListRow(vm: MainViewModel, page: Capture, notebooks: List<Notebo
             Column(Modifier.weight(1f)) {
                 Text(page.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("p. ${page.page}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (page.paper == null) {
+                    Text("⚠ Sin formato", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
             }
             CaptureActions(vm, page, notebooks, asRow = false)
         }
@@ -752,6 +778,7 @@ private fun CaptureActions(
     var moving by remember { mutableStateOf(false) }
     var tagging by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var formatting by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf<ExportMode?>(null) }
 
     fun doExport(fmt: ExportFormat, modeSel: ExportMode) {
@@ -767,6 +794,7 @@ private fun CaptureActions(
             IconButton(onClick = { vm.transcribe(c.id) }, enabled = online) { Icon(Icons.Filled.DocumentScanner, "OCR") }
             IconButton({ tagging = true }) { Icon(Icons.Filled.Label, "Etiquetas") }
             IconButton({ renaming = true }) { Icon(Icons.Filled.Edit, "Renombrar") }
+            IconButton({ formatting = true }) { Icon(Icons.Filled.AspectRatio, "Formato") }
             IconButton({ moving = true }) { Icon(Icons.AutoMirrored.Filled.DriveFileMove, "Mover") }
             IconButton({ deleting = true }) { Icon(Icons.Filled.Delete, "Borrar") }
         }
@@ -783,6 +811,7 @@ private fun CaptureActions(
                 )
                 DropdownMenuItem(text = { Text("Etiquetas") }, onClick = { menu = false; tagging = true })
                 DropdownMenuItem(text = { Text("Renombrar") }, onClick = { menu = false; renaming = true })
+                DropdownMenuItem(text = { Text("Formato de hoja…") }, onClick = { menu = false; formatting = true })
                 DropdownMenuItem(text = { Text("Mover a cuaderno") }, onClick = { menu = false; moving = true })
                 DropdownMenuItem(text = { Text("Borrar") }, onClick = { menu = false; deleting = true })
             }
@@ -804,6 +833,13 @@ private fun CaptureActions(
     if (deleting) {
         ConfirmDialog("¿Borrar «${c.name}»?", "Se eliminará en todos tus dispositivos.",
             onConfirm = { vm.deleteCapture(c.id); deleting = false; onAfterDelete?.invoke() }, onDismiss = { deleting = false })
+    }
+    if (formatting) {
+        PaperPickerDialog(
+            current = c.paper?.source,
+            onPick = { p -> vm.setCapturePaper(c.id, paperFromPreset(p)); formatting = false },
+            onDismiss = { formatting = false },
+        )
     }
     val mode = exporting
     if (mode != null) {
@@ -1028,6 +1064,7 @@ private fun SettingsScreen(vm: MainViewModel) {
     var syncMode by rememberSaveable(settings.syncMode) { mutableStateOf(settings.syncMode) }
     var interval by rememberSaveable(settings.syncIntervalMin) { mutableStateOf(settings.syncIntervalMin.toString()) }
     var background by rememberSaveable(settings.backgroundEnabled) { mutableStateOf(settings.backgroundEnabled) }
+    var importOnConnect by rememberSaveable(settings.importOnConnect) { mutableStateOf(settings.importOnConnect) }
     var backupMsg by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun persist() {
@@ -1035,7 +1072,7 @@ private fun SettingsScreen(vm: MainViewModel) {
             AppSettings(
                 serverUrl = url, password = pw, backgroundEnabled = background,
                 syncMode = syncMode, syncIntervalMin = interval.toIntOrNull() ?: 30,
-                appMode = mode, setupComplete = true,
+                appMode = mode, setupComplete = true, importOnConnect = importOnConnect,
             ),
         )
     }
@@ -1088,6 +1125,7 @@ private fun SettingsScreen(vm: MainViewModel) {
         // --- Sincronización del boli ---
         Text("Bluetooth y sincronización", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         PenToggleRow("Conexión en segundo plano", "Mantiene el boli conectado con la app cerrada", background) { background = it }
+        PenToggleRow("Volcar memoria al conectar", "Importa la escritura offline del boli en cuanto se conecta", importOnConnect) { importOnConnect = it }
         Text("Volcado de la memoria offline", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(syncMode == SyncMode.MANUAL, { syncMode = SyncMode.MANUAL }, label = { Text("Manual") })
@@ -1251,6 +1289,32 @@ private fun FormatPickerDialog(onPick: (ExportFormat) -> Unit, onDismiss: () -> 
             Column {
                 for (f in ExportFormat.entries) {
                     TextButton(onClick = { onPick(f) }, modifier = Modifier.fillMaxWidth()) { Text(f.name) }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+/** Selector del formato/proporciones de página (presets A4, A5, Moleskine…). */
+@Composable
+private fun PaperPickerDialog(current: String?, onPick: (PaperPreset) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Formato de página") },
+        text = {
+            Column {
+                Text(
+                    "Elige el tamaño real de la hoja para que las proporciones del dibujo sean correctas.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.size(8.dp))
+                PAPER_PRESETS.forEach { p ->
+                    TextButton(onClick = { onPick(p) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(p.label + if (p.id == current) "  ✓" else "", modifier = Modifier.fillMaxWidth())
+                    }
                 }
             }
         },

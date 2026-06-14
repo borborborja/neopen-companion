@@ -16,9 +16,11 @@ import net.micapum.neopen.core.data.NotebookCreateDto
 import net.micapum.neopen.core.data.DotDto
 import net.micapum.neopen.core.data.NotebookDto
 import net.micapum.neopen.core.data.NotebookPatchDto
+import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.ReorderDto
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.StrokeDto
+import net.micapum.neopen.core.pen.PaperLookup
 import net.micapum.neopen.core.pen.StrokePage
 import java.time.Instant
 import java.util.UUID
@@ -125,6 +127,28 @@ class NeopenRepository(private val db: NeopenDb) {
         )
     }
 
+    /** Formato de una hoja individual (override). Optimista + outbox PATCH. */
+    suspend fun setCapturePaper(id: String, paper: PaperDto?) {
+        val e = db.captures().getById(id) ?: return
+        db.captures().upsertOne(e.copy(paperJson = Json.paperJson(paper), updatedAt = nowIso()))
+        enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(paper = paper)))
+    }
+
+    /**
+     * Aplica localmente el formato del cuaderno a su entidad y re-sella sus hojas
+     * (respeta overrides por hoja con source="manual"), igual que el servidor. La
+     * subida la hace el ViewModel vía PUT directo; aquí solo es la copia optimista.
+     */
+    suspend fun applyNotebookPaperLocal(id: String, paper: PaperDto?) {
+        val nb = db.notebooks().getById(id) ?: return
+        val now = nowIso()
+        db.notebooks().upsertOne(nb.copy(paperJson = Json.paperJson(paper), paperSource = paper?.source, updatedAt = now))
+        for (c in db.captures().getByNotebook(id)) {
+            if (Json.paperOf(c.paperJson)?.source == "manual") continue
+            db.captures().upsertOne(c.copy(paperJson = Json.paperJson(paper), updatedAt = now))
+        }
+    }
+
     suspend fun deleteCapture(id: String) {
         db.captures().deleteById(id)
         enqueue(OutboxKind.DELETE_CAPTURE, id, "{}")
@@ -215,12 +239,16 @@ class NeopenRepository(private val db: NeopenDb) {
             StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) })
         }
         val name = "Nota ${s.section}.${s.owner}.${s.book}.${s.page}"
+        // Detección del formato real (NeoLAB) para sembrar el del cuaderno nuevo:
+        // así las hojas salen con las proporciones correctas sin intervención.
+        val paper = PaperLookup.lookup(s.section, s.owner, s.book, s.page)
         val input = CreateCaptureInput(
             sobp = SobpDto(s.section, s.owner, s.book, s.page),
             source = page.source,
             capturedAt = page.capturedAt,
             name = name,
             strokes = strokes,
+            paper = paper,
         )
         val now = nowIso()
         val entity = CaptureEntity(
@@ -237,6 +265,7 @@ class NeopenRepository(private val db: NeopenDb) {
             updatedAt = now,
             name = name,
             strokesJson = Json.strokesJson(strokes),
+            paperJson = Json.paperJson(paper),
             destination = "inbox",
         )
         enqueueCreateCapture(input, entity)

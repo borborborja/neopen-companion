@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import net.micapum.neopen.app.data.NeopenRepository
@@ -84,6 +85,8 @@ class Graph(app: Application) {
     val online: StateFlow<Boolean> = _online
 
     init {
+        // Mantén el flag de auto-volcado del PenManager al día con el ajuste.
+        scope.launch { settings.flow.collect { pen.autoImportOnConnect = it.importOnConnect } }
         val cm = app.getSystemService(ConnectivityManager::class.java)
         _online.value = cm?.activeNetwork != null
         cm?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
