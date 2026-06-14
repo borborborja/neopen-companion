@@ -88,6 +88,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -960,6 +961,106 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
         state.mac?.let { Text("MAC: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         state.firmware?.let { Text("Firmware: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+
+        // Herramienta avanzada (discreta): leer el SOBP de una marca.
+        var readingSobp by remember { mutableStateOf(false) }
+        TextButton(onClick = { readingSobp = true }, contentPadding = PaddingValues(top = 6.dp, bottom = 6.dp)) {
+            Text("Leer SOBP…", style = MaterialTheme.typography.bodySmall)
+        }
+        if (readingSobp) SobpReaderDialog(vm) { readingSobp = false }
+    }
+}
+
+/**
+ * Diálogo de la herramienta "Leer SOBP": espera una marca del boli, muestra el
+ * SOBP detectado y lo guarda con un identificador. El historial está en Ajustes.
+ */
+@Composable
+private fun SobpReaderDialog(vm: MainViewModel, onDismiss: () -> Unit) {
+    val detected by vm.detectedSobp.collectAsStateWithLifecycle()
+    var label by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        vm.startReadSobp()
+        onDispose { vm.cancelReadSobp() }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Leer SOBP") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val s = detected
+                when {
+                    saved -> Text("Guardado en el historial.")
+                    s == null -> {
+                        Text("Conecta el boli y haz una pequeña marca en una hoja Ncode…")
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                    else -> {
+                        Text(
+                            "SOBP detectado: ${s.section}.${s.owner}.${s.book}.${s.page}",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        OutlinedTextField(label, { label = it }, label = { Text("Identificador") }, singleLine = true)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                saved -> TextButton(onClick = onDismiss) { Text("Cerrar") }
+                detected != null -> TextButton(
+                    enabled = !saving,
+                    onClick = { saving = true; vm.saveSobpScan(label) { ok -> saving = false; if (ok) saved = true } },
+                ) { Text("Guardar") }
+                else -> {}
+            }
+        },
+        dismissButton = { if (!saved) TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+/** Sección "Historial de SOBP" en Ajustes (lista + borrar). */
+@Composable
+private fun SobpHistorySection(vm: MainViewModel) {
+    val scans by vm.sobpScans.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.loadSobpScans() }
+    Text("Historial de SOBP", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    Text(
+        "SOBP escaneados con «Leer SOBP» (panel del boli).",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (scans.isEmpty()) {
+        Text("Aún no has escaneado ningún SOBP.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else {
+        Card {
+            Column {
+                scans.forEachIndexed { i, s ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(s.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "${s.sobp.section}.${s.sobp.owner}.${s.sobp.book}.${s.sobp.page}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { vm.deleteSobpScan(s.id) }) {
+                            Text("Borrar", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    if (i < scans.lastIndex) HorizontalDivider()
+                }
+            }
+        }
     }
 }
 
@@ -1192,6 +1293,9 @@ private fun SettingsScreen(vm: MainViewModel) {
             OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.weight(1f)) { Text("Restaurar") }
         }
         backupMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+        HorizontalDivider()
+        SobpHistorySection(vm)
 
         HorizontalDivider()
         TextButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) {

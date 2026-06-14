@@ -169,6 +169,16 @@ data class NotebookPatchDto(
 
 data class ReorderDto(val order: List<String>)
 
+// Historial de SOBP escaneados (herramienta "Leer SOBP").
+data class SobpScanDto(
+    val id: String,
+    val label: String,
+    val sobp: SobpDto,
+    val pen: String? = null,
+    val scannedAt: String,
+)
+data class CreateSobpScanInput(val label: String, val sobp: SobpDto, val pen: String? = null)
+
 /** Cliente del servidor neopen. La contraseña va en la cabecera por petición. */
 interface NeopenApi {
     /** Healthcheck público (sin auth): comprueba que el servidor responde. */
@@ -267,6 +277,23 @@ interface NeopenApi {
         @Header("X-Auth-Password") password: String,
         @Body body: RegisterPenInput,
     ): PenInfoDto
+
+    // --- Historial de SOBP escaneados ---
+
+    @GET("api/sobp-scans")
+    suspend fun listSobpScans(@Header("X-Auth-Password") password: String): List<SobpScanDto>
+
+    @POST("api/sobp-scans")
+    suspend fun createSobpScan(
+        @Header("X-Auth-Password") password: String,
+        @Body body: CreateSobpScanInput,
+    ): SobpScanDto
+
+    @DELETE("api/sobp-scans/{id}")
+    suspend fun deleteSobpScan(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+    ): Response<Unit>
 
     // --- Backup (copia completa del contenido del servidor) ---
 
