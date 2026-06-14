@@ -54,6 +54,7 @@ data class NotebookEntity(
     val coverUrl: String? = null,
     val unclassified: Boolean = false,
     val custom: Boolean = false,
+    val category: String? = null,
 )
 
 /** Operación local pendiente de subir al servidor (FIFO). */
@@ -174,7 +175,7 @@ interface SyncMetaDao {
 
 @Database(
     entities = [CaptureEntity::class, NotebookEntity::class, OutboxEntity::class, SyncMetaEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {

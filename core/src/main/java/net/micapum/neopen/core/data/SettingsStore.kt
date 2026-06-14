@@ -16,6 +16,9 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "ne
 /** Modo de sincronización de la escritura offline guardada en el boli. */
 enum class SyncMode { MANUAL, INTERVAL }
 
+/** Modo de la app: solo puente (boli→servidor) o versión completa (cuadernos). */
+enum class AppMode { BRIDGE, FULL }
+
 data class AppSettings(
     val serverUrl: String = "",
     val password: String = "",
@@ -24,6 +27,10 @@ data class AppSettings(
     val syncMode: SyncMode = SyncMode.MANUAL,
     /** Intervalo de volcado offline en minutos (solo modo INTERVAL). */
     val syncIntervalMin: Int = 30,
+    /** Modo elegido en el wizard de primer arranque (cambiable luego en Ajustes). */
+    val appMode: AppMode = AppMode.FULL,
+    /** El wizard de primer arranque ya se completó. */
+    val setupComplete: Boolean = false,
 ) {
     val configured get() = serverUrl.isNotBlank() && password.isNotBlank()
 }
@@ -35,15 +42,22 @@ class SettingsStore(private val context: Context) {
         val bg = booleanPreferencesKey("background")
         val mode = stringPreferencesKey("sync_mode")
         val interval = intPreferencesKey("sync_interval")
+        val appMode = stringPreferencesKey("app_mode")
+        val setup = booleanPreferencesKey("setup_complete")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
+        val url = p[Keys.url] ?: ""
+        val pw = p[Keys.pw] ?: ""
         AppSettings(
-            serverUrl = p[Keys.url] ?: "",
-            password = p[Keys.pw] ?: "",
+            serverUrl = url,
+            password = pw,
             backgroundEnabled = p[Keys.bg] ?: false,
             syncMode = runCatching { SyncMode.valueOf(p[Keys.mode] ?: "MANUAL") }.getOrDefault(SyncMode.MANUAL),
             syncIntervalMin = p[Keys.interval] ?: 30,
+            appMode = runCatching { AppMode.valueOf(p[Keys.appMode] ?: "FULL") }.getOrDefault(AppMode.FULL),
+            // Migración: quien ya tenía servidor+contraseña no debe pasar por el wizard.
+            setupComplete = p[Keys.setup] ?: (url.isNotBlank() && pw.isNotBlank()),
         )
     }
 
@@ -54,6 +68,8 @@ class SettingsStore(private val context: Context) {
             p[Keys.bg] = s.backgroundEnabled
             p[Keys.mode] = s.syncMode.name
             p[Keys.interval] = s.syncIntervalMin
+            p[Keys.appMode] = s.appMode.name
+            p[Keys.setup] = s.setupComplete
         }
     }
 }

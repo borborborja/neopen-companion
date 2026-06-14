@@ -9,12 +9,12 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        // applicationId distinto del companion → ambas apps conviven instaladas.
+        // App unificada (puente + completa). El :companion quedó retirado del build.
         applicationId = "net.micapum.neopen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.8.1"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -61,6 +61,10 @@ dependencies {
 
     // Trabajo en segundo plano (motor de sincronización — Fase 2/3)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Widgets de pantalla de inicio (sincronización + cuadernos)
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
 
     // Persistencia local offline (cuadernos/capturas + outbox + cursor)
     implementation("androidx.room:room-runtime:2.6.1")

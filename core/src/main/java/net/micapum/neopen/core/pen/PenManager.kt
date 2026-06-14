@@ -63,6 +63,12 @@ class PenManager(
     private var connecting = false
     private var target: BluetoothDevice? = null
     private var connectAttempts = 0
+
+    /**
+     * Reconexión automática ante desconexiones inesperadas (no solicitadas por el
+     * usuario). La activa el servicio en primer plano para mantener el boli vivo.
+     */
+    var autoReconnect = false
     private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
     private var scanCb: ScanCallback? = null
 
@@ -269,7 +275,17 @@ class PenManager(
                 connecting = false
                 g.close()
                 if (gatt === g) gatt = null
-                update { it.copy(status = PenStatus.DISCONNECTED) }
+                val device = target
+                // Desconexión inesperada (target != null = no la pidió el usuario):
+                // reintenta sola si la reconexión automática está activa.
+                if (autoReconnect && device != null) {
+                    log("Reconexión automática en 1,5 s…")
+                    connectAttempts = 0
+                    update { it.copy(status = PenStatus.CONNECTING, error = null) }
+                    main.postDelayed({ if (autoReconnect && target === device) openGatt(device) }, 1500)
+                } else {
+                    update { it.copy(status = PenStatus.DISCONNECTED) }
+                }
             }
         }
 
@@ -395,8 +411,11 @@ class PenManager(
                 val notes = Protocol.parseNoteList(frame.data)
                 update { it.copy(offlinePhase = OfflinePhase.IDLE, notes = notes) }
             }
-            Protocol.OFFLINE_DATA_RESPONSE ->
+            Protocol.OFFLINE_DATA_RESPONSE -> {
+                offlineTotalStrokes = Protocol.parseOfflineTotalStrokes(frame.data)
+                offlineReceivedStrokes = 0
                 update { it.copy(offlinePhase = OfflinePhase.TRANSFERRING, offlineProgress = 0) }
+            }
             Protocol.OFFLINE_PACKET_REQUEST -> handleOfflinePacket(frame.data)
             Protocol.OFFLINE_DATA_DELETE_RESPONSE ->
                 update { it.copy(notes = emptyList()) }
@@ -492,18 +511,58 @@ class PenManager(
         }
     }
 
-    private var offlinePacketIndex = 0
+    private var offlineTotalStrokes = 0
+    private var offlineReceivedStrokes = 0
+
+    /**
+     * Recibe un chunk offline (0x24): parsea la cabecera, descomprime (zlib) si
+     * procede, extrae strokes/dots, los agrupa por SOBP de página y los sube como
+     * StrokePage(source="offline") — el servidor las fusiona por SOBP. Acusa el
+     * paquete (con su packetId) salvo el último (transPosition==2), igual que el SDK.
+     */
     private fun handleOfflinePacket(data: ByteArray) {
-        // VERIFY: el chunk trae [index][total][sobp][dots... posiblemente zlib].
-        // 1) ACK del paquete para que el boli envíe el siguiente.
-        write(Protocol.resOfflinePacket(offlinePacketIndex++))
-        // 2) Extraer dots (descomprimir si procede) y agruparlos en páginas offline.
-        //    TODO: implementar el parseo exacto del chunk con el boli real y
-        //    java.util.zip.Inflater para los datos comprimidos.
-        update {
-            val pct = minOf(99, it.offlineProgress + 5)
-            it.copy(offlineProgress = pct)
+        try {
+            val chunk = Protocol.parseOfflineChunk(data)
+            val raw = if (chunk.isCompressed) inflateZlib(chunk.data, chunk.beforeSize) else chunk.data
+            val strokes = Protocol.parseOfflineStrokes(raw, chunk.section, chunk.owner, chunk.note, chunk.strokeCount)
+            // Agrupa por página física y sube una StrokePage por SOBP.
+            strokes.groupBy({ it.first }, { it.second }).forEach { (sobp, pageStrokes) ->
+                log("📄 Offline sobp ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}: ${pageStrokes.size} trazos → subiendo…")
+                onPage(StrokePage(sobp, "offline", iso.format(System.currentTimeMillis()), pageStrokes))
+            }
+            // Acusa para recibir el siguiente (el último no se acusa, como el SDK).
+            if (chunk.transPosition != 2) write(Protocol.resOfflinePacket(chunk.packetId))
+            offlineReceivedStrokes += chunk.strokeCount
+            val pct =
+                if (offlineTotalStrokes > 0) (offlineReceivedStrokes * 100 / offlineTotalStrokes).coerceIn(0, 100)
+                else if (chunk.transPosition == 2) 100 else 50
+            if (chunk.transPosition == 2) {
+                update { it.copy(offlinePhase = OfflinePhase.IDLE, offlineProgress = 100) }
+            } else {
+                update { it.copy(offlineProgress = pct) }
+            }
+        } catch (e: Exception) {
+            log("⚠ Error parseando chunk offline: ${e.message}")
+            update { it.copy(error = "offline-parse") }
         }
+    }
+
+    /** Descomprime datos zlib (cabecera estándar) a su tamaño original. */
+    private fun inflateZlib(data: ByteArray, expectedSize: Int): ByteArray {
+        val inflater = java.util.zip.Inflater()
+        inflater.setInput(data)
+        val out = java.io.ByteArrayOutputStream(maxOf(expectedSize, data.size))
+        val buf = ByteArray(8192)
+        try {
+            while (!inflater.finished()) {
+                val n = inflater.inflate(buf)
+                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+                out.write(buf, 0, n)
+            }
+        } finally {
+            inflater.end()
+        }
+        return out.toByteArray()
     }
 
     // ----------------------------------------------------------------------------------

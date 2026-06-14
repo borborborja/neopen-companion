@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -60,6 +62,7 @@ class NeopenApp : Application() {
                 } else {
                     pen.pushLog("✗ Subida FALLÓ (¿servidor/contraseña configurados?)")
                 }
+                notifyUpload(ok, page.strokes.size)
                 SyncWidget.refresh(this@NeopenApp)
             }
         }
@@ -79,6 +82,24 @@ class NeopenApp : Application() {
         }
     }
 
+    /**
+     * Notifica el resultado real de una subida (reusa una misma notificación que
+     * se actualiza en sitio, para no acumular). En Android 13+ requiere
+     * POST_NOTIFICATIONS; si no está concedido, no-op silencioso.
+     */
+    private fun notifyUpload(ok: Boolean, strokes: Int) {
+        val text = if (ok) "Subida correcta · $strokes trazos"
+        else "Error de red al subir — se reintentará"
+        val notif = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(text)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(true)
+            .build()
+        runCatching { NotificationManagerCompat.from(this).notify(UPLOAD_NOTIF_ID, notif) }
+    }
+
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
@@ -91,6 +112,7 @@ class NeopenApp : Application() {
 
     companion object {
         const val CHANNEL_ID = "pen-connection"
+        private const val UPLOAD_NOTIF_ID = 43
         fun from(context: Context) = context.applicationContext as NeopenApp
     }
 }

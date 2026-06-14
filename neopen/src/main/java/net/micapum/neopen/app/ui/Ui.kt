@@ -2,6 +2,7 @@ package net.micapum.neopen.app.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,10 +22,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
@@ -62,9 +66,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -72,6 +80,9 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -87,7 +98,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,6 +115,10 @@ import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.InkCanvas
+import net.micapum.neopen.core.data.AppMode
+import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.data.SyncMode
+import net.micapum.neopen.app.widget.TAB_NOTEBOOKS
 import net.micapum.neopen.core.pen.PenStatus
 
 private val NotebookColors = listOf(
@@ -123,27 +142,46 @@ private fun penDotColor(status: PenStatus): Color = when (status) {
 
 // --- Raíz / navegación -------------------------------------------------------
 
+/** Pestañas inferiores. El conjunto visible depende del modo de la app. */
+private enum class HomeTab(val title: String, val icon: ImageVector) {
+    INBOX("Bandeja", Icons.Filled.Inbox),
+    NOTEBOOKS("Cuadernos", Icons.Filled.Book),
+    PEN("Boli", Icons.Filled.Draw),
+    SETTINGS("Ajustes", Icons.Filled.Settings),
+}
+
 @Composable
-fun AppRoot(vm: MainViewModel = viewModel()) {
+fun AppRoot(
+    vm: MainViewModel = viewModel(),
+    initialTab: String? = null,
+    initialNotebookId: String? = null,
+) {
     val settings by vm.settings.collectAsStateWithLifecycle()
-    if (!settings.configured) {
-        LoginScreen(vm)
+    if (!settings.setupComplete) {
+        SetupWizard(vm)
         return
     }
     LaunchedEffect(Unit) { vm.syncNow() }
 
     val notebooks by vm.notebooks.collectAsStateWithLifecycle()
-    var showPen by rememberSaveable { mutableStateOf(false) }
-    var openNotebookId by rememberSaveable { mutableStateOf<String?>(null) }
+    var openNotebookId by rememberSaveable { mutableStateOf(initialNotebookId) }
     var openPageId by rememberSaveable { mutableStateOf<String?>(null) }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    if (showPen) {
-        PenScreen(vm, onBack = { showPen = false })
-        return
+    // Modo PUENTE → solo Boli + Ajustes; modo COMPLETO → todas las pestañas.
+    val tabs = if (settings.appMode == AppMode.BRIDGE) {
+        listOf(HomeTab.PEN, HomeTab.SETTINGS)
+    } else {
+        listOf(HomeTab.INBOX, HomeTab.NOTEBOOKS, HomeTab.PEN, HomeTab.SETTINGS)
     }
+    var current by rememberSaveable(settings.appMode) {
+        mutableStateOf(
+            if (initialTab == TAB_NOTEBOOKS && HomeTab.NOTEBOOKS in tabs) HomeTab.NOTEBOOKS else tabs.first(),
+        )
+    }
+
+    // Pantallas a pantalla completa (solo en modo completo).
     val pageId = openPageId
     if (pageId != null) {
         PageViewer(vm, pageId, notebooks, onBack = { openPageId = null })
@@ -162,40 +200,57 @@ fun AppRoot(vm: MainViewModel = viewModel()) {
     val penState by vm.penState.collectAsStateWithLifecycle()
 
     Scaffold(
-        topBar = {
-            HomeBar(tab, syncing, pending, status != null, penState.status, onSync = vm::syncNow, onPen = { showPen = true })
-        },
+        topBar = { HomeBar(current.title, syncing, pending, status != null, onSync = vm::syncNow) },
         floatingActionButton = {
-            if (tab == 0) {
+            if (current == HomeTab.NOTEBOOKS) {
                 FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, "Nuevo cuaderno") }
             }
         },
         bottomBar = {
             NavigationBar {
-                NavigationBarItem(tab == 0, { tab = 0 }, icon = { Icon(Icons.Filled.Book, null) }, label = { Text("Cuadernos") })
-                NavigationBarItem(tab == 1, { tab = 1 }, icon = { Icon(Icons.Filled.Inbox, null) }, label = { Text("Bandeja") })
-                NavigationBarItem(tab == 2, { tab = 2 }, icon = { Icon(Icons.Filled.Settings, null) }, label = { Text("Ajustes") })
+                tabs.forEach { t ->
+                    NavigationBarItem(
+                        selected = current == t,
+                        onClick = { current = t },
+                        icon = {
+                            if (t == HomeTab.PEN) {
+                                Box {
+                                    Icon(t.icon, null)
+                                    StatusDot(penDotColor(penState.status), Modifier.align(Alignment.TopEnd))
+                                }
+                            } else {
+                                Icon(t.icon, null)
+                            }
+                        },
+                        label = { Text(t.title) },
+                    )
+                }
             }
         },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            when (tab) {
-                0 -> NotebooksScreen(vm, notebooks, onOpen = { openNotebookId = it }, onEdit = { editingId = it })
-                1 -> InboxScreen(vm, notebooks, onOpenPage = { openPageId = it })
-                else -> SettingsScreen(vm)
+            when (current) {
+                HomeTab.INBOX -> InboxScreen(vm, notebooks, onOpenPage = { openPageId = it })
+                HomeTab.NOTEBOOKS -> NotebooksScreen(vm, notebooks, onOpen = { openNotebookId = it }, onEdit = { editingId = it })
+                HomeTab.PEN -> PenTabContent(vm)
+                HomeTab.SETTINGS -> SettingsScreen(vm)
             }
         }
     }
 
+    val categorySuggestions = notebooks
+        .mapNotNull { it.category?.trim()?.ifBlank { null } }
+        .distinct()
+        .sorted()
     if (creating) {
-        NotebookEditorDialog("Nuevo cuaderno", "", NotebookColors.first(), emptyList(),
-            onConfirm = { n, c, t -> vm.createNotebook(n, c, t); creating = false },
+        NotebookEditorDialog("Nuevo cuaderno", "", NotebookColors.first(), emptyList(), "", categorySuggestions,
+            onConfirm = { n, c, t, cat -> vm.createNotebook(n, c, t, cat.ifBlank { null }); creating = false },
             onDismiss = { creating = false })
     }
     val editing = editingId?.let { id -> notebooks.firstOrNull { it.id == id } }
     if (editing != null) {
-        NotebookEditorDialog("Editar cuaderno", editing.name, editing.color, editing.tags,
-            onConfirm = { n, c, t -> vm.editNotebook(editing.id, n, c, t); editingId = null },
+        NotebookEditorDialog("Editar cuaderno", editing.name, editing.color, editing.tags, editing.category ?: "", categorySuggestions,
+            onConfirm = { n, c, t, cat -> vm.editNotebook(editing.id, n, c, t, cat); editingId = null },
             onDismiss = { editingId = null })
     }
 }
@@ -203,19 +258,12 @@ fun AppRoot(vm: MainViewModel = viewModel()) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeBar(
-    tab: Int,
+    title: String,
     syncing: Boolean,
     pending: Int,
     hasError: Boolean,
-    penStatus: PenStatus,
     onSync: () -> Unit,
-    onPen: () -> Unit,
 ) {
-    val title = when (tab) {
-        0 -> "Cuadernos"
-        1 -> "Bandeja"
-        else -> "Ajustes"
-    }
     TopAppBar(
         title = { Text(title) },
         actions = {
@@ -235,10 +283,6 @@ private fun HomeBar(
                     )
                 }
             }
-            Box {
-                IconButton(onClick = onPen) { Icon(Icons.Filled.Draw, "Boli") }
-                StatusDot(penDotColor(penStatus), Modifier.align(Alignment.TopEnd).padding(8.dp))
-            }
         },
     )
 }
@@ -256,53 +300,113 @@ private fun StatusDot(color: Color, modifier: Modifier = Modifier) {
 // --- Login -------------------------------------------------------------------
 
 @Composable
-private fun LoginScreen(vm: MainViewModel) {
+private fun SetupWizard(vm: MainViewModel) {
+    var step by rememberSaveable { mutableIntStateOf(0) }
     var url by rememberSaveable { mutableStateOf(vm.serverUrl()) }
     var pw by rememberSaveable { mutableStateOf("") }
-    var error by rememberSaveable { mutableStateOf<String?>(null) }
-    var busy by rememberSaveable { mutableStateOf(false) }
+    var mode by rememberSaveable { mutableStateOf(AppMode.FULL) }
+    val check by vm.serverCheck.collectAsStateWithLifecycle()
 
     Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("neopen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("Conecta con tu servidor neopen", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.size(24.dp))
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it; error = null },
-            label = { Text("URL del servidor") },
-            placeholder = { Text("https://neopen.ejemplo.com") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.size(12.dp))
-        OutlinedTextField(
-            value = pw,
-            onValueChange = { pw = it; error = null },
-            label = { Text("Contraseña") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (error != null) {
+        Text("neopen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Configuración inicial · paso ${step + 1} de 2", style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.size(8.dp))
+
+        if (step == 0) {
+            Text("Conecta con tu servidor neopen", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = url,
+                onValueChange = { url = it; vm.resetServerCheck() },
+                label = { Text("URL del servidor") },
+                placeholder = { Text("https://neopen.ejemplo.com") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = pw,
+                onValueChange = { pw = it; vm.resetServerCheck() },
+                label = { Text("Contraseña") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedButton(
+                onClick = { vm.testServer(url, pw) },
+                enabled = check != ServerCheck.Checking && url.isNotBlank() && pw.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (check == ServerCheck.Checking) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Probar conexión")
+                }
+            }
+            ServerCheckResult(check)
             Spacer(Modifier.size(8.dp))
-            Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        Spacer(Modifier.size(20.dp))
-        Button(
-            onClick = {
-                busy = true
-                vm.connect(url, pw) { _, err -> busy = false; error = err }
-            },
-            enabled = !busy && url.isNotBlank() && pw.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text("Conectar")
+            Button(
+                onClick = { step = 1 },
+                enabled = check == ServerCheck.Ok,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Siguiente") }
+        } else {
+            Text("¿Cómo quieres usar la app?", style = MaterialTheme.typography.titleMedium)
+            ModeCard(
+                selected = mode == AppMode.FULL,
+                title = "Versión completa",
+                desc = "Captura, cuadernos, bandeja, transcripción y sincronización con el servidor.",
+                onClick = { mode = AppMode.FULL },
+            )
+            ModeCard(
+                selected = mode == AppMode.BRIDGE,
+                title = "Solo puente",
+                desc = "Solo conecta el boli y sube lo que escribes al servidor. Sin navegar cuadernos en el móvil.",
+                onClick = { mode = AppMode.BRIDGE },
+            )
+            Spacer(Modifier.size(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { step = 0 }, modifier = Modifier.weight(1f)) { Text("Atrás") }
+                Button(onClick = { vm.completeSetup(url, pw, mode) {} }, modifier = Modifier.weight(1f)) {
+                    Text("Empezar")
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun ModeCard(selected: Boolean, title: String, desc: String, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) cs.secondaryContainer else cs.surfaceVariant,
+            contentColor = if (selected) cs.onSecondaryContainer else cs.onSurfaceVariant,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(desc, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+/** Mensaje del resultado de probar el servidor (sin iconos, color semántico). */
+@Composable
+private fun ServerCheckResult(check: ServerCheck) {
+    val cs = MaterialTheme.colorScheme
+    val (color, msg) = when (check) {
+        ServerCheck.Idle, ServerCheck.Checking -> return
+        ServerCheck.Ok -> cs.primary to "Conexión correcta. Servidor y contraseña válidos."
+        ServerCheck.BadAuth -> cs.error to "El servidor responde, pero la contraseña es incorrecta."
+        is ServerCheck.Unreachable -> cs.error to "No se pudo conectar: ${check.detail}"
+    }
+    Text(msg, color = color, style = MaterialTheme.typography.bodyMedium)
 }
 
 // --- Cuadernos ---------------------------------------------------------------
@@ -318,6 +422,18 @@ private fun NotebooksScreen(
         EmptyHint("No hay cuadernos todavía.\nSincroniza para descargarlos.")
         return
     }
+    // Agrupación por categoría (opt-in): solo se muestran cabeceras si algún
+    // cuaderno tiene categoría. El grupo "Sin categoría" (null) va al final.
+    val hasCategories = notebooks.any { !it.category.isNullOrBlank() }
+    val groups: List<Pair<String?, List<Notebook>>> =
+        if (!hasCategories) {
+            listOf(null to notebooks)
+        } else {
+            notebooks
+                .groupBy { it.category?.trim()?.ifBlank { null } }
+                .toList()
+                .sortedWith(compareBy({ it.first == null }, { it.first?.lowercase() ?: "" }))
+        }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(160.dp),
         contentPadding = PaddingValues(12.dp),
@@ -325,7 +441,35 @@ private fun NotebooksScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        gridItems(notebooks, key = { it.id }) { nb -> NotebookCard(vm, nb, onOpen, onEdit) }
+        groups.forEach { (category, items) ->
+            if (hasCategories) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    CategoryHeader(category ?: "Sin categoría", items.size)
+                }
+            }
+            gridItems(items, key = { it.id }) { nb -> NotebookCard(vm, nb, onOpen, onEdit) }
+        }
+    }
+}
+
+/** Cabecera de sección de categoría dentro de la rejilla de cuadernos. */
+@Composable
+private fun CategoryHeader(label: String, count: Int) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -554,17 +698,39 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
 
 @Composable
 private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage: (String) -> Unit) {
-    val items by vm.inbox.collectAsStateWithLifecycle()
-    if (items.isEmpty()) {
-        EmptyHint("Bandeja vacía.")
-        return
+    val items by vm.recent.collectAsStateWithLifecycle()
+    var query by rememberSaveable { mutableStateOf("") }
+    val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    val filtered = if (terms.isEmpty()) items else items.filter { c ->
+        val hay = buildString {
+            append(c.name.lowercase())
+            c.transcription?.let {
+                append(' ').append(it.title?.lowercase() ?: "").append(' ').append(it.text?.lowercase() ?: "")
+            }
+            c.tags.forEach { append(' ').append(it.lowercase()) }
+        }
+        terms.all { hay.contains(it) }
     }
-    LazyColumn(
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        items(items, key = { it.id }) { c -> PageListRow(vm, c, notebooks, onClick = { onOpenPage(c.id) }) }
+
+    Column(Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Buscar por nombre, texto o etiqueta") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+        if (filtered.isEmpty()) {
+            EmptyHint(if (items.isEmpty()) "Aún no hay ediciones." else "Sin resultados para la búsqueda.")
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(filtered, key = { it.id }) { c -> PageListRow(vm, c, notebooks, onClick = { onOpenPage(c.id) }) }
+            }
+        }
     }
 }
 
@@ -647,11 +813,16 @@ private fun CaptureActions(
 
 // --- Boli --------------------------------------------------------------------
 
+private val SHUTDOWN_OPTIONS = listOf(5, 10, 20, 30, 60)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PenScreen(vm: MainViewModel, onBack: () -> Unit) {
+private fun PenTabContent(vm: MainViewModel) {
     val state by vm.penState.collectAsStateWithLifecycle()
+    val logs by vm.penLogs.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var penTab by rememberSaveable { mutableIntStateOf(0) }
+    var showLogs by rememberSaveable { mutableStateOf(false) }
     val perms = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -666,46 +837,170 @@ private fun PenScreen(vm: MainViewModel, onBack: () -> Unit) {
         val granted = perms.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
         if (granted) vm.connectPen() else launcher.launch(perms)
     }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Boli Neo M1+") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") } },
-            )
-        },
-    ) { padding ->
-        Column(
-            Modifier.padding(padding).fillMaxSize().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(penDotColor(state.status))
-                Spacer(Modifier.size(8.dp))
-                Text("Estado: ${penStatusLabel(state.status)}", style = MaterialTheme.typography.bodyLarge)
-            }
-            state.name?.let { Text("Dispositivo: $it", style = MaterialTheme.typography.bodyMedium) }
-            state.settings.battery?.let { Text("Batería: $it%", style = MaterialTheme.typography.bodyMedium) }
-            if (state.capturedPages > 0) {
-                Text("Páginas capturadas: ${state.capturedPages}", style = MaterialTheme.typography.bodyMedium)
-            }
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Spacer(Modifier.size(8.dp))
-            if (state.connected) {
-                OutlinedButton(onClick = vm::importOffline, modifier = Modifier.fillMaxWidth()) { Text("Importar memoria offline") }
-                OutlinedButton(onClick = vm::disconnectPen, modifier = Modifier.fillMaxWidth()) { Text("Desconectar") }
-            } else {
-                val busy = state.status == PenStatus.SCANNING || state.status == PenStatus.CONNECTING
-                Button(onClick = connect, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (busy) "Conectando…" else "Conectar")
+    val busy = state.status == PenStatus.SCANNING || state.status == PenStatus.CONNECTING
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // Estado + métricas en tarjeta.
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(penDotColor(state.status))
+                    Spacer(Modifier.size(8.dp))
+                    Text(state.name ?: state.mac ?: "Boli Neo M1+", style = MaterialTheme.typography.titleMedium)
                 }
+                Text("Estado: ${penStatusLabel(state.status)}", style = MaterialTheme.typography.bodyMedium)
+                state.settings.battery?.let {
+                    Text("Batería: $it%${if (state.settings.charging) " ⚡" else ""}", style = MaterialTheme.typography.bodyMedium)
+                }
+                state.settings.usedMem?.let { Text("Memoria: ${100 - it}% libre", style = MaterialTheme.typography.bodyMedium) }
+                if (state.capturedPages > 0) {
+                    Text("Páginas capturadas: ${state.capturedPages}", style = MaterialTheme.typography.bodyMedium)
+                }
+                state.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
+        }
+
+        if (busy) {
+            OutlinedButton(onClick = vm::stopConnecting, modifier = Modifier.fillMaxWidth()) { Text("Detener conexión") }
+        } else {
+            Button(onClick = connect, modifier = Modifier.fillMaxWidth()) {
+                Text(if (state.connected) "Reconectar" else "Conectar boli")
+            }
+        }
+
+        if (state.connected) {
+            SecondaryTabRow(selectedTabIndex = penTab) {
+                Tab(penTab == 0, { penTab = 0 }, text = { Text("Configuración") })
+                Tab(penTab == 1, { penTab = 1 }, text = { Text("Memoria") })
+            }
+            when (penTab) {
+                0 -> PenConfigTab(state, vm)
+                else -> PenMemoryTab(state, vm)
+            }
+        } else {
             Text(
-                "Escribe en papel Ncode: las páginas aparecen al instante en la Bandeja y se suben al servidor al reconectar.",
+                "Necesita un Neo smartpen M1+ encendido y permisos de Bluetooth. Escribe en papel Ncode: las páginas aparecen en la Bandeja y se suben al servidor.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        HorizontalDivider()
+        OutlinedButton(onClick = { showLogs = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Ver registro de conexión (${logs.size})")
+        }
     }
+
+    if (showLogs) {
+        PenDebugLogDialog(logs, onClear = vm::clearLogs, onDismiss = { showLogs = false })
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        PenToggleRow("Encendido automático", "Se enciende al empezar a escribir", state.settings.autoPowerOn ?: false, vm::setAutoPowerOn)
+        PenToggleRow("Sonido del lápiz", "Pitido al escribir", state.settings.beep ?: false, vm::setBeep)
+        PenToggleRow("Guardar offline", "Almacena la escritura sin la app abierta", state.settings.offlineData ?: false, vm::setOfflineData)
+        Spacer(Modifier.size(8.dp))
+        Text("Apagado automático", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val current = state.settings.autoShutdownTime ?: 20
+            SHUTDOWN_OPTIONS.forEach { m ->
+                FilterChip(selected = current == m, onClick = { vm.setAutoShutdown(m) }, label = { Text("$m min") })
+            }
+        }
+        HorizontalDivider(Modifier.padding(vertical = 12.dp))
+        state.mac?.let { Text("MAC: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        state.firmware?.let { Text("Firmware: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+@Composable
+private fun PenMemoryTab(state: net.micapum.neopen.core.pen.PenState, vm: MainViewModel) {
+    val idle = state.offlinePhase == net.micapum.neopen.core.pen.OfflinePhase.IDLE
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = vm::listOffline, enabled = idle, modifier = Modifier.weight(1f)) { Text("Leer memoria") }
+            if (!state.notes.isNullOrEmpty()) {
+                FilledTonalButton(onClick = vm::importOffline, enabled = idle, modifier = Modifier.weight(1f)) { Text("Importar todo") }
+            }
+        }
+        if (state.offlinePhase == net.micapum.neopen.core.pen.OfflinePhase.TRANSFERRING) {
+            Text("Importando… ${state.offlineProgress}%", style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(progress = { state.offlineProgress / 100f }, modifier = Modifier.fillMaxWidth())
+        }
+        state.notes?.let { notes ->
+            if (notes.isEmpty()) {
+                Text("El boli no tiene notas guardadas.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Card {
+                    Column {
+                        notes.forEachIndexed { i, n ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column {
+                                    Text("${n.section}.${n.owner}.${n.note}", style = MaterialTheme.typography.bodyMedium)
+                                    n.pages?.let { Text("$it páginas", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                }
+                                TextButton(onClick = { vm.importNote(n) }, enabled = idle) { Text("Importar") }
+                            }
+                            if (i < notes.lastIndex) HorizontalDivider()
+                        }
+                    }
+                }
+                TextButton(onClick = vm::clearOffline) {
+                    Text("Vaciar memoria del boli", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PenToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked, onChange)
+    }
+}
+
+@Composable
+private fun PenDebugLogDialog(logs: List<String>, onClear: () -> Unit, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    val text = if (logs.isEmpty()) "(sin registros — pulsa «Conectar boli»)" else logs.joinToString("\n")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Registro de conexión") },
+        text = {
+            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                Text(text, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { clipboard.setText(AnnotatedString(text)) }) { Text("Copiar") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onClear) { Text("Limpiar") }
+                TextButton(onClick = onDismiss) { Text("Cerrar") }
+            }
+        },
+    )
 }
 
 private fun penStatusLabel(status: PenStatus): String = when (status) {
@@ -723,16 +1018,105 @@ private fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Servidor", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(settings.serverUrl, style = MaterialTheme.typography.bodyLarge)
-        Spacer(Modifier.size(4.dp))
-        Text("Pendiente de subir: $pending", style = MaterialTheme.typography.bodyMedium)
+    val check by vm.serverCheck.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var url by rememberSaveable(settings.serverUrl) { mutableStateOf(settings.serverUrl) }
+    var pw by rememberSaveable(settings.password) { mutableStateOf(settings.password) }
+    var mode by rememberSaveable(settings.appMode) { mutableStateOf(settings.appMode) }
+    var syncMode by rememberSaveable(settings.syncMode) { mutableStateOf(settings.syncMode) }
+    var interval by rememberSaveable(settings.syncIntervalMin) { mutableStateOf(settings.syncIntervalMin.toString()) }
+    var background by rememberSaveable(settings.backgroundEnabled) { mutableStateOf(settings.backgroundEnabled) }
+    var backupMsg by rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun persist() {
+        vm.saveSettings(
+            AppSettings(
+                serverUrl = url, password = pw, backgroundEnabled = background,
+                syncMode = syncMode, syncIntervalMin = interval.toIntOrNull() ?: 30,
+                appMode = mode, setupComplete = true,
+            ),
+        )
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri: Uri? ->
+        if (uri != null) scope.launch {
+            val bytes = vm.exportBackup()
+            backupMsg = if (bytes != null && runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                }.isSuccess) "Copia exportada." else "No se pudo exportar."
+        }
+    }
+    val restoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) scope.launch {
+            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            backupMsg = if (bytes != null && vm.restoreBackup(bytes)) "Copia restaurada." else "No se pudo restaurar."
+        }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // --- Servidor ---
+        Text("Servidor neopen", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text("URL del servidor") },
+            singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text("Contraseña") },
+            visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedButton(onClick = { vm.testServer(url, pw) }, enabled = check != ServerCheck.Checking,
+            modifier = Modifier.fillMaxWidth()) {
+            if (check == ServerCheck.Checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            else Text("Probar conexión")
+        }
+        ServerCheckResult(check)
+
+        HorizontalDivider()
+        // --- Modo de la app ---
+        Text("Modo de la app", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(mode == AppMode.FULL, { mode = AppMode.FULL }, label = { Text("Completo") })
+            FilterChip(mode == AppMode.BRIDGE, { mode = AppMode.BRIDGE }, label = { Text("Solo puente") })
+        }
+
+        HorizontalDivider()
+        // --- Sincronización del boli ---
+        Text("Bluetooth y sincronización", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        PenToggleRow("Conexión en segundo plano", "Mantiene el boli conectado con la app cerrada", background) { background = it }
+        Text("Volcado de la memoria offline", style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(syncMode == SyncMode.MANUAL, { syncMode = SyncMode.MANUAL }, label = { Text("Manual") })
+            FilterChip(syncMode == SyncMode.INTERVAL, { syncMode = SyncMode.INTERVAL }, label = { Text("Por intervalo") })
+        }
+        if (syncMode == SyncMode.INTERVAL) {
+            OutlinedTextField(interval, { interval = it.filter(Char::isDigit) },
+                label = { Text("Intervalo (min, mín. 15)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
+
+        Button(onClick = { persist() }, modifier = Modifier.fillMaxWidth()) { Text("Guardar ajustes") }
+        OutlinedButton(onClick = vm::syncNow, modifier = Modifier.fillMaxWidth()) { Text("Sincronizar ahora") }
+        Text("Pendiente de subir: $pending", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (status != null) {
             Text("Último error: $status", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
-        Spacer(Modifier.size(8.dp))
-        OutlinedButton(onClick = vm::syncNow, modifier = Modifier.fillMaxWidth()) { Text("Sincronizar ahora") }
+
+        HorizontalDivider()
+        // --- Copia de seguridad ---
+        Text("Copia de seguridad", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text("Exporta o restaura todo el contenido del servidor (cuadernos y hojas) como un fichero JSON.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { backupMsg = null; exportLauncher.launch("neopen-backup.json") }, modifier = Modifier.weight(1f)) { Text("Exportar") }
+            OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.weight(1f)) { Text("Restaurar") }
+        }
+        backupMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+        HorizontalDivider()
         TextButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) {
             Text("Cerrar sesión", color = MaterialTheme.colorScheme.error)
         }
@@ -747,12 +1131,15 @@ private fun NotebookEditorDialog(
     initialName: String,
     initialColor: String,
     initialTags: List<String>,
-    onConfirm: (String, String, List<String>) -> Unit,
+    initialCategory: String,
+    categorySuggestions: List<String>,
+    onConfirm: (String, String, List<String>, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember { mutableStateOf(initialName) }
     var color by remember { mutableStateOf(initialColor) }
     var tagsText by remember { mutableStateOf(initialTags.joinToString(", ")) }
+    var category by remember { mutableStateOf(initialCategory) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -765,6 +1152,18 @@ private fun NotebookEditorDialog(
                 ColorSwatches(color) { color = it }
                 Spacer(Modifier.size(12.dp))
                 OutlinedTextField(
+                    category,
+                    { category = it },
+                    label = { Text("Categoría (opcional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (categorySuggestions.isNotEmpty()) {
+                    Spacer(Modifier.size(6.dp))
+                    CategorySuggestions(categorySuggestions, selected = category) { category = it }
+                }
+                Spacer(Modifier.size(12.dp))
+                OutlinedTextField(
                     tagsText,
                     { tagsText = it },
                     label = { Text("Etiquetas (separadas por comas)") },
@@ -773,10 +1172,22 @@ private fun NotebookEditorDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim(), color, parseTags(tagsText)) }) { Text("Guardar") }
+            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim(), color, parseTags(tagsText), category.trim()) }) { Text("Guardar") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
+}
+
+/** Chips de categorías existentes; al pulsar una, rellena el campo (toggle). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategorySuggestions(suggestions: List<String>, selected: String, onPick: (String) -> Unit) {
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (c in suggestions) {
+            val active = c.equals(selected.trim(), ignoreCase = true)
+            FilterChip(selected = active, onClick = { onPick(if (active) "" else c) }, label = { Text(c) })
+        }
+    }
 }
 
 @Composable

@@ -52,6 +52,7 @@ data class Notebook(
     val coverUrl: String?,
     val unclassified: Boolean,
     val custom: Boolean,
+    val category: String? = null,
     val pageCount: Int = 0,
 )
 

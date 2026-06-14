@@ -205,9 +205,23 @@ object Protocol {
         return buildFrame(OFFLINE_DATA_REQUEST, bb.array())
     }
 
-    /** ACK de un chunk offline (APP→PEN). */
-    fun resOfflinePacket(index: Int): ByteArray =
-        buildFrame(OFFLINE_PACKET_RESPONSE, le(4).putInt(index).array())
+    /**
+     * ACK de un chunk offline (APP→PEN), fiel al SDK (`ReqOfflineData2`): tras el
+     * CMD lleva un byte de éxito ANTES de la longitud, y el payload es
+     * [index(2 LE), endByte]. `endByte` = 0 si es el último, 1 si quedan más.
+     */
+    fun resOfflinePacket(index: Int, end: Boolean = false): ByteArray {
+        val out = ArrayList<Byte>(10)
+        out.add(STX.toByte())
+        putEscaped(out, OFFLINE_PACKET_RESPONSE)
+        putEscaped(out, 0)                       // result/éxito = 0 (OK)
+        putEscaped(out, 3); putEscaped(out, 0)   // longitud = 3 (LE short)
+        putEscaped(out, index and 0xff)
+        putEscaped(out, (index shr 8) and 0xff)  // index (LE short)
+        putEscaped(out, if (end) 0 else 1)       // endByte
+        out.add(ETX.toByte())
+        return out.toByteArray()
+    }
 
     fun reqOfflineDelete(section: Int, owner: Int, notes: IntArray): ByteArray {
         val bb = le(5 + notes.size * 4)
@@ -305,6 +319,95 @@ object Protocol {
             val note = i32(data, o + 4)
             out.add(OfflineNote(section, owner, note))
             o += 8
+        }
+        return out
+    }
+
+    /** OFFLINE_DATA_RESPONSE (0xa3) → nº total de trazos del volcado (para el %). */
+    fun parseOfflineTotalStrokes(data: ByteArray): Int = i32(data, 0)
+
+    /** Cabecera + datos de un chunk offline (OFFLINE_PACKET_REQUEST, 0x24). */
+    data class OfflineChunk(
+        val packetId: Int,
+        val isCompressed: Boolean,
+        val beforeSize: Int,
+        val afterSize: Int,
+        val transPosition: Int, // 0 inicio, 1 medio, 2 fin
+        val section: Int,
+        val owner: Int,
+        val note: Int,
+        val strokeCount: Int,
+        val data: ByteArray,
+    )
+
+    /** Parsea la cabecera del chunk offline y extrae sus bytes de datos (crudos). */
+    fun parseOfflineChunk(d: ByteArray): OfflineChunk {
+        var o = 0
+        val packetId = u16(d, o); o += 2
+        val isCompressed = u8(d, o) == 1; o += 1
+        val beforeSize = u16(d, o); o += 2
+        val afterSize = u16(d, o); o += 2
+        val transPosition = u8(d, o); o += 1
+        val owner = u8(d, o) or (u8(d, o + 1) shl 8) or (u8(d, o + 2) shl 16)
+        val section = u8(d, o + 3); o += 4
+        val note = i32(d, o); o += 4
+        val strokeCount = u16(d, o); o += 2
+        val size = if (isCompressed) afterSize else beforeSize
+        val end = minOf(o + size, d.size)
+        return OfflineChunk(
+            packetId, isCompressed, beforeSize, afterSize, transPosition,
+            section, owner, note, strokeCount, d.copyOfRange(o, end),
+        )
+    }
+
+    /**
+     * Parsea los strokes/dots de los datos offline (ya descomprimidos). section,
+     * owner y note vienen del chunk; cada stroke trae su `page`, así que se
+     * etiqueta cada trazo con su SOBP de página. Layout fiel a
+     * `ParseSDK2OfflinePenData` del SDK.
+     */
+    fun parseOfflineStrokes(
+        d: ByteArray,
+        section: Int,
+        owner: Int,
+        note: Int,
+        strokeCount: Int,
+    ): List<Pair<Sobp, Stroke>> {
+        val out = ArrayList<Pair<Sobp, Stroke>>(strokeCount)
+        var o = 0
+        repeat(strokeCount) {
+            if (o + 27 > d.size) return out // cabecera de stroke = 27 bytes
+            val page = i32(d, o); o += 4
+            var time = u64(d, o); o += 8 // downTime
+            o += 8 // upTime (no usado)
+            o += 1 // penTipType (no usado)
+            o += 4 // penTipColor (no usado)
+            val dotCount = u16(d, o); o += 2
+            val start = time
+            val sobp = Sobp(section, owner, note, page)
+            val dots = ArrayList<Dot>(dotCount)
+            for (j in 0 until dotCount) {
+                if (o + 16 > d.size) return out // cada dot = 16 bytes
+                val nTimeDelta = u8(d, o); o += 1
+                val force = u16(d, o); o += 2
+                val xi = u16(d, o); o += 2
+                val yi = u16(d, o); o += 2
+                val fx = u8(d, o); o += 1
+                val fy = u8(d, o); o += 1
+                o += 1 // xtilt
+                o += 1 // ytilt
+                o += 2 // twist
+                o += 2 // reservado
+                o += 1 // checksum
+                time += nTimeDelta
+                val type = when {
+                    j == 0 -> DOT_DOWN
+                    j == dotCount - 1 -> DOT_UP
+                    else -> DOT_MOVE
+                }
+                dots.add(Dot(xi + fx * 0.01f, yi + fy * 0.01f, force.toFloat(), time, type))
+            }
+            out.add(sobp to Stroke(start, time, dots))
         }
         return out
     }

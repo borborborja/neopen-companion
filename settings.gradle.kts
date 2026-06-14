@@ -14,4 +14,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "neopen-companion"
-include(":core", ":companion", ":neopen")
+// App unificada: :neopen (completa, con modo "solo puente" integrado). :companion
+// quedó retirado del build tras fusionarse en :neopen.
+include(":core", ":neopen")
