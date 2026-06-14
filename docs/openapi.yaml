@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: neopen API
-  version: "0.2.0"
+  version: "0.3.0"
   description: |
     Contrato de la API del servidor neopen, pensado como **fuente de verdad para
     clientes nativos** (companion Android/iOS) además del frontend web.
@@ -27,6 +27,8 @@ tags:
     description: Registro del boli
   - name: notebooks
     description: Cuadernos (solo lectura para un companion)
+  - name: sync
+    description: Sincronización incremental (delta-sync para la app completa offline)
   - name: meta
     description: Salud y capacidades
 
@@ -109,11 +111,12 @@ paths:
   /api/captures/{id}:
     delete:
       tags: [captures]
-      summary: Borra una captura
+      summary: Borra una captura (idempotente)
+      description: Idempotente — si ya estaba borrada (existe tombstone) devuelve 204, no 404.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
-        "204": { description: Borrada }
+        "204": { description: Borrada (o ya borrada previamente) }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -195,6 +198,31 @@ paths:
                   notebooks:
                     type: array
                     items: { $ref: "#/components/schemas/Notebook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/changes:
+    get:
+      tags: [sync]
+      summary: Cambios incrementales desde un cursor (delta-sync de la app completa)
+      description: |
+        Devuelve las capturas y cuadernos con `rev > since`, los borrados
+        (tombstones) y el nuevo `cursor`. Pagina con `hasMore`. Si `since`
+        supera la cabeza (BD recreada/restaurada) responde `reset: true` con el
+        estado completo: el cliente debe vaciar su copia local y re-sincronizar.
+      parameters:
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: Último cursor recibido (0 = desde cero).
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+      responses:
+        "200":
+          description: Lote de cambios
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChangesResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
 components:
@@ -302,10 +330,12 @@ components:
       allOf:
         - $ref: "#/components/schemas/CreateCaptureInput"
         - type: object
-          required: [id, importedAt, destination, position]
+          required: [id, rev, importedAt, updatedAt, destination, position]
           properties:
             id: { type: string }
+            rev: { type: integer, description: Revisión global monótona (cursor del delta-sync). }
             importedAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time, description: Última modificación (last-write-wins). }
             destination: { type: string, enum: [inbox, notebook, loose] }
             notebookId: { type: string }
             position: { type: integer }
@@ -313,6 +343,32 @@ components:
             transcription:
               type: object
               description: Resultado del OCR/HTR, si la hoja se ha transcrito.
+
+    Deletion:
+      type: object
+      description: Un borrado propagado a los clientes de sync (tombstone).
+      required: [id, kind, rev]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [capture, notebook] }
+        rev: { type: integer }
+
+    ChangesResponse:
+      type: object
+      required: [cursor, hasMore, captures, notebooks, deletions]
+      properties:
+        cursor: { type: integer, description: "Nuevo cursor; pásalo como ?since= en la siguiente petición." }
+        hasMore: { type: boolean, description: "Quedan más cambios por encima del cursor (paginar)." }
+        reset: { type: boolean, description: "El historial previo no es válido; vaciar y re-sincronizar desde cero." }
+        captures:
+          type: array
+          items: { $ref: "#/components/schemas/Capture" }
+        notebooks:
+          type: array
+          items: { $ref: "#/components/schemas/Notebook" }
+        deletions:
+          type: array
+          items: { $ref: "#/components/schemas/Deletion" }
 
     PenInfo:
       type: object
@@ -327,9 +383,10 @@ components:
 
     Notebook:
       type: object
-      required: [id, name, color, tags, createdAt, updatedAt]
+      required: [id, rev, name, color, tags, createdAt, updatedAt]
       properties:
         id: { type: string }
+        rev: { type: integer, description: Revisión global monótona (cursor del delta-sync). }
         name: { type: string }
         color: { type: string }
         tags:

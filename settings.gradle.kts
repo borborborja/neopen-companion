@@ -14,4 +14,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "neopen-companion"
-include(":app")
+include(":core", ":companion", ":neopen")
