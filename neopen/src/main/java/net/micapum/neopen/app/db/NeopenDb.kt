@@ -93,6 +93,9 @@ interface CaptureDao {
     @Query("SELECT * FROM captures WHERE id = :id")
     suspend fun getById(id: String): CaptureEntity?
 
+    @Query("SELECT * FROM captures WHERE id = :id")
+    fun observeById(id: String): Flow<CaptureEntity?>
+
     @Query("SELECT * FROM captures ORDER BY importedAt DESC")
     fun observeAll(): Flow<List<CaptureEntity>>
 

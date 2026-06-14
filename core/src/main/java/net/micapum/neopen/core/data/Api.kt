@@ -166,6 +166,10 @@ interface NeopenApi {
     @GET("api/notebooks")
     suspend fun listNotebooks(@Header("X-Auth-Password") password: String): NotebooksResponseDto
 
+    /** Cuaderno reservado "Sin clasificar" (se crea en el servidor si no existe). */
+    @GET("api/notebooks/unclassified")
+    suspend fun unclassifiedNotebook(@Header("X-Auth-Password") password: String): NotebookDto
+
     @GET("api/changes")
     suspend fun changes(
         @Header("X-Auth-Password") password: String,

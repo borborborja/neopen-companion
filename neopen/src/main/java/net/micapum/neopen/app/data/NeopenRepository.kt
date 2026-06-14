@@ -57,6 +57,8 @@ class NeopenRepository(private val db: NeopenDb) {
 
     suspend fun capture(id: String): Capture? = db.captures().getById(id)?.toDomain()
 
+    fun captureFlow(id: String): Flow<Capture?> = db.captures().observeById(id).map { it?.toDomain() }
+
     suspend fun notebook(id: String): Notebook? = db.notebooks().getById(id)?.toDomain()
 
     fun pendingCount(): Flow<Int> = db.outbox().observeCount()
@@ -131,23 +133,38 @@ class NeopenRepository(private val db: NeopenDb) {
         enqueue(OutboxKind.REORDER_NOTEBOOK, notebookId, Json.reorder.toJson(ReorderDto(orderedIds)))
     }
 
-    suspend fun createNotebook(name: String, color: String): String {
+    suspend fun createNotebook(name: String, color: String, tags: List<String> = emptyList()): String {
         val tempId = "local-" + UUID.randomUUID()
         val now = nowIso()
         db.notebooks().upsertOne(
-            NotebookEntity(id = tempId, rev = 0, name = name, color = color, createdAt = now, updatedAt = now),
+            NotebookEntity(
+                id = tempId,
+                rev = 0,
+                name = name,
+                color = color,
+                tagsJson = Json.tagsJson(tags),
+                createdAt = now,
+                updatedAt = now,
+            ),
         )
-        enqueue(OutboxKind.CREATE_NOTEBOOK, tempId, Json.notebookCreate.toJson(NotebookCreateDto(name, color)))
+        enqueue(OutboxKind.CREATE_NOTEBOOK, tempId, Json.notebookCreate.toJson(NotebookCreateDto(name, color, tags)))
         return tempId
     }
 
-    suspend fun renameNotebook(id: String, name: String?, color: String?) {
+    suspend fun editNotebook(id: String, name: String?, color: String?, tags: List<String>?) {
         val e = db.notebooks().getById(id) ?: return
-        db.notebooks().upsertOne(e.copy(name = name ?: e.name, color = color ?: e.color, updatedAt = nowIso()))
+        db.notebooks().upsertOne(
+            e.copy(
+                name = name ?: e.name,
+                color = color ?: e.color,
+                tagsJson = if (tags != null) Json.tagsJson(tags) else e.tagsJson,
+                updatedAt = nowIso(),
+            ),
+        )
         enqueue(
             OutboxKind.PATCH_NOTEBOOK,
             id,
-            Json.notebookPatch.toJson(NotebookPatchDto(name = name, color = color)),
+            Json.notebookPatch.toJson(NotebookPatchDto(name = name, color = color, tags = tags)),
         )
     }
 

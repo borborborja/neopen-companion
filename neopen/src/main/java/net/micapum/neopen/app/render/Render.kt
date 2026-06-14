@@ -69,16 +69,12 @@ private fun computeBounds(strokes: List<StrokeDto>): Bounds {
     return Bounds(minX, minY, maxX, maxY)
 }
 
-/** Rasteriza una página a PNG (fondo blanco, tinta #111) para enviar al OCR. */
-fun rasterizePng(strokes: List<StrokeDto>, paper: PaperDto?): ByteArray {
-    val m = buildModel(strokes, paper)
-    val w = m.width.toInt().coerceIn(1, 4000)
-    val h = m.height.toInt().coerceIn(1, 4000)
-    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(bmp)
-    canvas.drawColor(android.graphics.Color.WHITE)
+internal const val INK = 0xFF111111.toInt()
+
+/** Pinta las polilíneas del modelo en un Canvas de android.graphics (PNG/PDF). */
+internal fun drawModelTo(canvas: android.graphics.Canvas, m: RenderModel) {
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF111111.toInt()
+        color = INK
         style = Paint.Style.STROKE
         strokeWidth = m.strokeWidth
         strokeCap = Paint.Cap.ROUND
@@ -94,6 +90,26 @@ fun rasterizePng(strokes: List<StrokeDto>, paper: PaperDto?): ByteArray {
         pts.forEachIndexed { i, p -> if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y) }
         canvas.drawPath(path, paint)
     }
+}
+
+/**
+ * Rasteriza una página a PNG (fondo blanco, tinta #111). `dpiScale=2` para
+ * export/OCR nítidos (igual que la web, que exporta a 2×).
+ */
+fun rasterizePng(strokes: List<StrokeDto>, paper: PaperDto?, dpiScale: Float = 2f): ByteArray {
+    val m = buildModel(
+        strokes,
+        paper,
+        scale = 28f * dpiScale,
+        padding = 24f * dpiScale,
+        strokeWidth = 1.6f * dpiScale,
+    )
+    val w = m.width.toInt().coerceIn(1, 6000)
+    val h = m.height.toInt().coerceIn(1, 6000)
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    canvas.drawColor(android.graphics.Color.WHITE)
+    drawModelTo(canvas, m)
     val out = java.io.ByteArrayOutputStream()
     bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
     bmp.recycle()
