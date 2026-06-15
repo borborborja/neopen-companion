@@ -48,9 +48,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Flag
-import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.filled.Draw
@@ -100,6 +100,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -247,7 +248,7 @@ fun AppRoot(
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (current) {
                 HomeTab.INBOX -> InboxScreen(vm, notebooks, onOpenPage = { openPageId = it })
-                HomeTab.NOTEBOOKS -> NotebooksScreen(vm, notebooks, onOpen = { openNotebookId = it }, onEdit = { editingId = it })
+                HomeTab.NOTEBOOKS -> NotebooksScreen(vm, notebooks, onOpen = { openNotebookId = it }, onOpenPage = { openPageId = it }, onEdit = { editingId = it })
                 HomeTab.PEN -> PenTabContent(vm)
                 HomeTab.SETTINGS -> SettingsScreen(vm)
             }
@@ -439,9 +440,13 @@ private fun NotebooksScreen(
     vm: MainViewModel,
     notebooks: List<Notebook>,
     onOpen: (String) -> Unit,
+    onOpenPage: (String) -> Unit,
     onEdit: (String) -> Unit,
 ) {
-    var mode by rememberSaveable { mutableStateOf(NotebookView.Mosaic) }
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val mode = runCatching { NotebookView.valueOf(settings.notebookView) }.getOrDefault(NotebookView.Mosaic)
+    // Qué cuadernos están desplegados en la vista lista (se pierde al cerrar la app).
+    val expanded = remember { mutableStateMapOf<String, Boolean>() }
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
@@ -450,9 +455,9 @@ private fun NotebooksScreen(
             Text("Cuadernos", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             val active = MaterialTheme.colorScheme.primary
             val muted = MaterialTheme.colorScheme.onSurfaceVariant
-            IconButton({ mode = NotebookView.Mosaic }) { Icon(Icons.Filled.GridView, "Mosaico", tint = if (mode == NotebookView.Mosaic) active else muted) }
-            IconButton({ mode = NotebookView.Compact }) { Icon(Icons.Filled.Apps, "Compacto", tint = if (mode == NotebookView.Compact) active else muted) }
-            IconButton({ mode = NotebookView.List }) { Icon(Icons.AutoMirrored.Filled.ViewList, "Lista", tint = if (mode == NotebookView.List) active else muted) }
+            IconButton({ vm.setNotebookView(NotebookView.Mosaic.name) }) { Icon(Icons.Filled.GridView, "Mosaico", tint = if (mode == NotebookView.Mosaic) active else muted) }
+            IconButton({ vm.setNotebookView(NotebookView.Compact.name) }) { Icon(Icons.Filled.Apps, "Compacto", tint = if (mode == NotebookView.Compact) active else muted) }
+            IconButton({ vm.setNotebookView(NotebookView.List.name) }) { Icon(Icons.AutoMirrored.Filled.ViewList, "Lista", tint = if (mode == NotebookView.List) active else muted) }
         }
         if (notebooks.isEmpty()) {
             EmptyHint("No hay cuadernos todavía.\nSincroniza para descargarlos.")
@@ -474,13 +479,24 @@ private fun NotebooksScreen(
             NotebookView.Mosaic -> NotebookGrid(groups, hasCategories, 150.dp, false, vm, onOpen, onEdit)
             NotebookView.Compact -> NotebookGrid(groups, hasCategories, 104.dp, true, vm, onOpen, onEdit)
             NotebookView.List -> LazyColumn(
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 groups.forEach { (category, list) ->
-                    if (hasCategories) item(key = "cat-$category") { CategoryHeader(category ?: "Sin categoría", list.size) }
-                    items(list, key = { it.id }) { nb -> NotebookListRow(vm, nb, onOpen, onEdit) }
+                    if (hasCategories) item(key = "cat-$category") {
+                        CategoryHeader(category ?: "Sin categoría", list.size, Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                    }
+                    items(list, key = { it.id }) { nb ->
+                        NotebookTreeRow(
+                            vm = vm,
+                            nb = nb,
+                            notebooks = notebooks,
+                            expanded = expanded[nb.id] == true,
+                            onToggle = { expanded[nb.id] = !(expanded[nb.id] == true) },
+                            onOpenPage = onOpenPage,
+                            onEdit = onEdit,
+                        )
+                    }
                 }
             }
         }
@@ -517,9 +533,9 @@ private fun NotebookGrid(
 
 /** Cabecera de sección de categoría dentro de la rejilla de cuadernos. */
 @Composable
-private fun CategoryHeader(label: String, count: Int) {
+private fun CategoryHeader(label: String, count: Int, modifier: Modifier = Modifier) {
     Row(
-        Modifier.fillMaxWidth().padding(top = 4.dp),
+        modifier.fillMaxWidth().padding(top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -564,7 +580,10 @@ private fun notebookCoverModel(serverUrl: String, nb: Notebook): Any? {
     return absoluteUrl(serverUrl, path)
 }
 
-/** Tile de cuaderno: color de fondo + portada por delante + título/menú en overlay abajo. */
+/** Para volver a mostrar la miniatura de portada en la vista lista, pon a true. */
+private const val LIST_SHOW_COVER = false
+
+/** Tarjeta de cuaderno (mosaico/compacto): portada (o color) arriba + texto debajo. */
 @Composable
 private fun NotebookCard(
     vm: MainViewModel,
@@ -575,12 +594,14 @@ private fun NotebookCard(
 ) {
     val cover = notebookCoverModel(vm.serverUrl(), nb)
     val noFormat = nb.paper == null && !nb.unclassified && !nb.custom
+    // Con portada: proporción de libreta; sin portada (local): franja fina de color.
+    val coverAspect = if (cover != null) 1.5f else 2.6f
     Card(
         onClick = { onOpen(nb.id) },
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(0.74f)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(coverAspect)) {
             Box(Modifier.matchParentSize().background(parseColor(nb.color)))
             if (cover != null) {
                 AsyncImage(
@@ -603,50 +624,54 @@ private fun NotebookCard(
                     color = MaterialTheme.colorScheme.onErrorContainer,
                 )
             }
-            CompositionLocalProvider(LocalContentColor provides Color.White) {
-                Row(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))
-                        .padding(start = 10.dp, end = 2.dp, top = 16.dp, bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            nb.name,
-                            style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        if (!compact) {
-                            Text(
-                                "${nb.pageCount} ${if (nb.pageCount == 1) "hoja" else "hojas"}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.85f),
-                            )
-                        }
-                    }
-                    if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
+        }
+        Row(
+            Modifier.padding(start = 10.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    nb.name,
+                    style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!compact) {
+                    Text(
+                        "${nb.pageCount} ${if (nb.pageCount == 1) "hoja" else "hojas"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
+            if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
         }
     }
 }
 
-/** Fila de cuaderno (vista lista): miniatura de portada + nombre + nº hojas + menú. */
+/** Fila de cuaderno (vista lista): detalle de color + nombre; al pulsar despliega sus hojas. */
 @Composable
-private fun NotebookListRow(vm: MainViewModel, nb: Notebook, onOpen: (String) -> Unit, onEdit: (String) -> Unit) {
-    val cover = notebookCoverModel(vm.serverUrl(), nb)
-    Card(onClick = { onOpen(nb.id) }, modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
+private fun NotebookTreeRow(
+    vm: MainViewModel,
+    nb: Notebook,
+    notebooks: List<Notebook>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onOpenPage: (String) -> Unit,
+    onEdit: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(40.dp, 52.dp).clip(RoundedCornerShape(6.dp)).background(parseColor(nb.color))) {
-                if (cover != null) {
-                    AsyncImage(cover, nb.name, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+            if (LIST_SHOW_COVER) {
+                val cover = notebookCoverModel(vm.serverUrl(), nb)
+                Box(Modifier.size(36.dp, 46.dp).clip(RoundedCornerShape(5.dp)).background(parseColor(nb.color))) {
+                    if (cover != null) AsyncImage(cover, nb.name, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
                 }
+            } else {
+                Box(Modifier.size(14.dp).clip(CircleShape).background(parseColor(nb.color)))
             }
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
@@ -657,7 +682,31 @@ private fun NotebookListRow(vm: MainViewModel, nb: Notebook, onOpen: (String) ->
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Icon(
+                if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                if (expanded) "Contraer" else "Desplegar",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
+        }
+        if (expanded) {
+            val pages by vm.capturesIn(nb.id).collectAsStateWithLifecycle(initialValue = emptyList())
+            if (pages.isEmpty()) {
+                Text(
+                    "Sin hojas.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 40.dp, bottom = 10.dp),
+                )
+            } else {
+                Column(
+                    Modifier.padding(start = 24.dp, end = 8.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    pages.forEach { p -> PageListRow(vm, p, notebooks, onClick = { onOpenPage(p.id) }) }
+                }
+            }
+            HorizontalDivider()
         }
     }
 }
@@ -1394,6 +1443,7 @@ private fun SettingsScreen(vm: MainViewModel) {
                 recentShowCount = settings.recentShowCount,
                 recentClearedAt = settings.recentClearedAt,
                 finishMode = settings.finishMode,
+                notebookView = settings.notebookView,
             ),
         )
     }
