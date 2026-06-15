@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -14,7 +15,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -89,6 +92,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -130,6 +134,7 @@ import net.micapum.neopen.app.data.PaperPreset
 import net.micapum.neopen.app.data.paperFromPreset
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.InkCanvas
+import net.micapum.neopen.app.render.buildModel
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.SyncMode
@@ -922,15 +927,44 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
             Box(Modifier.padding(padding)) { EmptyHint("Cargando…") }
             return@Scaffold
         }
-        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
-            PageCanvas(vm, c, Modifier.fillMaxWidth().height(420.dp).background(Color.White))
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            // Proporción real de la hoja (papel o, sin papel, bbox de los trazos).
+            val aspect = remember(c.id, c.updatedAt) {
+                val m = buildModel(c.strokes, c.paper)
+                if (m.height > 0f) m.width / m.height else 0.75f
+            }
+            BoxWithConstraints(
+                Modifier.weight(1f).fillMaxWidth().padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                // "Contain": la hoja sale tan grande como cabe conservando su proporción.
+                val areaRatio = maxWidth.value / maxHeight.value
+                val sheetMod = if (areaRatio > aspect) {
+                    Modifier.fillMaxHeight().aspectRatio(aspect, matchHeightConstraintsFirst = true)
+                } else {
+                    Modifier.fillMaxWidth().aspectRatio(aspect)
+                }
+                Surface(
+                    modifier = sheetMod,
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    PageCanvas(vm, c, Modifier.fillMaxSize())
+                }
+            }
             CaptureActions(vm, c, notebooks, asRow = true, onAfterDelete = onBack)
-            if (c.tags.isNotEmpty()) TagChips(c.tags, Modifier.padding(horizontal = 12.dp))
+            if (c.tags.isNotEmpty()) TagChips(c.tags, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             val text = c.transcription?.text
             if (!text.isNullOrBlank()) {
-                Text("Transcripción", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(12.dp))
-                Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp))
-                Spacer(Modifier.size(24.dp))
+                Column(
+                    Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text("Transcripción", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 4.dp))
+                    Text(text, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.size(16.dp))
+                }
             }
         }
     }
@@ -1012,6 +1046,7 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
 
 // --- Acciones de hoja (iconos o menú, misma lógica) --------------------------
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CaptureActions(
     vm: MainViewModel,
@@ -1038,22 +1073,65 @@ private fun CaptureActions(
     }
 
     if (asRow) {
-        Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            IconButton({ exporting = ExportMode.Share }) { Icon(Icons.Filled.Share, "Compartir") }
-            IconButton({ exporting = ExportMode.Save }) { Icon(Icons.Filled.FileDownload, "Descargar") }
-            IconButton(onClick = { vm.transcribe(c.id) }, enabled = online) { Icon(Icons.Filled.DocumentScanner, "OCR") }
-            IconButton({ tagging = true }) { Icon(Icons.Filled.Label, "Etiquetas") }
-            IconButton({ renaming = true }) { Icon(Icons.Filled.Edit, "Renombrar") }
-            IconButton({ formatting = true }) { Icon(Icons.Filled.AspectRatio, "Formato") }
-            IconButton({ moving = true }) { Icon(Icons.AutoMirrored.Filled.DriveFileMove, "Mover") }
-            IconButton(onClick = { vm.finalizeCapture(c) }) {
-                Icon(
-                    Icons.Filled.Flag,
-                    if (c.sealed) "Reabrir hoja" else "Finalizar página",
-                    tint = if (c.sealed) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                )
-            }
-            IconButton({ deleting = true }) { Icon(Icons.Filled.Delete, "Borrar") }
+        // Chips con icono + etiqueta (claras), que envuelven a varias filas.
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val iconMod = Modifier.size(18.dp)
+            AssistChip(
+                onClick = { vm.transcribe(c.id) },
+                enabled = online,
+                label = { Text("Transcribir") },
+                leadingIcon = { Icon(Icons.Filled.DocumentScanner, null, iconMod) },
+            )
+            AssistChip(
+                onClick = { exporting = ExportMode.Share },
+                label = { Text("Compartir") },
+                leadingIcon = { Icon(Icons.Filled.Share, null, iconMod) },
+            )
+            AssistChip(
+                onClick = { exporting = ExportMode.Save },
+                label = { Text("Descargar") },
+                leadingIcon = { Icon(Icons.Filled.FileDownload, null, iconMod) },
+            )
+            AssistChip(
+                onClick = { tagging = true },
+                label = { Text("Etiquetas") },
+                leadingIcon = { Icon(Icons.Filled.Label, null, iconMod) },
+            )
+            AssistChip(
+                onClick = { renaming = true },
+                label = { Text("Renombrar") },
+                leadingIcon = { Icon(Icons.Filled.Edit, null, iconMod) },
+            )
+            AssistChip(
+                onClick = { formatting = true },
+                label = { Text("Formato") },
+                leadingIcon = { Icon(Icons.Filled.AspectRatio, null, iconMod) },
+            )
+            AssistChip(
+                onClick = { moving = true },
+                label = { Text("Mover") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null, iconMod) },
+            )
+            AssistChip(
+                onClick = { vm.finalizeCapture(c) },
+                label = { Text(if (c.sealed) "Reabrir" else "Finalizar") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.Flag,
+                        null,
+                        iconMod,
+                        tint = if (c.sealed) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                    )
+                },
+            )
+            AssistChip(
+                onClick = { deleting = true },
+                label = { Text("Borrar") },
+                leadingIcon = { Icon(Icons.Filled.Delete, null, iconMod) },
+            )
         }
     } else {
         Box {
