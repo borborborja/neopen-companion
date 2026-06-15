@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -63,6 +64,7 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.micapum.neopen.app.R
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.PageBackground
 import net.micapum.neopen.app.render.BgPresets
@@ -260,18 +262,18 @@ fun BackgroundPickerDialog(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Text(
-                    if (scope == "book") "Fondo del cuaderno" else "Fondo de la hoja",
+                    if (scope == "book") stringResource(R.string.bg_title_book) else stringResource(R.string.bg_title_sheet),
                     style = MaterialTheme.typography.titleLarge,
                 )
                 if (currentLabel != null) {
                     Text(
-                        "Fondo actual: $currentLabel",
+                        stringResource(R.string.bg_current, currentLabel),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
-                Text("Catálogo", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.bg_catalog), style = MaterialTheme.typography.titleSmall)
                 FlowRow(horizontalArrangement = gridH, verticalArrangement = gridH) {
                     BgPresets.ALL.forEach { id ->
                         BgCard(
@@ -285,11 +287,11 @@ fun BackgroundPickerDialog(
                 }
 
                 OutlinedButton(onClick = { picker.launch(arrayOf("image/*", "application/pdf")) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Subir imagen o PDF")
+                    Text(stringResource(R.string.bg_upload_image_or_pdf))
                 }
 
                 if (studioEnabled && presets.any { it.bgImage != null }) {
-                    Text("Presets", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.bg_presets), style = MaterialTheme.typography.titleSmall)
                     FlowRow(horizontalArrangement = gridH, verticalArrangement = gridH) {
                         presets.forEach { p ->
                             val url = p.bgImage ?: return@forEach
@@ -313,7 +315,7 @@ fun BackgroundPickerDialog(
                 }
 
                 if (studioEnabled && recents.any { it.bgImage != null }) {
-                    Text("Recientes", style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.bg_recents), style = MaterialTheme.typography.titleSmall)
                     FlowRow(horizontalArrangement = gridH, verticalArrangement = gridH) {
                         recents.forEach { r ->
                             val url = r.bgImage ?: return@forEach
@@ -338,10 +340,10 @@ fun BackgroundPickerDialog(
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (onRemove != null) {
-                        TextButton(onClick = { onRemove(); onDismiss() }) { Text("Quitar fondo") }
+                        TextButton(onClick = { onRemove(); onDismiss() }) { Text(stringResource(R.string.bg_remove)) }
                         Spacer(Modifier.size(8.dp))
                     }
-                    TextButton(onClick = onDismiss) { Text("Cerrar") }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.bg_close)) }
                 }
             }
         }

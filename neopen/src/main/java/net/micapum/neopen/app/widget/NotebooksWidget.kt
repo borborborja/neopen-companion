@@ -59,7 +59,7 @@ class NotebooksWidget : GlanceAppWidget() {
         val flow = context.graph.repo.notebooks()
         provideContent {
             val notebooks by flow.collectAsState(emptyList())
-            WidgetUi(notebooks)
+            WidgetUi(context, notebooks)
         }
     }
 
@@ -73,7 +73,7 @@ class NotebooksWidgetReceiver : GlanceAppWidgetReceiver() {
 }
 
 @Composable
-private fun WidgetUi(notebooks: List<Notebook>) {
+private fun WidgetUi(context: Context, notebooks: List<Notebook>) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -86,13 +86,19 @@ private fun WidgetUi(notebooks: List<Notebook>) {
                 .clickable(actionStartActivity<MainActivity>(actionParametersOf(openTabKey to TAB_NOTEBOOKS))),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Cuadernos", style = TextStyle(color = Accent, fontSize = 15.sp, fontWeight = FontWeight.Medium))
+            Text(
+                context.getString(R.string.wgt_notebooks_title),
+                style = TextStyle(color = Accent, fontSize = 15.sp, fontWeight = FontWeight.Medium),
+            )
             Spacer(GlanceModifier.defaultWeight())
             Text("›", style = TextStyle(color = Accent, fontSize = 18.sp, fontWeight = FontWeight.Bold))
         }
         Spacer(GlanceModifier.height(8.dp))
         if (notebooks.isEmpty()) {
-            Text("Sin cuadernos todavía.", style = TextStyle(color = Muted, fontSize = 13.sp))
+            Text(
+                context.getString(R.string.wgt_notebooks_empty),
+                style = TextStyle(color = Muted, fontSize = 13.sp),
+            )
         } else {
             LazyColumn {
                 items(notebooks, itemId = { it.id.hashCode().toLong() }) { nb ->

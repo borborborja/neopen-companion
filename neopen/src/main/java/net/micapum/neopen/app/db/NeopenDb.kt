@@ -38,6 +38,10 @@ data class CaptureEntity(
     val paperJson: String? = null,
     val kind: String? = null,
     val sealed: Boolean = false,
+    /** Aviso de trazos superpuestos (JSON de OverlapDto); null = sin aviso. */
+    val overlapJson: String? = null,
+    /** Id de la hoja origen si es un clon; las hojas clon no reciben fusiones por SOBP. */
+    val clonedFrom: String? = null,
 )
 
 @Entity(tableName = "notebooks")
@@ -129,7 +133,7 @@ interface CaptureDao {
     @Query("SELECT * FROM captures WHERE notebookId = :notebookId")
     suspend fun getByNotebook(notebookId: String): List<CaptureEntity>
 
-    @Query("SELECT * FROM captures WHERE section = :s AND owner = :o AND book = :b AND page = :p AND sealed = 0 ORDER BY importedAt DESC LIMIT 1")
+    @Query("SELECT * FROM captures WHERE section = :s AND owner = :o AND book = :b AND page = :p AND clonedFrom IS NULL AND sealed = 0 ORDER BY importedAt DESC LIMIT 1")
     suspend fun findBySobp(s: Int, o: Int, b: Int, p: Int): CaptureEntity?
 
     @Query("UPDATE captures SET sealed = :sealed, updatedAt = :now WHERE id = :id")
@@ -243,7 +247,7 @@ interface PageBackgroundDao {
         CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
         SyncMetaEntity::class, PageBackgroundEntity::class,
     ],
-    version = 4,
+    version = 6,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {

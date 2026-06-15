@@ -32,6 +32,7 @@ import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.sync.SyncWorker
 import net.micapum.neopen.core.data.AppMode
+import net.micapum.neopen.core.data.OverlapConfig
 import net.micapum.neopen.core.data.SettingsStore
 import net.micapum.neopen.core.data.SyncMode
 import net.micapum.neopen.core.data.SyncStatusStore
@@ -52,7 +53,7 @@ class NeopenFullApp : Application() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "Boli", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, getString(R.string.appsvc_channel_pen), NotificationManager.IMPORTANCE_LOW)
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
         }
     }
@@ -92,11 +93,28 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+/** v4→v5: añade la columna `overlapJson` (aviso de trazos superpuestos) a captures. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE captures ADD COLUMN overlapJson TEXT")
+    }
+}
+
+/** v5→v6: añade la columna `clonedFrom` (hoja clon) a captures. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE captures ADD COLUMN clonedFrom TEXT")
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
-        .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
-        .fallbackToDestructiveMigration()
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        // Solo permite recrear la BD desde la v1 efímera (dev, nunca publicada; el
+        // esquema arrancó en v2). De v2 en adelante SIEMPRE hay migración explícita,
+        // así que jamás se borran datos del usuario en una actualización.
+        .fallbackToDestructiveMigrationFrom(1)
         .build()
     val settings = SettingsStore(app)
     val syncStatus = SyncStatusStore(app)
@@ -133,6 +151,12 @@ class Graph(app: Application) {
             settings.flow.collect {
                 pen.autoImportOnConnect = it.importOnConnect
                 localMode = it.appMode == AppMode.LOCAL
+                // El umbral de superposición lo lee la ingesta local (modo local).
+                repo.overlapConfig = OverlapConfig(
+                    enabled = it.overlapEnabled,
+                    minStrokes = it.overlapMinStrokes,
+                    minAreaPercent = it.overlapMinAreaPercent,
+                )
             }
         }
         val cm = app.getSystemService(ConnectivityManager::class.java)

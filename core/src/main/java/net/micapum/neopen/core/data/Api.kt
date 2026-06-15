@@ -99,6 +99,17 @@ data class CaptureDto(
     val paper: PaperDto? = null,
     val kind: String? = null,
     val sealed: Boolean = false,
+    val overlap: OverlapDto? = null,
+    // Hoja clon (copia en un cuaderno personalizado): nunca recibe fusiones por SOBP.
+    val clonedFrom: String? = null,
+)
+
+/** Aviso de trazos superpuestos detectado en la última fusión (espejo de OverlapInfo). */
+data class OverlapDto(
+    val strokeIndex: Int = 0,
+    val atTime: Long = 0,
+    val overlappingStrokes: Int = 0,
+    val areaPercent: Int = 0,
 )
 
 data class NotebookDto(
@@ -153,6 +164,19 @@ data class NotebookPaperBody(val paper: PaperDto, val source: String? = null)
 /** Modo al finalizar una hoja (GET/PUT /api/finish-mode). */
 data class FinishModeDto(val mode: String = "newSheet")
 data class FinishModeBody(val mode: String)
+
+/** Umbral de detección de trazos superpuestos (GET/PATCH /api/overlap). */
+data class OverlapConfigDto(
+    val enabled: Boolean = true,
+    val minStrokes: Int = 3,
+    val minAreaPercent: Int = 25,
+)
+
+/** Cuerpo de POST /api/captures/{id}/split (índice de corte + modo). */
+data class SplitBody(val cutIndex: Int, val mode: String)
+
+/** Respuesta del split: la hoja original (sellada) + la hoja nueva. */
+data class SplitResultDto(val original: CaptureDto, val created: CaptureDto)
 
 data class NotebookCreateDto(
     val name: String,
@@ -353,6 +377,30 @@ interface NeopenApi {
         @Header("X-Auth-Password") password: String,
         @Body body: FinishModeBody,
     ): FinishModeDto
+
+    @GET("api/overlap")
+    suspend fun getOverlapConfig(@Header("X-Auth-Password") password: String): OverlapConfigDto
+
+    @PATCH("api/overlap")
+    suspend fun setOverlapConfig(
+        @Header("X-Auth-Password") password: String,
+        @Body body: OverlapConfigDto,
+    ): OverlapConfigDto
+
+    /** Corta una hoja con trazos superpuestos: sella la original y crea una nueva. */
+    @POST("api/captures/{id}/split")
+    suspend fun splitCapture(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+        @Body body: SplitBody,
+    ): SplitResultDto
+
+    /** Descarta el aviso de superposición sin cortar. */
+    @POST("api/captures/{id}/dismiss-overlap")
+    suspend fun dismissOverlap(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+    ): CaptureDto
 
     @Multipart
     @POST("api/captures/{id}/transcribe")

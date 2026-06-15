@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -67,6 +68,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ViewDay
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -91,6 +93,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SecondaryTabRow
@@ -116,6 +119,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -127,6 +131,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import net.micapum.neopen.app.R
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.data.PAPER_PRESETS
@@ -134,7 +139,9 @@ import net.micapum.neopen.app.data.PaperPreset
 import net.micapum.neopen.app.data.paperFromPreset
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.InkCanvas
+import net.micapum.neopen.app.render.OverlapPreview
 import net.micapum.neopen.app.render.buildModel
+import kotlin.math.roundToInt
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.SyncMode
@@ -165,11 +172,11 @@ private fun penDotColor(status: PenStatus): Color = when (status) {
 // --- Raíz / navegación -------------------------------------------------------
 
 /** Pestañas inferiores. El conjunto visible depende del modo de la app. */
-private enum class HomeTab(val title: String, val icon: ImageVector) {
-    INBOX("Ediciones", Icons.Filled.Inbox),
-    NOTEBOOKS("Cuadernos", Icons.Filled.Book),
-    PEN("Boli", Icons.Filled.Draw),
-    SETTINGS("Ajustes", Icons.Filled.Settings),
+private enum class HomeTab(@StringRes val titleRes: Int, val icon: ImageVector) {
+    INBOX(R.string.tab_inbox, Icons.Filled.Inbox),
+    NOTEBOOKS(R.string.tab_notebooks, Icons.Filled.Book),
+    PEN(R.string.tab_pen, Icons.Filled.Draw),
+    SETTINGS(R.string.tab_settings, Icons.Filled.Settings),
 }
 
 @Composable
@@ -211,7 +218,7 @@ fun AppRoot(
     }
     val nbId = openNotebookId
     if (nbId != null) {
-        val title = notebooks.firstOrNull { it.id == nbId }?.name ?: "Cuaderno"
+        val title = notebooks.firstOrNull { it.id == nbId }?.name ?: stringResource(R.string.notebook_fallback_title)
         NotebookScreen(vm, nbId, title, notebooks, onOpenPage = { openPageId = it }, onBack = { openNotebookId = null })
         return
     }
@@ -222,10 +229,10 @@ fun AppRoot(
     val penState by vm.penState.collectAsStateWithLifecycle()
 
     Scaffold(
-        topBar = { HomeBar(current.title, syncing, pending, status != null, onSync = vm::syncNow) },
+        topBar = { HomeBar(stringResource(current.titleRes), syncing, pending, status != null, onSync = vm::syncNow) },
         floatingActionButton = {
             if (current == HomeTab.NOTEBOOKS) {
-                FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, "Nuevo cuaderno") }
+                FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, stringResource(R.string.notebook_new)) }
             }
         },
         bottomBar = {
@@ -244,7 +251,7 @@ fun AppRoot(
                                 Icon(t.icon, null)
                             }
                         },
-                        label = { Text(t.title) },
+                        label = { Text(stringResource(t.titleRes)) },
                     )
                 }
             }
@@ -265,13 +272,13 @@ fun AppRoot(
         .distinct()
         .sorted()
     if (creating) {
-        NotebookEditorDialog("Nuevo cuaderno", "", NotebookColors.first(), emptyList(), "", categorySuggestions,
+        NotebookEditorDialog(stringResource(R.string.notebook_new), "", NotebookColors.first(), emptyList(), "", categorySuggestions,
             onConfirm = { n, c, t, cat -> vm.createNotebook(n, c, t, cat.ifBlank { null }); creating = false },
             onDismiss = { creating = false })
     }
     val editing = editingId?.let { id -> notebooks.firstOrNull { it.id == id } }
     if (editing != null) {
-        NotebookEditorDialog("Editar cuaderno", editing.name, editing.color, editing.tags, editing.category ?: "", categorySuggestions,
+        NotebookEditorDialog(stringResource(R.string.notebook_edit_title), editing.name, editing.color, editing.tags, editing.category ?: "", categorySuggestions,
             onConfirm = { n, c, t, cat -> vm.editNotebook(editing.id, n, c, t, cat); editingId = null },
             onDismiss = { editingId = null })
     }
@@ -300,7 +307,7 @@ private fun HomeBar(
                 IconButton(onClick = onSync) {
                     Icon(
                         Icons.Filled.Refresh,
-                        "Sincronizar",
+                        stringResource(R.string.action_sync),
                         tint = if (hasError) MaterialTheme.colorScheme.error else LocalContentColor.current,
                     )
                 }
@@ -335,49 +342,49 @@ private fun SetupWizard(vm: MainViewModel) {
     ) {
         Spacer(Modifier.size(24.dp))
         Text("neopen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("Configuración inicial", style = MaterialTheme.typography.bodyMedium,
+        Text(stringResource(R.string.setup_subtitle), style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.size(8.dp))
 
         if (step == 0) {
-            Text("¿Cómo quieres usar la app?", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.setup_how_to_use), style = MaterialTheme.typography.titleMedium)
             ModeCard(
                 selected = mode == AppMode.FULL,
-                title = "Versión completa",
-                desc = "Captura, cuadernos, bandeja, transcripción y sincronización con un servidor.",
+                title = stringResource(R.string.setup_mode_full_title),
+                desc = stringResource(R.string.setup_mode_full_desc),
                 onClick = { mode = AppMode.FULL },
             )
             ModeCard(
                 selected = mode == AppMode.LOCAL,
-                title = "Local (sin servidor)",
-                desc = "Todo en el móvil, sin servidor. Podrás vincular uno más tarde sin perder nada.",
+                title = stringResource(R.string.setup_mode_local_title),
+                desc = stringResource(R.string.setup_mode_local_desc),
                 onClick = { mode = AppMode.LOCAL },
             )
             ModeCard(
                 selected = mode == AppMode.BRIDGE,
-                title = "Solo puente",
-                desc = "Solo conecta el boli y sube lo que escribes a un servidor. Sin cuadernos en el móvil.",
+                title = stringResource(R.string.setup_mode_bridge_title),
+                desc = stringResource(R.string.setup_mode_bridge_desc),
                 onClick = { mode = AppMode.BRIDGE },
             )
             Spacer(Modifier.size(8.dp))
             Button(
                 onClick = { if (mode == AppMode.LOCAL) vm.completeSetup("", "", AppMode.LOCAL) {} else step = 1 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (mode == AppMode.LOCAL) "Empezar" else "Siguiente") }
+            ) { Text(if (mode == AppMode.LOCAL) stringResource(R.string.setup_start) else stringResource(R.string.setup_next)) }
         } else {
-            Text("Conecta con tu servidor neopen", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.setup_connect_server), style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it; vm.resetServerCheck() },
-                label = { Text("URL del servidor") },
-                placeholder = { Text("https://neopen.ejemplo.com") },
+                label = { Text(stringResource(R.string.server_url_label)) },
+                placeholder = { Text(stringResource(R.string.server_url_placeholder)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = pw,
                 onValueChange = { pw = it; vm.resetServerCheck() },
-                label = { Text("Contraseña") },
+                label = { Text(stringResource(R.string.server_password_label)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
@@ -390,18 +397,18 @@ private fun SetupWizard(vm: MainViewModel) {
                 if (check == ServerCheck.Checking) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Probar conexión")
+                    Text(stringResource(R.string.server_test_connection))
                 }
             }
             ServerCheckResult(check)
             Spacer(Modifier.size(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { step = 0 }, modifier = Modifier.weight(1f)) { Text("Atrás") }
+                OutlinedButton(onClick = { step = 0 }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_back)) }
                 Button(
                     onClick = { vm.completeSetup(url, pw, mode) {} },
                     enabled = check == ServerCheck.Ok,
                     modifier = Modifier.weight(1f),
-                ) { Text("Empezar") }
+                ) { Text(stringResource(R.string.setup_start)) }
             }
         }
     }
@@ -431,9 +438,9 @@ private fun ServerCheckResult(check: ServerCheck) {
     val cs = MaterialTheme.colorScheme
     val (color, msg) = when (check) {
         ServerCheck.Idle, ServerCheck.Checking -> return
-        ServerCheck.Ok -> cs.primary to "Conexión correcta. Servidor y contraseña válidos."
-        ServerCheck.BadAuth -> cs.error to "El servidor responde, pero la contraseña es incorrecta."
-        is ServerCheck.Unreachable -> cs.error to "No se pudo conectar: ${check.detail}"
+        ServerCheck.Ok -> cs.primary to stringResource(R.string.server_check_ok)
+        ServerCheck.BadAuth -> cs.error to stringResource(R.string.server_check_bad_auth)
+        is ServerCheck.Unreachable -> cs.error to stringResource(R.string.server_check_unreachable, check.detail)
     }
     Text(msg, color = color, style = MaterialTheme.typography.bodyMedium)
 }
@@ -457,15 +464,15 @@ private fun NotebooksScreen(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Cuadernos", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.tab_notebooks), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             val active = MaterialTheme.colorScheme.primary
             val muted = MaterialTheme.colorScheme.onSurfaceVariant
-            IconButton({ vm.setNotebookView(NotebookView.Mosaic.name) }) { Icon(Icons.Filled.GridView, "Mosaico", tint = if (mode == NotebookView.Mosaic) active else muted) }
-            IconButton({ vm.setNotebookView(NotebookView.Compact.name) }) { Icon(Icons.Filled.Apps, "Compacto", tint = if (mode == NotebookView.Compact) active else muted) }
-            IconButton({ vm.setNotebookView(NotebookView.List.name) }) { Icon(Icons.AutoMirrored.Filled.ViewList, "Lista", tint = if (mode == NotebookView.List) active else muted) }
+            IconButton({ vm.setNotebookView(NotebookView.Mosaic.name) }) { Icon(Icons.Filled.GridView, stringResource(R.string.view_mosaic), tint = if (mode == NotebookView.Mosaic) active else muted) }
+            IconButton({ vm.setNotebookView(NotebookView.Compact.name) }) { Icon(Icons.Filled.Apps, stringResource(R.string.view_compact), tint = if (mode == NotebookView.Compact) active else muted) }
+            IconButton({ vm.setNotebookView(NotebookView.List.name) }) { Icon(Icons.AutoMirrored.Filled.ViewList, stringResource(R.string.view_list), tint = if (mode == NotebookView.List) active else muted) }
         }
         if (notebooks.isEmpty()) {
-            EmptyHint("No hay cuadernos todavía.\nSincroniza para descargarlos.")
+            EmptyHint(stringResource(R.string.notebooks_empty))
             return@Column
         }
         // Agrupación por categoría (opt-in): solo se muestran cabeceras si algún
@@ -489,7 +496,7 @@ private fun NotebooksScreen(
             ) {
                 groups.forEach { (category, list) ->
                     if (hasCategories) item(key = "cat-$category") {
-                        CategoryHeader(category ?: "Sin categoría", list.size, Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                        CategoryHeader(category ?: stringResource(R.string.category_none), list.size, Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     }
                     items(list, key = { it.id }) { nb ->
                         NotebookTreeRow(
@@ -528,7 +535,7 @@ private fun NotebookGrid(
         groups.forEach { (category, items) ->
             if (hasCategories) {
                 item(span = { GridItemSpan(maxLineSpan) }, key = "cat-$category") {
-                    CategoryHeader(category ?: "Sin categoría", items.size)
+                    CategoryHeader(category ?: stringResource(R.string.category_none), items.size)
                 }
             }
             gridItems(items, key = { it.id }) { nb -> NotebookCard(vm, nb, onOpen, onEdit, compact) }
@@ -643,7 +650,7 @@ private fun NotebookCard(
                 )
                 if (!compact) {
                     Text(
-                        "${nb.pageCount} ${if (nb.pageCount == 1) "hoja" else "hojas"}",
+                        stringResource(if (nb.pageCount == 1) R.string.sheet_count_one else R.string.sheet_count_other, nb.pageCount),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -682,14 +689,14 @@ private fun NotebookTreeRow(
             Column(Modifier.weight(1f)) {
                 Text(nb.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${nb.pageCount} ${if (nb.pageCount == 1) "hoja" else "hojas"}",
+                    stringResource(if (nb.pageCount == 1) R.string.sheet_count_one else R.string.sheet_count_other, nb.pageCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Icon(
                 if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                if (expanded) "Contraer" else "Desplegar",
+                if (expanded) stringResource(R.string.action_collapse) else stringResource(R.string.action_expand),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
@@ -698,7 +705,7 @@ private fun NotebookTreeRow(
             val pages by vm.capturesIn(nb.id).collectAsStateWithLifecycle(initialValue = emptyList())
             if (pages.isEmpty()) {
                 Text(
-                    "Sin hojas.",
+                    stringResource(R.string.notebook_no_sheets),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 40.dp, bottom = 10.dp),
@@ -719,10 +726,10 @@ private fun NotebookTreeRow(
 @Composable
 private fun OriginBadge(nb: Notebook) {
     val (icon, label) = when {
-        nb.unclassified -> Icons.Filled.Inbox to "Sin clasificar"
-        nb.bookKey != null -> Icons.Filled.Draw to "Del boli"
-        nb.custom -> Icons.Filled.Collections to "Colección"
-        else -> Icons.Filled.Book to "Cuaderno"
+        nb.unclassified -> Icons.Filled.Inbox to stringResource(R.string.origin_unclassified)
+        nb.bookKey != null -> Icons.Filled.Draw to stringResource(R.string.origin_from_pen)
+        nb.custom -> Icons.Filled.Collections to stringResource(R.string.origin_collection)
+        else -> Icons.Filled.Book to stringResource(R.string.notebook_fallback_title)
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -743,25 +750,25 @@ private fun NotebookMenu(vm: MainViewModel, nb: Notebook, onEdit: (String) -> Un
         nb.bookKey?.let { vm.observeBookBackground(it) } ?: flowOf(null)
     }.collectAsStateWithLifecycle(initialValue = null)
     Box {
-        IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "Acciones") }
+        IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more)) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("Editar") }, onClick = { open = false; onEdit(nb.id) })
-            DropdownMenuItem(text = { Text("Formato de página…") }, onClick = { open = false; formatting = true })
+            DropdownMenuItem(text = { Text(stringResource(R.string.action_edit)) }, onClick = { open = false; onEdit(nb.id) })
+            DropdownMenuItem(text = { Text(stringResource(R.string.notebook_page_format)) }, onClick = { open = false; formatting = true })
             if (nb.bookKey != null) {
                 DropdownMenuItem(
-                    text = { Text(if (bookBg != null) "Fondo: ${bookBg?.label}" else "Fondo…") },
+                    text = { Text(if (bookBg != null) stringResource(R.string.notebook_background_set, bookBg?.label ?: "") else stringResource(R.string.notebook_background)) },
                     onClick = { open = false; background = true },
                 )
             }
-            DropdownMenuItem(text = { Text("Compartir (PDF)") }, onClick = {
+            DropdownMenuItem(text = { Text(stringResource(R.string.notebook_share_pdf)) }, onClick = {
                 open = false
                 scope.launch { vm.exportNotebookPdf(nb.id)?.let { shareExport(context, it) } }
             })
-            DropdownMenuItem(text = { Text("Guardar (PDF)") }, onClick = {
+            DropdownMenuItem(text = { Text(stringResource(R.string.notebook_save_pdf)) }, onClick = {
                 open = false
                 scope.launch { vm.exportNotebookPdf(nb.id)?.let { saveExport(context, it) } }
             })
-            DropdownMenuItem(text = { Text("Borrar") }, onClick = { open = false; deleting = true })
+            DropdownMenuItem(text = { Text(stringResource(R.string.action_delete)) }, onClick = { open = false; deleting = true })
         }
     }
     if (formatting) {
@@ -772,7 +779,7 @@ private fun NotebookMenu(vm: MainViewModel, nb: Notebook, onEdit: (String) -> Un
         )
     }
     if (deleting) {
-        ConfirmDialog("¿Borrar «${nb.name}»?", "Sus hojas pasarán a «Sin clasificar».",
+        ConfirmDialog(stringResource(R.string.notebook_delete_title, nb.name), stringResource(R.string.notebook_delete_body),
             onConfirm = { vm.deleteNotebook(nb.id); deleting = false }, onDismiss = { deleting = false })
     }
     if (background && nb.bookKey != null) {
@@ -806,19 +813,19 @@ private fun NotebookScreen(
         topBar = {
             TopAppBar(
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back)) } },
                 actions = {
                     val active = MaterialTheme.colorScheme.primary
                     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                    IconButton({ mode = PageView.Grid }) { Icon(Icons.Filled.GridView, "Cuadrícula", tint = if (mode == PageView.Grid) active else muted) }
-                    IconButton({ mode = PageView.List }) { Icon(Icons.AutoMirrored.Filled.ViewList, "Lista", tint = if (mode == PageView.List) active else muted) }
-                    IconButton({ mode = PageView.Large }) { Icon(Icons.Filled.ViewDay, "Grande", tint = if (mode == PageView.Large) active else muted) }
+                    IconButton({ mode = PageView.Grid }) { Icon(Icons.Filled.GridView, stringResource(R.string.view_grid), tint = if (mode == PageView.Grid) active else muted) }
+                    IconButton({ mode = PageView.List }) { Icon(Icons.AutoMirrored.Filled.ViewList, stringResource(R.string.view_list), tint = if (mode == PageView.List) active else muted) }
+                    IconButton({ mode = PageView.Large }) { Icon(Icons.Filled.ViewDay, stringResource(R.string.view_large), tint = if (mode == PageView.Large) active else muted) }
                 },
             )
         },
     ) { padding ->
         if (pages.isEmpty()) {
-            Box(Modifier.padding(padding)) { EmptyHint("Cuaderno sin hojas.") }
+            Box(Modifier.padding(padding)) { EmptyHint(stringResource(R.string.notebook_empty_sheets)) }
             return@Scaffold
         }
         when (mode) {
@@ -871,9 +878,9 @@ private fun PageListRow(vm: MainViewModel, page: Capture, notebooks: List<Notebo
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(page.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("p. ${page.page}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.page_number, page.page), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (page.paper == null) {
-                    Text("⚠ Sin formato", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.page_no_format), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
             }
             CaptureActions(vm, page, notebooks, asRow = false)
@@ -915,16 +922,16 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(c?.name ?: "Hoja", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") } },
+                title = { Text(c?.name ?: stringResource(R.string.sheet_fallback_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back)) } },
                 actions = {
-                    if (c != null) TextButton(onClick = { bgOpen = true }) { Text("Fondo") }
+                    if (c != null) TextButton(onClick = { bgOpen = true }) { Text(stringResource(R.string.action_background)) }
                 },
             )
         },
     ) { padding ->
         if (c == null) {
-            Box(Modifier.padding(padding)) { EmptyHint("Cargando…") }
+            Box(Modifier.padding(padding)) { EmptyHint(stringResource(R.string.loading)) }
             return@Scaffold
         }
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -961,7 +968,7 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
                 Column(
                     Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
                 ) {
-                    Text("Transcripción", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 4.dp))
+                    Text(stringResource(R.string.transcription_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 4.dp))
                     Text(text, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.size(16.dp))
                 }
@@ -1010,7 +1017,7 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Últimas ediciones", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.inbox_recent_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             if (!searching) {
                 listOf(5, 10, 20).forEach { n ->
                     FilterChip(
@@ -1020,18 +1027,18 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
                         modifier = Modifier.padding(horizontal = 2.dp),
                     )
                 }
-                TextButton(onClick = { vm.clearRecent() }) { Text("Limpiar") }
+                TextButton(onClick = { vm.clearRecent() }) { Text(stringResource(R.string.action_clear)) }
             }
         }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("Buscar por nombre, texto o etiqueta") },
+            label = { Text(stringResource(R.string.inbox_search_label)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         )
         if (shown.isEmpty()) {
-            EmptyHint(if (items.isEmpty()) "Aún no hay ediciones." else "Sin resultados.")
+            EmptyHint(if (items.isEmpty()) stringResource(R.string.inbox_empty) else stringResource(R.string.inbox_no_results))
         } else {
             LazyColumn(
                 contentPadding = PaddingValues(12.dp),
@@ -1064,7 +1071,12 @@ private fun CaptureActions(
     var tagging by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var formatting by remember { mutableStateOf(false) }
+    var resolvingOverlap by remember { mutableStateOf(false) }
+    var finalizing by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf<ExportMode?>(null) }
+    // Bloqueada: sellada y ya hay otra hoja con el mismo SOBP → no se puede reabrir.
+    val superseded by vm.supersededSobps.collectAsStateWithLifecycle()
+    val reopenLocked = c.sealed && superseded.contains(c.sobpLabel)
 
     fun doExport(fmt: ExportFormat, modeSel: ExportMode) {
         scope.launch {
@@ -1082,42 +1094,56 @@ private fun CaptureActions(
             AssistChip(
                 onClick = { vm.transcribe(c.id) },
                 enabled = online,
-                label = { Text("Transcribir") },
+                label = { Text(stringResource(R.string.action_transcribe)) },
                 leadingIcon = { Icon(Icons.Filled.DocumentScanner, null, iconMod) },
             )
             AssistChip(
                 onClick = { exporting = ExportMode.Share },
-                label = { Text("Compartir") },
+                label = { Text(stringResource(R.string.action_share)) },
                 leadingIcon = { Icon(Icons.Filled.Share, null, iconMod) },
             )
             AssistChip(
                 onClick = { exporting = ExportMode.Save },
-                label = { Text("Descargar") },
+                label = { Text(stringResource(R.string.action_download)) },
                 leadingIcon = { Icon(Icons.Filled.FileDownload, null, iconMod) },
             )
             AssistChip(
                 onClick = { tagging = true },
-                label = { Text("Etiquetas") },
+                label = { Text(stringResource(R.string.action_tags)) },
                 leadingIcon = { Icon(Icons.Filled.Label, null, iconMod) },
             )
             AssistChip(
                 onClick = { renaming = true },
-                label = { Text("Renombrar") },
+                label = { Text(stringResource(R.string.action_rename)) },
                 leadingIcon = { Icon(Icons.Filled.Edit, null, iconMod) },
             )
             AssistChip(
                 onClick = { formatting = true },
-                label = { Text("Formato") },
+                label = { Text(stringResource(R.string.action_format)) },
                 leadingIcon = { Icon(Icons.Filled.AspectRatio, null, iconMod) },
             )
             AssistChip(
                 onClick = { moving = true },
-                label = { Text("Mover") },
+                label = { Text(stringResource(R.string.action_move)) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null, iconMod) },
             )
+            if (c.overlap != null) {
+                AssistChip(
+                    onClick = { resolvingOverlap = true },
+                    label = { Text(stringResource(R.string.action_overlap)) },
+                    leadingIcon = { Icon(Icons.Filled.Warning, null, iconMod, tint = Color(0xFFEA580C)) },
+                )
+            }
             AssistChip(
-                onClick = { vm.finalizeCapture(c) },
-                label = { Text(if (c.sealed) "Reabrir" else "Finalizar") },
+                onClick = { if (c.sealed) vm.finalizeCapture(c) else finalizing = true },
+                enabled = !reopenLocked,
+                label = {
+                    Text(
+                        if (reopenLocked) stringResource(R.string.action_finished_locked)
+                        else if (c.sealed) stringResource(R.string.action_reopen)
+                        else stringResource(R.string.action_finish),
+                    )
+                },
                 leadingIcon = {
                     Icon(
                         Icons.Filled.Flag,
@@ -1129,36 +1155,50 @@ private fun CaptureActions(
             )
             AssistChip(
                 onClick = { deleting = true },
-                label = { Text("Borrar") },
+                label = { Text(stringResource(R.string.action_delete)) },
                 leadingIcon = { Icon(Icons.Filled.Delete, null, iconMod) },
             )
         }
     } else {
         Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Acciones") }
+            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more)) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Compartir") }, onClick = { menu = false; exporting = ExportMode.Share })
-                DropdownMenuItem(text = { Text("Descargar") }, onClick = { menu = false; exporting = ExportMode.Save })
+                DropdownMenuItem(text = { Text(stringResource(R.string.action_share)) }, onClick = { menu = false; exporting = ExportMode.Share })
+                DropdownMenuItem(text = { Text(stringResource(R.string.action_download)) }, onClick = { menu = false; exporting = ExportMode.Save })
                 DropdownMenuItem(
-                    text = { Text(if (online) "Transcribir (OCR)" else "Transcribir (sin conexión)") },
+                    text = { Text(if (online) stringResource(R.string.action_transcribe_ocr) else stringResource(R.string.action_transcribe_offline)) },
                     enabled = online,
                     onClick = { menu = false; vm.transcribe(c.id) },
                 )
-                DropdownMenuItem(text = { Text("Etiquetas") }, onClick = { menu = false; tagging = true })
-                DropdownMenuItem(text = { Text("Renombrar") }, onClick = { menu = false; renaming = true })
-                DropdownMenuItem(text = { Text("Formato de hoja…") }, onClick = { menu = false; formatting = true })
-                DropdownMenuItem(text = { Text("Mover a cuaderno") }, onClick = { menu = false; moving = true })
+                DropdownMenuItem(text = { Text(stringResource(R.string.action_tags)) }, onClick = { menu = false; tagging = true })
+                DropdownMenuItem(text = { Text(stringResource(R.string.action_rename)) }, onClick = { menu = false; renaming = true })
+                DropdownMenuItem(text = { Text(stringResource(R.string.action_sheet_format)) }, onClick = { menu = false; formatting = true })
+                DropdownMenuItem(text = { Text(stringResource(R.string.action_move_to_notebook)) }, onClick = { menu = false; moving = true })
                 DropdownMenuItem(
-                    text = { Text(if (c.sealed) "Reabrir hoja" else "Finalizar página") },
-                    onClick = { menu = false; vm.finalizeCapture(c) },
+                    text = {
+                        Text(
+                            if (reopenLocked) stringResource(R.string.action_finished_locked)
+                            else if (c.sealed) stringResource(R.string.action_reopen_sheet)
+                            else stringResource(R.string.action_finish_page),
+                        )
+                    },
+                    enabled = !reopenLocked,
+                    onClick = { menu = false; if (c.sealed) vm.finalizeCapture(c) else finalizing = true },
                 )
-                DropdownMenuItem(text = { Text("Borrar") }, onClick = { menu = false; deleting = true })
+                if (c.overlap != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_overlap_strokes)) },
+                        onClick = { menu = false; resolvingOverlap = true },
+                        leadingIcon = { Icon(Icons.Filled.Warning, null, tint = Color(0xFFEA580C)) },
+                    )
+                }
+                DropdownMenuItem(text = { Text(stringResource(R.string.action_delete)) }, onClick = { menu = false; deleting = true })
             }
         }
     }
 
     if (renaming) {
-        TextPromptDialog("Renombrar hoja", c.name, "Nombre",
+        TextPromptDialog(stringResource(R.string.rename_sheet_title), c.name, stringResource(R.string.field_name),
             onConfirm = { vm.renameCapture(c.id, it); renaming = false }, onDismiss = { renaming = false })
     }
     if (moving) {
@@ -1166,11 +1206,11 @@ private fun CaptureActions(
             onPick = { vm.moveCapture(c.id, it, 0); moving = false }, onDismiss = { moving = false })
     }
     if (tagging) {
-        TagsDialog("Etiquetas de la hoja", c.tags,
+        TagsDialog(stringResource(R.string.sheet_tags_title), c.tags,
             onConfirm = { vm.setTags(c.id, it); tagging = false }, onDismiss = { tagging = false })
     }
     if (deleting) {
-        ConfirmDialog("¿Borrar «${c.name}»?", "Se eliminará en todos tus dispositivos.",
+        ConfirmDialog(stringResource(R.string.sheet_delete_title, c.name), stringResource(R.string.sheet_delete_body),
             onConfirm = { vm.deleteCapture(c.id); deleting = false; onAfterDelete?.invoke() }, onDismiss = { deleting = false })
     }
     if (formatting) {
@@ -1178,6 +1218,19 @@ private fun CaptureActions(
             current = c.paper?.source,
             onPick = { p -> vm.setCapturePaper(c.id, paperFromPreset(p)); formatting = false },
             onDismiss = { formatting = false },
+        )
+    }
+    if (resolvingOverlap) {
+        OverlapResolverDialog(c, vm, onDismiss = { resolvingOverlap = false })
+    }
+    if (finalizing) {
+        ConfirmDialog(
+            stringResource(R.string.finish_warn_title),
+            stringResource(R.string.finish_warn_body),
+            confirmText = stringResource(R.string.action_finish),
+            destructive = false,
+            onConfirm = { vm.finalizeCapture(c); finalizing = false },
+            onDismiss = { finalizing = false },
         )
     }
     val mode = exporting
@@ -1224,32 +1277,35 @@ private fun PenTabContent(vm: MainViewModel) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     StatusDot(penDotColor(state.status))
                     Spacer(Modifier.size(8.dp))
-                    Text(state.name ?: state.mac ?: "Boli Neo M1+", style = MaterialTheme.typography.titleMedium)
+                    Text(state.name ?: state.mac ?: stringResource(R.string.pen_default_name), style = MaterialTheme.typography.titleMedium)
                 }
-                Text("Estado: ${penStatusLabel(state.status)}", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.pen_status, penStatusLabel(state.status)), style = MaterialTheme.typography.bodyMedium)
                 state.settings.battery?.let {
-                    Text("Batería: $it%${if (state.settings.charging) " ⚡" else ""}", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (state.settings.charging) stringResource(R.string.pen_battery_charging, it) else stringResource(R.string.pen_battery, it),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
-                state.settings.usedMem?.let { Text("Memoria: ${100 - it}% libre", style = MaterialTheme.typography.bodyMedium) }
+                state.settings.usedMem?.let { Text(stringResource(R.string.pen_memory_free, 100 - it), style = MaterialTheme.typography.bodyMedium) }
                 if (state.capturedPages > 0) {
-                    Text("Páginas capturadas: ${state.capturedPages}", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.pen_captured_pages, state.capturedPages), style = MaterialTheme.typography.bodyMedium)
                 }
-                state.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                state.error?.let { Text(stringResource(R.string.pen_error, it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         }
 
         if (busy) {
-            OutlinedButton(onClick = vm::stopConnecting, modifier = Modifier.fillMaxWidth()) { Text("Detener conexión") }
+            OutlinedButton(onClick = vm::stopConnecting, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pen_stop_connecting)) }
         } else {
             Button(onClick = connect, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.connected) "Reconectar" else "Conectar boli")
+                Text(if (state.connected) stringResource(R.string.pen_reconnect) else stringResource(R.string.pen_connect))
             }
         }
 
         if (state.connected) {
             SecondaryTabRow(selectedTabIndex = penTab) {
-                Tab(penTab == 0, { penTab = 0 }, text = { Text("Configuración") })
-                Tab(penTab == 1, { penTab = 1 }, text = { Text("Memoria") })
+                Tab(penTab == 0, { penTab = 0 }, text = { Text(stringResource(R.string.pen_tab_config)) })
+                Tab(penTab == 1, { penTab = 1 }, text = { Text(stringResource(R.string.pen_tab_memory)) })
             }
             when (penTab) {
                 0 -> PenConfigTab(state, vm)
@@ -1257,7 +1313,7 @@ private fun PenTabContent(vm: MainViewModel) {
             }
         } else {
             Text(
-                "Necesita un Neo smartpen M1+ encendido y permisos de Bluetooth. Escribe en papel Ncode: las páginas aparecen en la Bandeja y se suben al servidor.",
+                stringResource(R.string.pen_disconnected_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1265,7 +1321,7 @@ private fun PenTabContent(vm: MainViewModel) {
 
         HorizontalDivider()
         OutlinedButton(onClick = { showLogs = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("Ver registro de conexión (${logs.size})")
+            Text(stringResource(R.string.pen_view_log, logs.size))
         }
     }
 
@@ -1278,25 +1334,25 @@ private fun PenTabContent(vm: MainViewModel) {
 @Composable
 private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        PenToggleRow("Encendido automático", "Se enciende al empezar a escribir", state.settings.autoPowerOn ?: false, vm::setAutoPowerOn)
-        PenToggleRow("Sonido del lápiz", "Pitido al escribir", state.settings.beep ?: false, vm::setBeep)
-        PenToggleRow("Guardar offline", "Almacena la escritura sin la app abierta", state.settings.offlineData ?: false, vm::setOfflineData)
+        PenToggleRow(stringResource(R.string.pen_auto_power_on_title), stringResource(R.string.pen_auto_power_on_desc), state.settings.autoPowerOn ?: false, vm::setAutoPowerOn)
+        PenToggleRow(stringResource(R.string.pen_beep_title), stringResource(R.string.pen_beep_desc), state.settings.beep ?: false, vm::setBeep)
+        PenToggleRow(stringResource(R.string.pen_offline_title), stringResource(R.string.pen_offline_desc), state.settings.offlineData ?: false, vm::setOfflineData)
         Spacer(Modifier.size(8.dp))
-        Text("Apagado automático", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.pen_auto_shutdown), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val current = state.settings.autoShutdownTime ?: 20
             SHUTDOWN_OPTIONS.forEach { m ->
-                FilterChip(selected = current == m, onClick = { vm.setAutoShutdown(m) }, label = { Text("$m min") })
+                FilterChip(selected = current == m, onClick = { vm.setAutoShutdown(m) }, label = { Text(stringResource(R.string.pen_minutes, m)) })
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
-        state.mac?.let { Text("MAC: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        state.firmware?.let { Text("Firmware: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        state.mac?.let { Text(stringResource(R.string.pen_mac, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        state.firmware?.let { Text(stringResource(R.string.pen_firmware, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
         // Herramienta avanzada (discreta): leer el SOBP de una marca.
         var readingSobp by remember { mutableStateOf(false) }
         TextButton(onClick = { readingSobp = true }, contentPadding = PaddingValues(top = 6.dp, bottom = 6.dp)) {
-            Text("Leer SOBP…", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.pen_read_sobp), style = MaterialTheme.typography.bodySmall)
         }
         if (readingSobp) SobpReaderDialog(vm) { readingSobp = false }
     }
@@ -1320,37 +1376,37 @@ private fun SobpReaderDialog(vm: MainViewModel, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Leer SOBP") },
+        title = { Text(stringResource(R.string.sobp_reader_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val s = detected
                 when {
-                    saved -> Text("Guardado en el historial.")
+                    saved -> Text(stringResource(R.string.sobp_saved_in_history))
                     s == null -> {
-                        Text("Conecta el boli y haz una pequeña marca en una hoja Ncode…")
+                        Text(stringResource(R.string.sobp_make_a_mark))
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
                     else -> {
                         Text(
-                            "SOBP detectado: ${s.section}.${s.owner}.${s.book}.${s.page}",
+                            stringResource(R.string.sobp_detected, s.section, s.owner, s.book, s.page),
                             style = MaterialTheme.typography.bodyLarge,
                         )
-                        OutlinedTextField(label, { label = it }, label = { Text("Identificador") }, singleLine = true)
+                        OutlinedTextField(label, { label = it }, label = { Text(stringResource(R.string.field_identifier)) }, singleLine = true)
                     }
                 }
             }
         },
         confirmButton = {
             when {
-                saved -> TextButton(onClick = onDismiss) { Text("Cerrar") }
+                saved -> TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
                 detected != null -> TextButton(
                     enabled = !saving,
                     onClick = { saving = true; vm.saveSobpScan(label) { ok -> saving = false; if (ok) saved = true } },
-                ) { Text("Guardar") }
+                ) { Text(stringResource(R.string.action_save)) }
                 else -> {}
             }
         },
-        dismissButton = { if (!saved) TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { if (!saved) TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -1359,14 +1415,14 @@ private fun SobpReaderDialog(vm: MainViewModel, onDismiss: () -> Unit) {
 private fun SobpHistorySection(vm: MainViewModel) {
     val scans by vm.sobpScans.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.loadSobpScans() }
-    Text("Historial de SOBP", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    Text(stringResource(R.string.sobp_history_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
     Text(
-        "SOBP escaneados con «Leer SOBP» (panel del boli).",
+        stringResource(R.string.sobp_history_desc),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (scans.isEmpty()) {
-        Text("Aún no has escaneado ningún SOBP.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.sobp_history_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
         Card {
             Column {
@@ -1385,7 +1441,7 @@ private fun SobpHistorySection(vm: MainViewModel) {
                             )
                         }
                         TextButton(onClick = { vm.deleteSobpScan(s.id) }) {
-                            Text("Borrar", color = MaterialTheme.colorScheme.error)
+                            Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
                         }
                     }
                     if (i < scans.lastIndex) HorizontalDivider()
@@ -1400,18 +1456,18 @@ private fun PenMemoryTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
     val idle = state.offlinePhase == net.micapum.neopen.core.pen.OfflinePhase.IDLE
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = vm::listOffline, enabled = idle, modifier = Modifier.weight(1f)) { Text("Leer memoria") }
+            OutlinedButton(onClick = vm::listOffline, enabled = idle, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.pen_read_memory)) }
             if (!state.notes.isNullOrEmpty()) {
-                FilledTonalButton(onClick = vm::importOffline, enabled = idle, modifier = Modifier.weight(1f)) { Text("Importar todo") }
+                FilledTonalButton(onClick = vm::importOffline, enabled = idle, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.pen_import_all)) }
             }
         }
         if (state.offlinePhase == net.micapum.neopen.core.pen.OfflinePhase.TRANSFERRING) {
-            Text("Importando… ${state.offlineProgress}%", style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.pen_importing, state.offlineProgress), style = MaterialTheme.typography.bodyMedium)
             LinearProgressIndicator(progress = { state.offlineProgress / 100f }, modifier = Modifier.fillMaxWidth())
         }
         state.notes?.let { notes ->
             if (notes.isEmpty()) {
-                Text("El boli no tiene notas guardadas.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.pen_no_notes), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             } else {
                 Card {
                     Column {
@@ -1423,16 +1479,16 @@ private fun PenMemoryTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
                             ) {
                                 Column {
                                     Text("${n.section}.${n.owner}.${n.note}", style = MaterialTheme.typography.bodyMedium)
-                                    n.pages?.let { Text("$it páginas", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    n.pages?.let { Text(stringResource(R.string.pen_note_pages, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                                 }
-                                TextButton(onClick = { vm.importNote(n) }, enabled = idle) { Text("Importar") }
+                                TextButton(onClick = { vm.importNote(n) }, enabled = idle) { Text(stringResource(R.string.action_import)) }
                             }
                             if (i < notes.lastIndex) HorizontalDivider()
                         }
                     }
                 }
                 TextButton(onClick = vm::clearOffline) {
-                    Text("Vaciar memoria del boli", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.pen_clear_memory), color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -1457,33 +1513,34 @@ private fun PenToggleRow(title: String, subtitle: String, checked: Boolean, onCh
 @Composable
 private fun PenDebugLogDialog(logs: List<String>, onClear: () -> Unit, onDismiss: () -> Unit) {
     val clipboard = LocalClipboardManager.current
-    val text = if (logs.isEmpty()) "(sin registros — pulsa «Conectar boli»)" else logs.joinToString("\n")
+    val text = if (logs.isEmpty()) stringResource(R.string.pen_log_empty) else logs.joinToString("\n")
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Registro de conexión") },
+        title = { Text(stringResource(R.string.pen_log_title)) },
         text = {
             Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
                 Text(text, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
             }
         },
         confirmButton = {
-            TextButton(onClick = { clipboard.setText(AnnotatedString(text)) }) { Text("Copiar") }
+            TextButton(onClick = { clipboard.setText(AnnotatedString(text)) }) { Text(stringResource(R.string.action_copy)) }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onClear) { Text("Limpiar") }
-                TextButton(onClick = onDismiss) { Text("Cerrar") }
+                TextButton(onClick = onClear) { Text(stringResource(R.string.action_clear)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
             }
         },
     )
 }
 
+@Composable
 private fun penStatusLabel(status: PenStatus): String = when (status) {
-    PenStatus.IDLE -> "Desconectado"
-    PenStatus.SCANNING -> "Buscando…"
-    PenStatus.CONNECTING -> "Conectando…"
-    PenStatus.AUTHORIZED -> "Conectado"
-    PenStatus.DISCONNECTED -> "Desconectado"
+    PenStatus.IDLE -> stringResource(R.string.pen_status_disconnected)
+    PenStatus.SCANNING -> stringResource(R.string.pen_status_scanning)
+    PenStatus.CONNECTING -> stringResource(R.string.pen_status_connecting)
+    PenStatus.AUTHORIZED -> stringResource(R.string.pen_status_connected)
+    PenStatus.DISCONNECTED -> stringResource(R.string.pen_status_disconnected)
 }
 
 // --- Ajustes -----------------------------------------------------------------
@@ -1521,13 +1578,16 @@ private fun SettingsScreen(vm: MainViewModel) {
                 recentShowCount = settings.recentShowCount,
                 recentClearedAt = settings.recentClearedAt,
                 finishMode = settings.finishMode,
+                overlapEnabled = settings.overlapEnabled,
+                overlapMinStrokes = settings.overlapMinStrokes,
+                overlapMinAreaPercent = settings.overlapMinAreaPercent,
                 notebookView = settings.notebookView,
                 themeMode = settings.themeMode,
             ),
         )
     }
 
-    LaunchedEffect(Unit) { vm.refreshFinishMode() }
+    LaunchedEffect(Unit) { vm.refreshFinishMode(); vm.refreshOverlapConfig() }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -1536,7 +1596,7 @@ private fun SettingsScreen(vm: MainViewModel) {
             val bytes = vm.exportBackup()
             backupMsg = if (bytes != null && runCatching {
                     context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                }.isSuccess) "Copia exportada." else "No se pudo exportar."
+                }.isSuccess) context.getString(R.string.backup_exported) else context.getString(R.string.backup_export_failed)
         }
     }
     val restoreLauncher = rememberLauncherForActivityResult(
@@ -1544,7 +1604,7 @@ private fun SettingsScreen(vm: MainViewModel) {
     ) { uri: Uri? ->
         if (uri != null) scope.launch {
             val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            backupMsg = if (bytes != null && vm.restoreBackup(bytes)) "Copia restaurada." else "No se pudo restaurar."
+            backupMsg = if (bytes != null && vm.restoreBackup(bytes)) context.getString(R.string.backup_restored) else context.getString(R.string.backup_restore_failed)
         }
     }
 
@@ -1553,9 +1613,13 @@ private fun SettingsScreen(vm: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // --- Tema ---
-        Text("Tema", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val opts = listOf("system" to "Sistema", "light" to "Claro", "dark" to "Oscuro")
+            val opts = listOf(
+                "system" to stringResource(R.string.theme_system),
+                "light" to stringResource(R.string.theme_light),
+                "dark" to stringResource(R.string.theme_dark),
+            )
             opts.forEach { (value, label) ->
                 FilterChip(settings.themeMode == value, { vm.setThemeMode(value) }, label = { Text(label) })
             }
@@ -1564,97 +1628,122 @@ private fun SettingsScreen(vm: MainViewModel) {
 
         if (settings.appMode == AppMode.LOCAL) {
             // --- Modo local: vincular un servidor (migra los datos sin perderlos) ---
-            Text("Modo local (sin servidor)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.settings_local_mode_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Text(
-                "Tus cuadernos viven solo en este móvil. Si vinculas un servidor se subirá todo (sin perder nada) y a partir de entonces se sincronizará.",
+                stringResource(R.string.settings_local_mode_desc),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(url, { url = it }, label = { Text("URL del servidor") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(pw, { pw = it }, label = { Text("Contraseña") },
+            OutlinedTextField(url, { url = it }, label = { Text(stringResource(R.string.server_url_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(pw, { pw = it }, label = { Text(stringResource(R.string.server_password_label)) },
                 visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+            val linkOkMsg = stringResource(R.string.settings_link_ok)
+            val linkFailMsg = stringResource(R.string.settings_link_failed)
             Button(
                 onClick = {
                     linking = true; linkMsg = null
                     vm.linkServer(url, pw) { ok, err ->
                         linking = false
-                        linkMsg = if (ok) "Servidor vinculado y datos migrados." else (err ?: "No se pudo vincular")
+                        linkMsg = if (ok) linkOkMsg else (err ?: linkFailMsg)
                     }
                 },
                 enabled = !linking && url.isNotBlank() && pw.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (linking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Text("Vincular servidor y migrar")
+                else Text(stringResource(R.string.settings_link_button))
             }
             linkMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         } else {
             // --- Servidor ---
-            Text("Servidor neopen", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text("URL del servidor") },
+            Text(stringResource(R.string.settings_server_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text(stringResource(R.string.server_url_label)) },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text("Contraseña") },
+            OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text(stringResource(R.string.server_password_label)) },
                 visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedButton(onClick = { vm.testServer(url, pw) }, enabled = check != ServerCheck.Checking,
                 modifier = Modifier.fillMaxWidth()) {
                 if (check == ServerCheck.Checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Text("Probar conexión")
+                else Text(stringResource(R.string.server_test_connection))
             }
             ServerCheckResult(check)
 
             HorizontalDivider()
             // --- Modo de la app ---
-            Text("Modo de la app", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.settings_app_mode_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(mode == AppMode.FULL, { mode = AppMode.FULL }, label = { Text("Completo") })
-                FilterChip(mode == AppMode.BRIDGE, { mode = AppMode.BRIDGE }, label = { Text("Solo puente") })
+                FilterChip(mode == AppMode.FULL, { mode = AppMode.FULL }, label = { Text(stringResource(R.string.mode_full)) })
+                FilterChip(mode == AppMode.BRIDGE, { mode = AppMode.BRIDGE }, label = { Text(stringResource(R.string.mode_bridge)) })
             }
         }
 
         HorizontalDivider()
         // --- Al finalizar una hoja ---
-        Text("Al finalizar una hoja", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.settings_finish_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(settings.finishMode == "newSheet", { vm.setFinishMode("newSheet") }, label = { Text("Nueva hoja") })
-            FilterChip(settings.finishMode == "newNotebook", { vm.setFinishMode("newNotebook") }, label = { Text("Nuevo cuaderno") })
+            FilterChip(settings.finishMode == "newSheet", { vm.setFinishMode("newSheet") }, label = { Text(stringResource(R.string.finish_new_sheet)) })
+            FilterChip(settings.finishMode == "newNotebook", { vm.setFinishMode("newNotebook") }, label = { Text(stringResource(R.string.notebook_new)) })
         }
         Text(
             if (settings.finishMode == "newNotebook")
-                "Finalizar cierra el cuaderno entero; al volver a escribir en él arranca un cuaderno nuevo (copia). Para libretas Ncode reutilizadas."
+                stringResource(R.string.settings_finish_desc_notebook)
             else
-                "La hoja finalizada se cierra; al volver a escribir en la misma hoja física crea una hoja nueva en el mismo cuaderno. Recomendado.",
+                stringResource(R.string.settings_finish_desc_sheet),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         HorizontalDivider()
+        // --- Trazos superpuestos ---
+        Text(stringResource(R.string.settings_overlap_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        PenToggleRow(
+            stringResource(R.string.settings_overlap_toggle_title),
+            stringResource(R.string.settings_overlap_toggle_desc),
+            settings.overlapEnabled,
+        ) { vm.setOverlapConfig(it, settings.overlapMinStrokes, settings.overlapMinAreaPercent) }
+        if (settings.overlapEnabled) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    settings.overlapMinStrokes.toString(),
+                    { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(1, 100)?.let { n -> vm.setOverlapConfig(true, n, settings.overlapMinAreaPercent) } },
+                    label = { Text(stringResource(R.string.settings_overlap_min_strokes)) }, singleLine = true, modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    settings.overlapMinAreaPercent.toString(),
+                    { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(0, 100)?.let { n -> vm.setOverlapConfig(true, settings.overlapMinStrokes, n) } },
+                    label = { Text(stringResource(R.string.settings_overlap_min_area)) }, singleLine = true, modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        HorizontalDivider()
         // --- Sincronización del boli ---
-        Text("Bluetooth y sincronización", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        PenToggleRow("Conexión en segundo plano", "Mantiene el boli conectado con la app cerrada", background) { background = it }
-        PenToggleRow("Volcar memoria al conectar", "Importa la escritura offline del boli en cuanto se conecta", importOnConnect) { importOnConnect = it }
-        Text("Volcado de la memoria offline", style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.settings_bluetooth_sync_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        PenToggleRow(stringResource(R.string.settings_background_title), stringResource(R.string.settings_background_desc), background) { background = it }
+        PenToggleRow(stringResource(R.string.settings_import_on_connect_title), stringResource(R.string.settings_import_on_connect_desc), importOnConnect) { importOnConnect = it }
+        Text(stringResource(R.string.settings_offline_dump), style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(syncMode == SyncMode.MANUAL, { syncMode = SyncMode.MANUAL }, label = { Text("Manual") })
-            FilterChip(syncMode == SyncMode.INTERVAL, { syncMode = SyncMode.INTERVAL }, label = { Text("Por intervalo") })
+            FilterChip(syncMode == SyncMode.MANUAL, { syncMode = SyncMode.MANUAL }, label = { Text(stringResource(R.string.sync_manual)) })
+            FilterChip(syncMode == SyncMode.INTERVAL, { syncMode = SyncMode.INTERVAL }, label = { Text(stringResource(R.string.sync_interval)) })
         }
         if (syncMode == SyncMode.INTERVAL) {
             OutlinedTextField(interval, { interval = it.filter(Char::isDigit) },
-                label = { Text("Intervalo (min, mín. 15)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                label = { Text(stringResource(R.string.settings_interval_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
 
-        Button(onClick = { persist() }, modifier = Modifier.fillMaxWidth()) { Text("Guardar ajustes") }
-        OutlinedButton(onClick = vm::syncNow, modifier = Modifier.fillMaxWidth()) { Text("Sincronizar ahora") }
-        Text("Pendiente de subir: $pending", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = { persist() }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.settings_save)) }
+        OutlinedButton(onClick = vm::syncNow, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.settings_sync_now)) }
+        Text(stringResource(R.string.settings_pending_upload, pending), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (status != null) {
-            Text("Último error: $status", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.settings_last_error, status ?: ""), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
 
         HorizontalDivider()
         // --- Copia de seguridad ---
-        Text("Copia de seguridad", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Text("Exporta o restaura todo el contenido del servidor (cuadernos y hojas) como un fichero JSON.",
+        Text(stringResource(R.string.settings_backup_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.settings_backup_desc),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { backupMsg = null; exportLauncher.launch("neopen-backup.json") }, modifier = Modifier.weight(1f)) { Text("Exportar") }
-            OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.weight(1f)) { Text("Restaurar") }
+            OutlinedButton(onClick = { backupMsg = null; exportLauncher.launch("neopen-backup.json") }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_export)) }
+            OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_restore)) }
         }
         backupMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 
@@ -1663,7 +1752,7 @@ private fun SettingsScreen(vm: MainViewModel) {
 
         HorizontalDivider()
         TextButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) {
-            Text("Cerrar sesión", color = MaterialTheme.colorScheme.error)
+            Text(stringResource(R.string.settings_logout), color = MaterialTheme.colorScheme.error)
         }
     }
 }
@@ -1690,16 +1779,16 @@ private fun NotebookEditorDialog(
         title = { Text(title) },
         text = {
             Column {
-                OutlinedTextField(name, { name = it }, label = { Text("Nombre") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.field_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.size(12.dp))
-                Text("Color", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.field_color), style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.size(6.dp))
                 ColorSwatches(color) { color = it }
                 Spacer(Modifier.size(12.dp))
                 OutlinedTextField(
                     category,
                     { category = it },
-                    label = { Text("Categoría (opcional)") },
+                    label = { Text(stringResource(R.string.field_category)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1711,15 +1800,15 @@ private fun NotebookEditorDialog(
                 OutlinedTextField(
                     tagsText,
                     { tagsText = it },
-                    label = { Text("Etiquetas (separadas por comas)") },
+                    label = { Text(stringResource(R.string.field_tags)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim(), color, parseTags(tagsText), category.trim()) }) { Text("Guardar") }
+            TextButton(onClick = { if (name.isNotBlank()) onConfirm(name.trim(), color, parseTags(tagsText), category.trim()) }) { Text(stringResource(R.string.action_save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -1766,7 +1855,7 @@ private fun TagsDialog(title: String, initial: List<String>, onConfirm: (List<St
         title = { Text(title) },
         text = {
             Column {
-                OutlinedTextField(text, { text = it }, label = { Text("Etiquetas (separadas por comas)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(text, { text = it }, label = { Text(stringResource(R.string.field_tags)) }, modifier = Modifier.fillMaxWidth())
                 val preview = parseTags(text)
                 if (preview.isNotEmpty()) {
                     Spacer(Modifier.size(8.dp))
@@ -1774,8 +1863,8 @@ private fun TagsDialog(title: String, initial: List<String>, onConfirm: (List<St
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onConfirm(parseTags(text)) }) { Text("Guardar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        confirmButton = { TextButton(onClick = { onConfirm(parseTags(text)) }) { Text(stringResource(R.string.action_save)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -1791,7 +1880,7 @@ private fun TagChips(tags: List<String>, modifier: Modifier = Modifier) {
 private fun FormatPickerDialog(onPick: (ExportFormat) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Formato") },
+        title = { Text(stringResource(R.string.action_format)) },
         text = {
             Column {
                 for (f in ExportFormat.entries) {
@@ -1800,7 +1889,7 @@ private fun FormatPickerDialog(onPick: (ExportFormat) -> Unit, onDismiss: () -> 
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -1809,11 +1898,11 @@ private fun FormatPickerDialog(onPick: (ExportFormat) -> Unit, onDismiss: () -> 
 private fun PaperPickerDialog(current: String?, onPick: (PaperPreset) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Formato de página") },
+        title = { Text(stringResource(R.string.paper_picker_title)) },
         text = {
             Column {
                 Text(
-                    "Elige el tamaño real de la hoja para que las proporciones del dibujo sean correctas.",
+                    stringResource(R.string.paper_picker_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1826,7 +1915,7 @@ private fun PaperPickerDialog(current: String?, onPick: (PaperPreset) -> Unit, o
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -1843,19 +1932,30 @@ private fun TextPromptDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text(label) }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text.trim()) }) { Text("Guardar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        confirmButton = { TextButton(onClick = { if (text.isNotBlank()) onConfirm(text.trim()) }) { Text(stringResource(R.string.action_save)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
 @Composable
-private fun ConfirmDialog(title: String, body: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun ConfirmDialog(
+    title: String,
+    body: String,
+    confirmText: String = stringResource(R.string.action_delete),
+    destructive: Boolean = true,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(body) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Borrar", color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmText, color = if (destructive) MaterialTheme.colorScheme.error else Color.Unspecified)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -1863,7 +1963,7 @@ private fun ConfirmDialog(title: String, body: String, onConfirm: () -> Unit, on
 private fun MoveDialog(notebooks: List<Notebook>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Mover a cuaderno") },
+        title = { Text(stringResource(R.string.action_move_to_notebook)) },
         text = {
             LazyColumn {
                 items(notebooks, key = { it.id }) { nb ->
@@ -1876,7 +1976,65 @@ private fun MoveDialog(notebooks: List<Notebook>, onPick: (String) -> Unit, onDi
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
+}
+
+/**
+ * "Reproductor" para resolver una hoja con trazos superpuestos: dibuja la página
+ * y, con un slider tipo línea de tiempo (trazos ordenados por startTime), elige el
+ * punto de corte — lo posterior (naranja) se moverá. Tres salidas: misma página
+ * (descartar), nueva hoja o continuar en otro cuaderno.
+ */
+@Composable
+private fun OverlapResolverDialog(c: Capture, vm: MainViewModel, onDismiss: () -> Unit) {
+    val sorted = remember(c.strokes) { c.strokes.sortedBy { it.startTime } }
+    val o = c.overlap
+    val suggested = remember(c) {
+        if (o == null) sorted.size
+        else sorted.count { it.startTime < o.atTime }.let { if (it == 0) o.strokeIndex else it }.coerceIn(0, sorted.size)
+    }
+    var cut by remember { mutableIntStateOf(suggested) }
+    val moved = sorted.size - cut
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.overlap_dialog_title, c.sobpLabel)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    stringResource(R.string.overlap_dialog_body, o?.overlappingStrokes ?: 0, o?.areaPercent ?: 0),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(
+                    Modifier.fillMaxWidth().height(220.dp).background(Color.White, RoundedCornerShape(6.dp)),
+                ) {
+                    OverlapPreview(sorted, c.paper, cut, Modifier.fillMaxSize().padding(6.dp))
+                }
+                Slider(
+                    value = cut.toFloat(),
+                    onValueChange = { cut = it.roundToInt().coerceIn(0, sorted.size) },
+                    valueRange = 0f..sorted.size.toFloat().coerceAtLeast(1f),
+                )
+                Text(
+                    stringResource(R.string.overlap_dialog_moved, moved),
+                    style = MaterialTheme.typography.bodySmall, color = Color(0xFFEA580C),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { vm.resolveOverlap(c, cut, "newSheet"); onDismiss() },
+                        enabled = moved > 0, modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.finish_new_sheet)) }
+                    Button(
+                        onClick = { vm.resolveOverlap(c, cut, "newNotebook"); onDismiss() },
+                        enabled = moved > 0, modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.overlap_dialog_other_notebook)) }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = { vm.resolveOverlap(c, cut, "same"); onDismiss() }) { Text(stringResource(R.string.overlap_dialog_same_page)) }
+        },
     )
 }
 

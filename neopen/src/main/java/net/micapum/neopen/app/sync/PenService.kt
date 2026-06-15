@@ -33,7 +33,7 @@ class PenService : Service() {
     private fun buildNotification(): Notification =
         NotificationCompat.Builder(this, NeopenFullApp.CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText("Conexión del boli en segundo plano")
+            .setContentText(getString(R.string.pensvc_notif_text))
             .setSmallIcon(R.drawable.ic_launcher)
             .setOngoing(true)
             .build()

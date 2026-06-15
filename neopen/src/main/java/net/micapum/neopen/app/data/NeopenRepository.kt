@@ -1,5 +1,6 @@
 package net.micapum.neopen.app.data
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -20,7 +21,9 @@ import net.micapum.neopen.core.data.DotDto
 import net.micapum.neopen.core.data.NotebookDto
 import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.NotebookPatchDto
+import net.micapum.neopen.core.data.OverlapConfig
 import net.micapum.neopen.core.data.PaperDto
+import net.micapum.neopen.core.data.detectOverlap
 import net.micapum.neopen.core.data.ReorderDto
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.StrokeDto
@@ -46,6 +49,10 @@ object OutboxKind {
  * (Fase 3) se encolan en el outbox.
  */
 class NeopenRepository(private val db: NeopenDb) {
+
+    /** Umbral de detección de superposición (lo refresca el Graph desde los ajustes). */
+    @Volatile
+    var overlapConfig: OverlapConfig = OverlapConfig()
 
     // --- Lecturas (Flows reactivos sobre Room) ---
 
@@ -219,22 +226,122 @@ class NeopenRepository(private val db: NeopenDb) {
         val nb = db.notebooks().getById(notebookId) ?: return
         val bookKey = nb.bookKey ?: return
         val now = nowIso()
-        db.captures().sealByNotebook(notebookId, now)
-        db.notebooks().upsertOne(nb.copy(bookKey = null, name = "${nb.name} (finalizado)", updatedAt = now))
-        db.notebooks().upsertOne(
-            NotebookEntity(
-                id = "local-" + UUID.randomUUID(),
-                rev = 0,
-                name = nb.name,
-                color = nb.color,
-                createdAt = now,
-                updatedAt = now,
-                bookKey = bookKey,
-                paperJson = nb.paperJson,
-                paperSource = nb.paperSource,
-                category = nb.category,
-            ),
-        )
+        // Atómico: sellar + desligar + crear la copia no debe quedar a medias.
+        db.withTransaction {
+            db.captures().sealByNotebook(notebookId, now)
+            db.notebooks().upsertOne(nb.copy(bookKey = null, name = "${nb.name} (finalizado)", updatedAt = now))
+            db.notebooks().upsertOne(
+                NotebookEntity(
+                    id = "local-" + UUID.randomUUID(),
+                    rev = 0,
+                    name = nb.name,
+                    color = nb.color,
+                    createdAt = now,
+                    updatedAt = now,
+                    bookKey = bookKey,
+                    paperJson = nb.paperJson,
+                    paperSource = nb.paperSource,
+                    category = nb.category,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Corta una hoja con trazos superpuestos en LOCAL (sin servidor). Los trazos
+     * `[0, cut)` se quedan en la hoja original (que se sella y limpia el aviso) y
+     * los `[cut, …)` pasan a una hoja nueva sin sellar.
+     * - `newSheet`: la hoja nueva queda en el mismo cuaderno.
+     * - `newNotebook`: arranca un cuaderno nuevo (hereda el bookKey del original si
+     *   lo tenía, desligándolo del viejo).
+     */
+    suspend fun splitCaptureLocal(id: String, cutIndex: Int, mode: String) {
+        val e = db.captures().getById(id) ?: return
+        val sorted = Json.strokes(e.strokesJson).sortedBy { it.startTime }
+        // Un corte en 0 o al final (o una hoja vacía) no parte nada: no-op.
+        if (sorted.isEmpty() || cutIndex <= 0 || cutIndex >= sorted.size) return
+        val before = sorted.take(cutIndex)
+        val after = sorted.drop(cutIndex)
+        val now = nowIso()
+        // Atómico: sellar la original + (re)crear cuaderno + insertar la hoja nueva.
+        db.withTransaction {
+            // 1. La hoja original se queda con lo de antes del corte y se sella.
+            db.captures().upsertOne(
+                e.copy(strokesJson = Json.strokesJson(before), sealed = true, overlapJson = null, updatedAt = now),
+            )
+            // 2. Destino de la hoja nueva.
+            var notebookId = e.notebookId
+            var destination = e.destination
+            if (mode == "newNotebook") {
+                val srcNb = e.notebookId?.let { db.notebooks().getById(it) }
+                if (srcNb?.bookKey != null) {
+                    db.notebooks().upsertOne(srcNb.copy(bookKey = null, name = "${srcNb.name} (finalizado)", updatedAt = now))
+                    val freshNb = NotebookEntity(
+                        id = "local-" + UUID.randomUUID(),
+                        rev = 0,
+                        name = srcNb.name,
+                        color = srcNb.color,
+                        createdAt = now,
+                        updatedAt = now,
+                        bookKey = srcNb.bookKey,
+                        paperJson = srcNb.paperJson,
+                        paperSource = srcNb.paperSource,
+                        category = srcNb.category,
+                    )
+                    db.notebooks().upsertOne(freshNb)
+                    notebookId = freshNb.id
+                    destination = "notebook"
+                } else {
+                    val freshNb = NotebookEntity(
+                        id = "local-" + UUID.randomUUID(),
+                        rev = 0,
+                        name = e.name,
+                        color = "#64748b",
+                        createdAt = now,
+                        updatedAt = now,
+                        paperJson = e.paperJson,
+                        custom = true,
+                    )
+                    db.notebooks().upsertOne(freshNb)
+                    notebookId = freshNb.id
+                    destination = "notebook"
+                }
+            }
+            // 3. Inserta la hoja nueva con los trazos posteriores al corte.
+            db.captures().upsertOne(
+                CaptureEntity(
+                    id = "local-" + UUID.randomUUID(),
+                    rev = 0,
+                    section = e.section, owner = e.owner, book = e.book, page = e.page,
+                    notebook = e.notebook,
+                    source = e.source,
+                    capturedAt = e.capturedAt,
+                    importedAt = now,
+                    updatedAt = now,
+                    name = e.name,
+                    tagsJson = e.tagsJson,
+                    strokesJson = Json.strokesJson(after),
+                    destination = destination,
+                    notebookId = notebookId,
+                    position = 0,
+                    paperJson = e.paperJson,
+                    kind = e.kind,
+                    sealed = false,
+                ),
+            )
+        }
+    }
+
+    /** Descarta el aviso de superposición de una hoja en LOCAL (sin cortar). */
+    suspend fun dismissOverlapLocal(id: String) {
+        val e = db.captures().getById(id) ?: return
+        db.captures().upsertOne(e.copy(overlapJson = null, updatedAt = nowIso()))
+    }
+
+    /** Aplica al instante el resultado de un split del servidor (modo completo). */
+    suspend fun applySplitResult(original: CaptureDto, created: CaptureDto) {
+        db.captures().upsertOne(original.toEntity())
+        db.captures().upsertOne(created.toEntity())
     }
 
     suspend fun reorderNotebook(notebookId: String, orderedIds: List<String>) {
@@ -375,7 +482,13 @@ class NeopenRepository(private val db: NeopenDb) {
             val cur = Json.strokes(existing.strokesJson)
             val fresh = incoming.filter { n -> cur.none { it.startTime == n.startTime && it.dots.size == n.dots.size } }
             if (fresh.isEmpty()) return
-            db.captures().upsertOne(existing.copy(strokesJson = Json.strokesJson(cur + fresh), updatedAt = now))
+            // Detección de superposición: ¿los trazos nuevos pisan a los anteriores? Si
+            // dispara, marca la hoja; si no, conserva el aviso previo (sin resolver).
+            val overlapHit = detectOverlap(cur, fresh, overlapConfig)
+            val overlapJson = if (overlapHit != null) Json.overlapJson(overlapHit) else existing.overlapJson
+            db.captures().upsertOne(
+                existing.copy(strokesJson = Json.strokesJson(cur + fresh), overlapJson = overlapJson, updatedAt = now),
+            )
         } else {
             db.captures().upsertOne(
                 CaptureEntity(
