@@ -34,7 +34,7 @@ class PenService : Service() {
         NotificationCompat.Builder(this, NeopenFullApp.CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.pensvc_notif_text))
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
             .build()
 

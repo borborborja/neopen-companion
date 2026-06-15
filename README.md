@@ -1,93 +1,68 @@
 <p align="center">
-  <img src="assets/icono.svg" width="128" alt="neopen" />
+  <img src="assets/icono.svg" width="112" alt="neopen" />
 </p>
 
-# neopen companion (Android)
+<h1 align="center">neopen · Android</h1>
 
-App Android **companion** del proyecto [neopen](https://github.com/borborborja/neopen).
-Su único cometido: conectar por **Bluetooth LE** al **Neo smartpen M1+ (NWP-F51)**,
-captar la escritura (en vivo y de la memoria offline) y **subirla en crudo** al
-servidor neopen, que la archiva en su cuaderno por SOBP.
+<p align="center">
+  Android app for the <b>Neo smartpen M1+</b>: capture your handwriting over Bluetooth and keep it on your phone or sync it to a <a href="https://github.com/borborborja/neopen">neopen</a> server.
+</p>
 
-Es un **cliente fino**: no renderiza, no conoce la lógica de cuadernos. Todo eso
-lo hace el servidor (ver `docs/openapi.yaml`, copiado del repo neopen).
+<p align="center">
+  <b>English</b> · <a href="README.es.md">Español</a> · <a href="README.ca.md">Català</a>
+</p>
 
-## Pantallas
+> ⚠️ **Tested only with the Neo smartpen M1+ (NWP-F51).** Other pen models are untested and may not work.
 
-- **Boli**: cabecera con nombre + estado (`Conectado · Batería X% · Memoria Y%`) y
-  botón Conectar/Reconectar. Dos pestañas, como la ventana del boli en la web pero
-  **sin color ni sensibilidad de trazo**:
-  - **Configuración**: encendido automático, sonido, guardar offline, apagado
-    automático, e identidad (MAC, firmware).
-  - **Memoria**: leer memoria, importar libreta / importar todo, vaciar memoria, y
-    **volcar la memoria al servidor** (la copia/restauración completa de datos vive
-    en el propio neopen → Ajustes → Cuadernos).
-- **Ajustes**: URL del servidor + contraseña, y opciones de Bluetooth/sincronización
-  (conexión en segundo plano, modo manual o por intervalo, sincronizar ahora).
+## What it is
 
-## Arquitectura
+The Android counterpart of [**neopen**](https://github.com/borborborja). It connects to the Neo smartpen over **Bluetooth LE**, captures your writing (live and from the pen's offline memory), and either:
 
-```
-pen/Protocol.kt    Constantes y framing del protocolo v2 (UUIDs, comandos, dot 17B,
-                   escape DLE, checksum) — reconstruido del SDK oficial web_pen_sdk.
-pen/PenManager.kt  BLE: scan/connect/GATT, reensamblado de frames, handshake,
-                   captura online → StrokePage, y flujo offline. Expone PenState.
-data/SettingsStore Ajustes (DataStore): URL, contraseña, BLE, intervalo.
-data/Api.kt        Cliente Retrofit del servidor neopen (contrato docs/openapi.yaml).
-sync/Uploader.kt   StrokePage → POST /api/captures (el servidor archiva por SOBP).
-sync/PenService    Servicio en primer plano (conexión BLE en segundo plano).
-sync/SyncWorker    Volcado offline periódico (WorkManager, modo intervalo).
-ui/MainScreen.kt   Compose: pantalla del boli (pestañas) + ajustes.
-```
+- **Server mode** — uploads pages to your neopen server, which files them into notebooks and keeps everything in sync; or
+- **Local mode** — keeps everything **on the phone**, no server required. You can link a server later without losing anything.
 
-Una sola conexión BLE vive en `NeopenApp` (Application), compartida por la UI y el
-servicio. Cuando una página se completa, `PenManager.onPage` la sube vía `Uploader`.
+Notebooks, inbox, transcription (when online), overlapping-stroke detection, and finishing pages all work on-device, mirroring the web app.
 
-## Cómo abrirlo / compilarlo
+<p align="center">
+  <img src="assets/screenshots/inbox.png" width="720" alt="neopen (web app shown; the Android app feeds the same notes)" />
+</p>
 
-1. Abre la carpeta en **Android Studio** (Giraffe+); deja que genere el
-   `gradle-wrapper.jar` y sincronice (o ejecuta `gradle wrapper` si tienes Gradle).
-2. `minSdk 26`, `targetSdk 34`. Necesita un dispositivo **físico** con BLE
-   (el emulador no tiene Bluetooth).
-3. Concede los permisos de Bluetooth (y notificaciones en Android 13+) al arrancar.
+<p align="center"><sub>The neopen web app, where your notes land. More screenshots in the <a href="https://github.com/borborborja/neopen">neopen</a> repo.</sub></p>
 
-> Este scaffold se ha escrito sin un dispositivo a mano, así que **la capa BLE está
-> sin verificar en hardware**. La UI, los ajustes y el cliente API son completos y
-> funcionales; la parte BLE necesita una pasada con el boli real (ver abajo).
+## Features
 
-## Estado del protocolo BLE (qué falta verificar)
+- 🖊️ **BLE capture** of the M1+ — live, plus dumping the pen's offline memory.
+- 📴 **Local mode** (no server) or **server mode** (sync to neopen).
+- 🗂️ On-device **notebooks & inbox**, organize and tag.
+- ⚠️ **Overlapping-stroke detection** with timeline cut, and **finish page** (sealed permanently once you rewrite the same Ncode page).
+- 🔤 **Transcription** via your neopen server (when online).
+- 🔔 Optional **background service** to keep the pen connected.
+- 🔒 Server password **encrypted at rest** (Android Keystore) and excluded from cloud backup.
+- 🌍 Localized (16 languages) with light/dark themes.
 
-Constantes **confirmadas** desde `web_pen_sdk` (la implementación que ya funciona en
-la web): servicio `0x19F1`, write `0x2BA0`, notify `0x2BA1`, framing STX/ETX, escape
-DLE (`0x07, b^0x20`), checksum = suma de DATA & 0xFF, y el enum completo de comandos
-(`CMD.js`).
+## Build
 
-Marcado con **`VERIFY`** en el código (necesita el boli real o leer
-`PenRequestV2.js` / `PenClientParserV2.js` del SDK):
-- Payload exacto de `VERSION_REQUEST` y parseo de `VERSION_RESPONSE` (MAC/firmware).
-- Offsets de `SETTING_INFO_RESPONSE` (batería/memoria) y los ids de `SETTING_TYPE`.
-- Estructura del evento de dots y del `PAPER_INFO` (SOBP) — online.
-- Layout del chunk offline (`OFFLINE_PACKET_REQUEST`) y su descompresión zlib.
-
-**Alternativa recomendada si la reconstrucción da guerra:** integrar el **SDK oficial
-de Android de NeoLAB** (GPL-3.0) y dejar que él haga el BLE; `PenManager` se
-reescribe como un wrapper de su API y el resto de la app no cambia.
-
-## APK (GitHub Actions)
-
-El workflow `.github/workflows/build-apk.yml` compila un **APK debug** (instalable)
-en cada push a `main`, en cada PR y a demanda:
-
-- **Artifact**: pestaña *Actions* → run → `neopen-companion-debug`.
-- **Release**: al crear un tag `vX.Y.Z`, el APK se adjunta a la release.
+1. Open the project in **Android Studio** (or build from the CLI with **JDK 17**).
+2. `minSdk 26`, `targetSdk 34`. A **physical device** with BLE is required (the emulator has no Bluetooth).
+3. Grant Bluetooth (and notifications on Android 13+) permissions on first run.
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0   # genera una release con el APK
+JAVA_HOME=/path/to/jdk-17 ./gradlew :neopen:assembleDebug
 ```
 
-## Licencia
+### APK (GitHub Actions)
 
-Las constantes del protocolo se reconstruyeron a partir de los SDK GPL-3.0 de NeoLAB
-(no hay código copiado, solo los valores del protocolo). Si se integra el SDK oficial
-de NeoLAB, esta app hereda **GPL-3.0**. Tenlo en cuenta para cualquier plan de
-distribución comercial.
+CI builds an installable **debug APK** on every push to `main` and on PRs:
+
+- **Artifact**: *Actions* tab → run → APK artifact.
+- **Release**: pushing a tag `vX.Y.Z` attaches the APK to the GitHub release.
+
+## Disclaimer
+
+This app is an independent, community project. It is **not affiliated with, authorized, endorsed by, or sponsored by NeoLAB Convergence Inc.** "Neo smartpen", "Ncode", "N-code" and related names and logos are trademarks of NeoLAB Convergence Inc. and their respective owners, used here only to describe compatibility.
+
+It has been **tested only with the Neo smartpen M1+ (NWP-F51)**; other models are untested and may not work. The BLE protocol constants were reconstructed from NeoLAB's GPL-3.0 SDK (no code copied — only protocol values). The software is provided **"as is", without warranty of any kind**, to the extent permitted by law.
+
+## License
+
+[GPL-3.0](LICENSE).
