@@ -1522,6 +1522,7 @@ private fun SettingsScreen(vm: MainViewModel) {
                 recentClearedAt = settings.recentClearedAt,
                 finishMode = settings.finishMode,
                 notebookView = settings.notebookView,
+                themeMode = settings.themeMode,
             ),
         )
     }
@@ -1551,6 +1552,16 @@ private fun SettingsScreen(vm: MainViewModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // --- Tema ---
+        Text("Tema", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val opts = listOf("system" to "Sistema", "light" to "Claro", "dark" to "Oscuro")
+            opts.forEach { (value, label) ->
+                FilterChip(settings.themeMode == value, { vm.setThemeMode(value) }, label = { Text(label) })
+            }
+        }
+        HorizontalDivider()
+
         if (settings.appMode == AppMode.LOCAL) {
             // --- Modo local: vincular un servidor (migra los datos sin perderlos) ---
             Text("Modo local (sin servidor)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)

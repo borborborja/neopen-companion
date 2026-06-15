@@ -44,6 +44,8 @@ data class AppSettings(
     val finishMode: String = "newSheet",
     /** Vista de la pestaña Cuadernos: "Mosaic" | "Compact" | "List". */
     val notebookView: String = "Mosaic",
+    /** Tema de la app: "system" | "light" | "dark". */
+    val themeMode: String = "system",
 ) {
     val configured get() = serverUrl.isNotBlank() && password.isNotBlank()
 }
@@ -62,6 +64,7 @@ class SettingsStore(private val context: Context) {
         val recentCleared = stringPreferencesKey("recent_cleared")
         val finishMode = stringPreferencesKey("finish_mode")
         val notebookView = stringPreferencesKey("notebook_view")
+        val themeMode = stringPreferencesKey("theme_mode")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -81,6 +84,7 @@ class SettingsStore(private val context: Context) {
             recentClearedAt = p[Keys.recentCleared] ?: "",
             finishMode = p[Keys.finishMode] ?: "newSheet",
             notebookView = p[Keys.notebookView] ?: "Mosaic",
+            themeMode = p[Keys.themeMode] ?: "system",
         )
     }
 
@@ -98,6 +102,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.recentCleared] = s.recentClearedAt
             p[Keys.finishMode] = s.finishMode
             p[Keys.notebookView] = s.notebookView
+            p[Keys.themeMode] = s.themeMode
         }
     }
 }
