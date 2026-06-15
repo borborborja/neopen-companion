@@ -112,6 +112,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
@@ -555,11 +556,21 @@ private fun NotebookMenu(vm: MainViewModel, nb: Notebook, onEdit: (String) -> Un
     var open by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var formatting by remember { mutableStateOf(false) }
+    var background by remember { mutableStateOf(false) }
+    val bookBg by remember(nb.bookKey) {
+        nb.bookKey?.let { vm.observeBookBackground(it) } ?: flowOf(null)
+    }.collectAsStateWithLifecycle(initialValue = null)
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "Acciones") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("Editar") }, onClick = { open = false; onEdit(nb.id) })
             DropdownMenuItem(text = { Text("Formato de página…") }, onClick = { open = false; formatting = true })
+            if (nb.bookKey != null) {
+                DropdownMenuItem(
+                    text = { Text(if (bookBg != null) "Fondo: ${bookBg?.label}" else "Fondo…") },
+                    onClick = { open = false; background = true },
+                )
+            }
             DropdownMenuItem(text = { Text("Compartir (PDF)") }, onClick = {
                 open = false
                 scope.launch { vm.exportNotebookPdf(nb.id)?.let { shareExport(context, it) } }
@@ -581,6 +592,17 @@ private fun NotebookMenu(vm: MainViewModel, nb: Notebook, onEdit: (String) -> Un
     if (deleting) {
         ConfirmDialog("¿Borrar «${nb.name}»?", "Sus hojas pasarán a «Sin clasificar».",
             onConfirm = { vm.deleteNotebook(nb.id); deleting = false }, onDismiss = { deleting = false })
+    }
+    if (background && nb.bookKey != null) {
+        BackgroundPickerDialog(
+            vm = vm,
+            scope = "book",
+            bookKey = nb.bookKey,
+            page = null,
+            currentLabel = bookBg?.label,
+            onRemove = bookBg?.let { bg -> { vm.removeBackground(bg) } },
+            onDismiss = { background = false },
+        )
     }
 }
 
@@ -625,7 +647,7 @@ private fun NotebookScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                gridItems(pages, key = { it.id }) { p -> PageGridItem(p, onClick = { onOpenPage(p.id) }) }
+                gridItems(pages, key = { it.id }) { p -> PageGridItem(vm, p, onClick = { onOpenPage(p.id) }) }
             }
             PageView.List -> LazyColumn(
                 modifier = Modifier.padding(padding).fillMaxSize(),
@@ -646,9 +668,9 @@ private fun NotebookScreen(
 }
 
 @Composable
-private fun PageGridItem(page: Capture, onClick: () -> Unit) {
+private fun PageGridItem(vm: MainViewModel, page: Capture, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
-        InkCanvas(page.strokes, page.paper, Modifier.fillMaxWidth().aspectRatio(0.8f).background(Color.White))
+        PageCanvas(vm, page, Modifier.fillMaxWidth().aspectRatio(0.8f).background(Color.White))
         Text(
             page.name,
             style = MaterialTheme.typography.bodySmall,
@@ -663,7 +685,7 @@ private fun PageGridItem(page: Capture, onClick: () -> Unit) {
 private fun PageListRow(vm: MainViewModel, page: Capture, notebooks: List<Notebook>, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
         Row(Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            InkCanvas(page.strokes, page.paper, Modifier.size(64.dp).background(Color.White, RoundedCornerShape(8.dp)))
+            PageCanvas(vm, page, Modifier.size(64.dp).background(Color.White, RoundedCornerShape(8.dp)))
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(page.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -681,7 +703,7 @@ private fun PageListRow(vm: MainViewModel, page: Capture, notebooks: List<Notebo
 private fun PageLargeCard(vm: MainViewModel, page: Capture, notebooks: List<Notebook>) {
     Card(Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
         Column {
-            InkCanvas(page.strokes, page.paper, Modifier.fillMaxWidth().height(360.dp).background(Color.White))
+            PageCanvas(vm, page, Modifier.fillMaxWidth().height(360.dp).background(Color.White))
             Text(
                 page.name,
                 style = MaterialTheme.typography.titleSmall,
@@ -702,11 +724,20 @@ private fun PageLargeCard(vm: MainViewModel, page: Capture, notebooks: List<Note
 private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Notebook>, onBack: () -> Unit) {
     val capture by vm.captureFlow(captureId).collectAsStateWithLifecycle(initialValue = null)
     val c = capture
+    var bgOpen by remember { mutableStateOf(false) }
+    val bk = c?.let { "${it.section}.${it.owner}.${it.book}" }
+    val sheetBg by remember(bk, c?.page) {
+        if (bk != null && c != null) vm.observeSheetBackground(bk, c.page) else flowOf(null)
+    }.collectAsStateWithLifecycle(initialValue = null)
+    val pageScopeBg = sheetBg?.takeIf { it.scope == "page" }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(c?.name ?: "Hoja", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") } },
+                actions = {
+                    if (c != null) TextButton(onClick = { bgOpen = true }) { Text("Fondo") }
+                },
             )
         },
     ) { padding ->
@@ -715,7 +746,7 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
             return@Scaffold
         }
         Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
-            InkCanvas(c.strokes, c.paper, Modifier.fillMaxWidth().height(420.dp).background(Color.White))
+            PageCanvas(vm, c, Modifier.fillMaxWidth().height(420.dp).background(Color.White))
             CaptureActions(vm, c, notebooks, asRow = true, onAfterDelete = onBack)
             if (c.tags.isNotEmpty()) TagChips(c.tags, Modifier.padding(horizontal = 12.dp))
             val text = c.transcription?.text
@@ -725,6 +756,17 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
                 Spacer(Modifier.size(24.dp))
             }
         }
+    }
+    if (bgOpen && c != null && bk != null) {
+        BackgroundPickerDialog(
+            vm = vm,
+            scope = "page",
+            bookKey = bk,
+            page = c.page,
+            currentLabel = sheetBg?.label,
+            onRemove = pageScopeBg?.let { bg -> { vm.removeBackground(bg) } },
+            onDismiss = { bgOpen = false },
+        )
     }
 }
 

@@ -8,6 +8,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -60,9 +62,33 @@ class NeopenFullApp : Application() {
     }
 }
 
+/** v2→v3: añade la tabla de fondos (anclajes de plantilla) sin perder capturas. */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS page_backgrounds (
+                id TEXT NOT NULL PRIMARY KEY,
+                bookKey TEXT NOT NULL,
+                page INTEGER,
+                scope TEXT NOT NULL,
+                bgPreset TEXT,
+                bgImage TEXT,
+                label TEXT NOT NULL,
+                source TEXT NOT NULL,
+                remote INTEGER NOT NULL,
+                createdAt TEXT NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_page_backgrounds_bookKey ON page_backgrounds(bookKey)")
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
+        .addMigrations(MIGRATION_2_3)
         .fallbackToDestructiveMigration()
         .build()
     val settings = SettingsStore(app)

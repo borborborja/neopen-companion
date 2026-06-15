@@ -179,6 +179,41 @@ data class SobpScanDto(
 )
 data class CreateSobpScanInput(val label: String, val sobp: SobpDto, val pen: String? = null)
 
+// --- Fondos / anclajes de diseño (plantilla detrás de los trazos) ---
+
+/** Capacidades del servidor (solo leemos si Studio está activo). */
+data class StudioCapDto(val enabled: Boolean = false)
+data class CapabilitiesDto(val studio: StudioCapDto? = null)
+
+/**
+ * Anclaje de diseño del servidor (DesignAnchor). Solo usamos imagen/preset/ámbito;
+ * `studio` (config vectorial de la web) se ignora en Android. Moshi descarta los
+ * campos no declarados, así que no hace falta modelar `studio` ni `pageBySobp` salvo
+ * para deducir la página del ámbito "page".
+ */
+data class AnchorDto(
+    val id: String,
+    val label: String = "",
+    val bookKey: String,
+    val scope: String? = null,
+    val bgImage: String? = null,
+    val bgPreset: String? = null,
+    val pageBySobp: Map<String, Int>? = null,
+    val source: String = "custom",
+    val createdAt: String,
+)
+
+data class BackgroundUploadInput(val dataUrl: String)
+data class BackgroundUploadDto(val url: String)
+
+/** Generación reciente / preset guardado en Studio (solo necesitamos la imagen). */
+data class StudioItemDto(
+    val id: String,
+    val label: String = "",
+    val bgImage: String? = null,
+    val createdAt: String? = null,
+)
+
 /** Cliente del servidor neopen. La contraseña va en la cabecera por petición. */
 interface NeopenApi {
     /** Healthcheck público (sin auth): comprueba que el servidor responde. */
@@ -188,6 +223,40 @@ interface NeopenApi {
     /** Endpoint con auth: sirve para validar la contraseña (200 ok / 401 incorrecta). */
     @GET("api/capabilities")
     suspend fun capabilities(@Header("X-Auth-Password") password: String): Response<Unit>
+
+    /** Capacidades tipadas (p. ej. si Studio está activo → recientes/presets). */
+    @GET("api/capabilities")
+    suspend fun capabilitiesInfo(@Header("X-Auth-Password") password: String): CapabilitiesDto
+
+    // --- Fondos / anclajes de diseño ---
+
+    @GET("api/anchors")
+    suspend fun listAnchors(@Header("X-Auth-Password") password: String): List<AnchorDto>
+
+    @PUT("api/anchors/{id}")
+    suspend fun putAnchor(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+        @Body body: AnchorDto,
+    ): Response<Unit>
+
+    @DELETE("api/anchors/{id}")
+    suspend fun deleteAnchor(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+    ): Response<Unit>
+
+    @POST("api/backgrounds")
+    suspend fun uploadBackground(
+        @Header("X-Auth-Password") password: String,
+        @Body body: BackgroundUploadInput,
+    ): BackgroundUploadDto
+
+    @GET("api/studio/recents")
+    suspend fun listRecents(@Header("X-Auth-Password") password: String): List<StudioItemDto>
+
+    @GET("api/studio/presets")
+    suspend fun listPresets(@Header("X-Auth-Password") password: String): List<StudioItemDto>
 
     // --- Lectura / sincronización ---
 

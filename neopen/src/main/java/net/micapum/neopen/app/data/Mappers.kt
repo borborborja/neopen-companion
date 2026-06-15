@@ -2,6 +2,8 @@ package net.micapum.neopen.app.data
 
 import net.micapum.neopen.app.db.CaptureEntity
 import net.micapum.neopen.app.db.NotebookEntity
+import net.micapum.neopen.app.db.PageBackgroundEntity
+import net.micapum.neopen.core.data.AnchorDto
 import net.micapum.neopen.core.data.CaptureDto
 import net.micapum.neopen.core.data.NotebookDto
 
@@ -70,6 +72,37 @@ fun CaptureEntity.toDomain(): Capture = Capture(
     paper = Json.paperOf(paperJson),
     kind = kind,
 )
+
+fun PageBackgroundEntity.toDomain(): PageBackground = PageBackground(
+    id = id,
+    bookKey = bookKey,
+    page = page,
+    scope = scope,
+    bgPreset = bgPreset,
+    bgImage = bgImage,
+    label = label,
+    source = source,
+    remote = remote,
+)
+
+/** DesignAnchor del servidor → fila local (remote=true). El ámbito "page" deduce
+ *  su página de la primera clave de pageBySobp. */
+fun AnchorDto.toBackgroundEntity(): PageBackgroundEntity {
+    val sc = scope ?: "page"
+    val pg = if (sc == "page") pageBySobp?.keys?.firstOrNull()?.toIntOrNull() else null
+    return PageBackgroundEntity(
+        id = id,
+        bookKey = bookKey,
+        page = pg,
+        scope = sc,
+        bgPreset = bgPreset,
+        bgImage = bgImage,
+        label = label,
+        source = source,
+        remote = true,
+        createdAt = createdAt,
+    )
+}
 
 fun NotebookEntity.toDomain(pageCount: Int = 0): Notebook = Notebook(
     id = id,

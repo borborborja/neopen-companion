@@ -78,6 +78,25 @@ data class SyncMetaEntity(
     val lastPushAt: Long = 0,
 )
 
+/**
+ * Fondo (plantilla) anclado a un cuaderno o a una hoja. Espejo local de un
+ * `DesignAnchor` del servidor (modo completo) o fila puramente local (modo
+ * local). `page` null = ámbito cuaderno; con valor = ámbito hoja.
+ */
+@Entity(tableName = "page_backgrounds", indices = [Index("bookKey")])
+data class PageBackgroundEntity(
+    @PrimaryKey val id: String,
+    val bookKey: String,
+    val page: Int? = null,
+    val scope: String = "book",
+    val bgPreset: String? = null,
+    val bgImage: String? = null,
+    val label: String = "",
+    val source: String = "custom",
+    val remote: Boolean = false,
+    val createdAt: String,
+)
+
 // --- DAOs --------------------------------------------------------------------
 
 @Dao
@@ -188,9 +207,36 @@ interface SyncMetaDao {
     suspend fun upsert(row: SyncMetaEntity)
 }
 
+@Dao
+interface PageBackgroundDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: PageBackgroundEntity)
+
+    @Query("SELECT * FROM page_backgrounds WHERE bookKey = :bookKey")
+    suspend fun forBook(bookKey: String): List<PageBackgroundEntity>
+
+    @Query("SELECT * FROM page_backgrounds WHERE bookKey = :bookKey")
+    fun observeForBook(bookKey: String): Flow<List<PageBackgroundEntity>>
+
+    @Query("SELECT * FROM page_backgrounds WHERE id = :id")
+    suspend fun getById(id: String): PageBackgroundEntity?
+
+    @Query("DELETE FROM page_backgrounds WHERE id = :id")
+    suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM page_backgrounds WHERE remote = 1")
+    suspend fun clearRemote()
+
+    @Query("DELETE FROM page_backgrounds")
+    suspend fun clear()
+}
+
 @Database(
-    entities = [CaptureEntity::class, NotebookEntity::class, OutboxEntity::class, SyncMetaEntity::class],
-    version = 2,
+    entities = [
+        CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
+        SyncMetaEntity::class, PageBackgroundEntity::class,
+    ],
+    version = 3,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {
@@ -198,4 +244,5 @@ abstract class NeopenDb : RoomDatabase() {
     abstract fun notebooks(): NotebookDao
     abstract fun outbox(): OutboxDao
     abstract fun syncMeta(): SyncMetaDao
+    abstract fun backgrounds(): PageBackgroundDao
 }

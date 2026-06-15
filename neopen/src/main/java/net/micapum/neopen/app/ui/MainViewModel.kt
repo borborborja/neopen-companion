@@ -14,6 +14,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
+import net.micapum.neopen.app.data.PageBackground
+import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.sync.PenService
@@ -21,14 +23,17 @@ import net.micapum.neopen.app.render.rasterizePng
 import net.micapum.neopen.app.render.renderNotebookPdf
 import net.micapum.neopen.app.render.renderPagePdf
 import net.micapum.neopen.app.render.renderSvg
+import net.micapum.neopen.core.data.AnchorDto
 import net.micapum.neopen.core.data.ApiFactory
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.data.BackgroundUploadInput
 import net.micapum.neopen.core.data.CreateSobpScanInput
 import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.SobpScanDto
+import net.micapum.neopen.core.data.StudioItemDto
 import net.micapum.neopen.core.pen.OfflineNote
 import net.micapum.neopen.core.pen.PenState
 import net.micapum.neopen.core.pen.Sobp
@@ -371,6 +376,123 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return ExportFile("${fileBaseName(nb.name)}.pdf", ExportFormat.PDF.mime, bytes)
     }
 
+    // --- Fondos (plantilla detrás de los trazos) ------------------------------
+
+    private val _studioEnabled = MutableStateFlow(false)
+    val studioEnabled: StateFlow<Boolean> = _studioEnabled.asStateFlow()
+
+    private val _recents = MutableStateFlow<List<StudioItemDto>>(emptyList())
+    val recents: StateFlow<List<StudioItemDto>> = _recents.asStateFlow()
+
+    private val _presets = MutableStateFlow<List<StudioItemDto>>(emptyList())
+    val presets: StateFlow<List<StudioItemDto>> = _presets.asStateFlow()
+
+    /** ¿Hay servidor con el que sincronizar fondos? (no estamos en modo local). */
+    fun hasServer(): Boolean =
+        settings.value.appMode != AppMode.LOCAL && settings.value.serverUrl.isNotBlank()
+
+    /** Refresca si Studio está activo (→ recientes/presets) al abrir el selector. */
+    fun refreshStudio() {
+        val s = settings.value
+        if (!hasServer()) {
+            _studioEnabled.value = false
+            _recents.value = emptyList(); _presets.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            val api = ApiFactory.create(s.serverUrl)
+            val enabled = runCatching { api.capabilitiesInfo(s.password).studio?.enabled == true }.getOrDefault(false)
+            _studioEnabled.value = enabled
+            if (enabled) {
+                _recents.value = runCatching { api.listRecents(s.password) }.getOrDefault(emptyList())
+                _presets.value = runCatching { api.listPresets(s.password) }.getOrDefault(emptyList())
+            } else {
+                _recents.value = emptyList(); _presets.value = emptyList()
+            }
+        }
+    }
+
+    fun observeSheetBackground(bookKey: String, page: Int) = graph.repo.observeSheetBackground(bookKey, page)
+
+    fun observeBookBackground(bookKey: String) = graph.repo.observeBookBackground(bookKey)
+
+    private fun newBgId(): String = "bg-" + java.util.UUID.randomUUID()
+    private fun nowIso(): String = java.time.Instant.now().toString()
+
+    /** Guarda un PNG de fondo en el almacenamiento de la app (modo local). */
+    private fun saveLocalPng(id: String, bytes: ByteArray): String {
+        val dir = java.io.File(getApplication<Application>().filesDir, "backgrounds").apply { mkdirs() }
+        val f = java.io.File(dir, "$id.png")
+        f.writeBytes(bytes)
+        return "file://" + f.absolutePath
+    }
+
+    private suspend fun uploadPng(bytes: ByteArray): String? {
+        val s = settings.value
+        val dataUrl = "data:image/png;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        return runCatching {
+            withContext(Dispatchers.IO) { ApiFactory.create(s.serverUrl).uploadBackground(s.password, BackgroundUploadInput(dataUrl)).url }
+        }.getOrNull()
+    }
+
+    /**
+     * Crea/actualiza el fondo de un cuaderno (`scope="book"`, page=null) o de una
+     * hoja (`scope="page"`). En modo completo lo persiste como anchor en el
+     * servidor (compartido con la web); en local, solo en Room (+ archivo si es PNG).
+     */
+    fun setBackground(scope: String, bookKey: String, page: Int?, choice: ResolvedBg) {
+        viewModelScope.launch {
+            val s = settings.value
+            val existing = if (scope == "book") graph.repo.bookBackground(bookKey)
+            else page?.let { graph.repo.pageBackground(bookKey, it) }
+            val id = existing?.id ?: newBgId()
+            val now = nowIso()
+            var bgImage: String? = null
+            var bgPreset: String? = null
+            when (choice) {
+                is ResolvedBg.Preset -> bgPreset = choice.id
+                is ResolvedBg.ServerUrl -> bgImage = choice.url
+                is ResolvedBg.Png -> {
+                    bgImage = if (!hasServer()) saveLocalPng(id, choice.bytes)
+                    else uploadPng(choice.bytes) ?: run { _status.value = "No se pudo subir el fondo (¿sin conexión?)"; return@launch }
+                }
+            }
+            if (hasServer()) {
+                val ok = runCatching {
+                    ApiFactory.create(s.serverUrl).putAnchor(
+                        s.password, id,
+                        AnchorDto(
+                            id = id, label = choice.label, bookKey = bookKey, scope = scope,
+                            bgImage = bgImage, bgPreset = bgPreset,
+                            pageBySobp = if (scope == "page" && page != null) mapOf(page.toString() to 0) else null,
+                            source = choice.source, createdAt = now,
+                        ),
+                    ).isSuccessful
+                }.getOrDefault(false)
+                if (!ok) { _status.value = "No se pudo guardar el fondo (¿sin conexión?)"; return@launch }
+            }
+            graph.repo.upsertBackground(
+                PageBackgroundEntity(
+                    id = id, bookKey = bookKey, page = page, scope = scope,
+                    bgPreset = bgPreset, bgImage = bgImage, label = choice.label,
+                    source = choice.source, remote = hasServer(), createdAt = now,
+                ),
+            )
+        }
+    }
+
+    fun removeBackground(bg: PageBackground) {
+        viewModelScope.launch {
+            if (bg.remote) {
+                val s = settings.value
+                runCatching { ApiFactory.create(s.serverUrl).deleteAnchor(s.password, bg.id) }
+            }
+            val img = bg.bgImage
+            if (img != null && img.startsWith("file://")) runCatching { java.io.File(img.removePrefix("file://")).delete() }
+            graph.repo.deleteBackground(bg.id)
+        }
+    }
+
     private fun fileBaseName(name: String): String {
         val cleaned = name.trim().replace(Regex("[^\\p{L}\\p{N} _-]"), "").replace(' ', '_').take(60)
         return cleaned.ifBlank { "neopen" }
@@ -379,6 +501,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
 /** Fichero exportado listo para compartir o guardar. */
 class ExportFile(val filename: String, val mime: String, val bytes: ByteArray)
+
+/** Fondo elegido en el selector, ya resuelto a algo que se puede persistir. */
+sealed interface ResolvedBg {
+    val label: String
+    val source: String
+
+    /** Preset del catálogo (patrón dibujado en el cliente). */
+    data class Preset(val id: String, override val label: String) : ResolvedBg {
+        override val source get() = "preset"
+    }
+
+    /** Imagen ya en el servidor (reciente/preset de Studio). */
+    data class ServerUrl(val url: String, override val label: String) : ResolvedBg {
+        override val source get() = "custom"
+    }
+
+    /** PNG rasterizado en el dispositivo (imagen o PDF subidos por el usuario). */
+    data class Png(val bytes: ByteArray, override val label: String) : ResolvedBg {
+        override val source get() = "custom"
+    }
+}
 
 /** Resultado de la prueba de conexión con el servidor neopen. */
 sealed interface ServerCheck {
