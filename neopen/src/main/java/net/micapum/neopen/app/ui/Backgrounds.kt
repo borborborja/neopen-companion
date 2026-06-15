@@ -11,18 +11,30 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,14 +42,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.rememberCoroutineScope
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -87,8 +106,7 @@ private fun rememberBgImage(vm: MainViewModel, bg: PageBackground?): ImageBitmap
 
 /**
  * Como [InkCanvas] pero resolviendo y pintando el fondo anclado a la hoja
- * (imagen o preset del catálogo) debajo de los trazos. Usar donde se muestre una
- * captura para que se vea su plantilla.
+ * (imagen o preset del catálogo) debajo de los trazos.
  */
 @Composable
 fun PageCanvas(vm: MainViewModel, page: Capture, modifier: Modifier = Modifier) {
@@ -106,10 +124,100 @@ fun PageCanvas(vm: MainViewModel, page: Capture, modifier: Modifier = Modifier) 
 }
 
 /**
- * Selector de fondo (catálogo + subir imagen/PDF + recientes/presets si Studio).
- * `scope` = "book" (fondo de cuaderno) o "page" (fondo de hoja). En ámbito hoja,
- * `page` es su número.
+ * Miniatura NÍTIDA de un preset del catálogo para el selector (el patrón real del
+ * fondo es tenue; aquí lo dibujamos marcado en oscuro sobre el chip blanco).
  */
+@Composable
+private fun PresetThumb(id: String, modifier: Modifier = Modifier) {
+    val ink = Color(0xFF334155)
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return@Canvas
+        val sw = (h / 80f).coerceIn(2f, 4f)
+        when (id) {
+            BgPresets.LINED -> {
+                val step = h / 7f
+                var y = step
+                while (y < h - 1f) {
+                    drawLine(ink, Offset(w * 0.12f, y), Offset(w * 0.88f, y), sw)
+                    y += step
+                }
+            }
+            BgPresets.GRID -> {
+                val step = h / 7f
+                var y = step
+                while (y < h - 1f) {
+                    drawLine(ink, Offset(0f, y), Offset(w, y), sw)
+                    y += step
+                }
+                var x = step
+                while (x < w - 1f) {
+                    drawLine(ink, Offset(x, 0f), Offset(x, h), sw)
+                    x += step
+                }
+            }
+            BgPresets.DOTS -> {
+                val step = h / 7f
+                var y = step
+                while (y < h - 1f) {
+                    var x = step
+                    while (x < w - 1f) {
+                        drawCircle(ink, radius = sw, center = Offset(x, y))
+                        x += step
+                    }
+                    y += step
+                }
+            }
+            BgPresets.MUSIC -> {
+                val gap = h / 22f
+                val groupGap = gap * 3f
+                var y = gap * 1.5f
+                while (y + gap * 4f < h) {
+                    for (i in 0 until 5) {
+                        drawLine(ink, Offset(w * 0.1f, y + i * gap), Offset(w * 0.9f, y + i * gap), sw * 0.7f)
+                    }
+                    y += gap * 4f + groupGap
+                }
+            }
+        }
+    }
+}
+
+/** Tarjeta de una opción: preview arriba (cuadro blanco) + etiqueta completa debajo. */
+@Composable
+private fun BgCard(label: String, onClick: () -> Unit, preview: @Composable BoxScope.() -> Unit) {
+    Column(
+        modifier = Modifier.width(100.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.72f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White)
+                .clickable(onClick = onClick),
+            content = preview,
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * Selector de fondo (diálogo ancho con rejilla de previews). `scope` = "book"
+ * (fondo de cuaderno) o "page" (fondo de hoja). En ámbito hoja, `page` es su nº.
+ * Catálogo + subir imagen/PDF siempre; recientes/presets si Studio está activo
+ * (modo completo). Igual que la versión web.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BackgroundPickerDialog(
     vm: MainViewModel,
@@ -139,72 +247,108 @@ fun BackgroundPickerDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (scope == "book") "Fondo del cuaderno" else "Fondo de la hoja") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val gridH = Arrangement.spacedBy(12.dp)
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth(0.95f).heightIn(max = 640.dp),
+        ) {
+            Column(
+                Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    if (scope == "book") "Fondo del cuaderno" else "Fondo de la hoja",
+                    style = MaterialTheme.typography.titleLarge,
+                )
                 if (currentLabel != null) {
-                    Text("Plantilla actual: $currentLabel", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Fondo actual: $currentLabel",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Text("Catálogo", style = MaterialTheme.typography.labelLarge)
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                Text("Catálogo", style = MaterialTheme.typography.titleSmall)
+                FlowRow(horizontalArrangement = gridH, verticalArrangement = gridH) {
                     BgPresets.ALL.forEach { id ->
-                        OutlinedButton(onClick = {
-                            vm.setBackground(scope, bookKey, page, ResolvedBg.Preset(id, presetLabel(id)))
-                            onDismiss()
-                        }) { Text(presetLabel(id)) }
+                        BgCard(
+                            label = presetLabel(id),
+                            onClick = {
+                                vm.setBackground(scope, bookKey, page, ResolvedBg.Preset(id, presetLabel(id)))
+                                onDismiss()
+                            },
+                        ) { PresetThumb(id, Modifier.fillMaxSize()) }
                     }
                 }
-                OutlinedButton(onClick = { picker.launch(arrayOf("image/*", "application/pdf")) }) {
+
+                OutlinedButton(onClick = { picker.launch(arrayOf("image/*", "application/pdf")) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Subir imagen o PDF")
                 }
 
-                if (studioEnabled && recents.any { it.bgImage != null }) {
-                    Text("Recientes", style = MaterialTheme.typography.labelLarge)
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        recents.forEach { r ->
-                            val url = r.bgImage ?: return@forEach
-                            AsyncImage(
-                                model = bgUrl(server, url),
-                                contentDescription = r.label,
-                                modifier = Modifier.size(56.dp, 78.dp).clickableThumb {
-                                    vm.setBackground(scope, bookKey, page, ResolvedBg.ServerUrl(url, r.label.ifBlank { "Reciente" }))
-                                    onDismiss()
-                                },
-                            )
-                        }
-                    }
-                }
                 if (studioEnabled && presets.any { it.bgImage != null }) {
-                    Text("Presets", style = MaterialTheme.typography.labelLarge)
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Presets", style = MaterialTheme.typography.titleSmall)
+                    FlowRow(horizontalArrangement = gridH, verticalArrangement = gridH) {
                         presets.forEach { p ->
                             val url = p.bgImage ?: return@forEach
-                            AsyncImage(
-                                model = bgUrl(server, url),
-                                contentDescription = p.label,
-                                modifier = Modifier.size(56.dp, 78.dp).clickableThumb {
-                                    vm.setBackground(scope, bookKey, page, ResolvedBg.ServerUrl(url, p.label.ifBlank { "Preset" }))
+                            val label = p.label.ifBlank { "Preset" }
+                            BgCard(
+                                label = label,
+                                onClick = {
+                                    vm.setBackground(scope, bookKey, page, ResolvedBg.ServerUrl(url, label))
                                     onDismiss()
                                 },
-                            )
+                            ) {
+                                AsyncImage(
+                                    model = bgUrl(server, url),
+                                    contentDescription = label,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
                     }
                 }
+
+                if (studioEnabled && recents.any { it.bgImage != null }) {
+                    Text("Recientes", style = MaterialTheme.typography.titleSmall)
+                    FlowRow(horizontalArrangement = gridH, verticalArrangement = gridH) {
+                        recents.forEach { r ->
+                            val url = r.bgImage ?: return@forEach
+                            val label = r.label.ifBlank { "Reciente" }
+                            BgCard(
+                                label = label,
+                                onClick = {
+                                    vm.setBackground(scope, bookKey, page, ResolvedBg.ServerUrl(url, label))
+                                    onDismiss()
+                                },
+                            ) {
+                                AsyncImage(
+                                    model = bgUrl(server, url),
+                                    contentDescription = label,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (onRemove != null) {
+                        TextButton(onClick = { onRemove(); onDismiss() }) { Text("Quitar fondo") }
+                        Spacer(Modifier.size(8.dp))
+                    }
+                    TextButton(onClick = onDismiss) { Text("Cerrar") }
+                }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
-        dismissButton = if (onRemove != null) {
-            { TextButton(onClick = { onRemove(); onDismiss() }) { Text("Quitar fondo") } }
-        } else null,
-    )
+        }
+    }
 }
 
 // --- helpers ---------------------------------------------------------------
-
-private fun Modifier.clickableThumb(onClick: () -> Unit): Modifier =
-    this.clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick)
 
 /** Convierte una imagen o PDF (Uri) a PNG (primera página del PDF), reescalado. */
 fun uriToPngBytes(ctx: Context, uri: Uri): ByteArray? {
