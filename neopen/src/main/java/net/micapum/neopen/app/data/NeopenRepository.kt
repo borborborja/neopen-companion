@@ -197,6 +197,46 @@ class NeopenRepository(private val db: NeopenDb) {
         enqueue(OutboxKind.DELETE_CAPTURE, id, "{}")
     }
 
+    // --- Finalizar hoja / cuaderno (sellado) -----------------------------------
+
+    /** Sella/reabre una hoja (modo completo): optimista + outbox PATCH. */
+    suspend fun setCaptureSealed(id: String, sealed: Boolean) {
+        db.captures().setSealed(id, sealed, nowIso())
+        enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(sealed = sealed)))
+    }
+
+    /** Sella/reabre una hoja (modo local, sin servidor). */
+    suspend fun setCaptureSealedLocal(id: String, sealed: Boolean) {
+        db.captures().setSealed(id, sealed, nowIso())
+    }
+
+    /**
+     * Finaliza un cuaderno en LOCAL (modo "nuevo cuaderno"): sella sus hojas,
+     * desliga el bookKey del cuaderno viejo (renombrándolo) y crea una copia nueva
+     * con el mismo bookKey, de modo que el siguiente trazo cree un cuaderno nuevo.
+     */
+    suspend fun finalizeNotebookLocal(notebookId: String) {
+        val nb = db.notebooks().getById(notebookId) ?: return
+        val bookKey = nb.bookKey ?: return
+        val now = nowIso()
+        db.captures().sealByNotebook(notebookId, now)
+        db.notebooks().upsertOne(nb.copy(bookKey = null, name = "${nb.name} (finalizado)", updatedAt = now))
+        db.notebooks().upsertOne(
+            NotebookEntity(
+                id = "local-" + UUID.randomUUID(),
+                rev = 0,
+                name = nb.name,
+                color = nb.color,
+                createdAt = now,
+                updatedAt = now,
+                bookKey = bookKey,
+                paperJson = nb.paperJson,
+                paperSource = nb.paperSource,
+                category = nb.category,
+            ),
+        )
+    }
+
     suspend fun reorderNotebook(notebookId: String, orderedIds: List<String>) {
         orderedIds.forEachIndexed { i, cid ->
             db.captures().getById(cid)?.let { db.captures().upsertOne(it.copy(position = i, updatedAt = nowIso())) }

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
@@ -69,6 +70,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -151,7 +153,7 @@ private fun penDotColor(status: PenStatus): Color = when (status) {
 
 /** Pestañas inferiores. El conjunto visible depende del modo de la app. */
 private enum class HomeTab(val title: String, val icon: ImageVector) {
-    INBOX("Bandeja", Icons.Filled.Inbox),
+    INBOX("Ediciones", Icons.Filled.Inbox),
     NOTEBOOKS("Cuadernos", Icons.Filled.Book),
     PEN("Boli", Icons.Filled.Draw),
     SETTINGS("Ajustes", Icons.Filled.Settings),
@@ -775,9 +777,11 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
 @Composable
 private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage: (String) -> Unit) {
     val items by vm.recent.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    val filtered = if (terms.isEmpty()) items else items.filter { c ->
+    val searching = terms.isNotEmpty()
+    val matched = if (!searching) items else items.filter { c ->
         val hay = buildString {
             append(c.name.lowercase())
             c.transcription?.let {
@@ -787,8 +791,29 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
         }
         terms.all { hay.contains(it) }
     }
+    // Sin búsqueda: oculta lo "limpiado" (por última edición) y limita a N.
+    val cleared = settings.recentClearedAt
+    val shown = if (searching) matched
+    else (if (cleared.isNotEmpty()) items.filter { it.updatedAt > cleared } else items).take(settings.recentShowCount)
 
     Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Últimas ediciones", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (!searching) {
+                listOf(5, 10, 20).forEach { n ->
+                    FilterChip(
+                        selected = settings.recentShowCount == n,
+                        onClick = { vm.setRecentShowCount(n) },
+                        label = { Text("$n") },
+                        modifier = Modifier.padding(horizontal = 2.dp),
+                    )
+                }
+                TextButton(onClick = { vm.clearRecent() }) { Text("Limpiar") }
+            }
+        }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -796,15 +821,15 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         )
-        if (filtered.isEmpty()) {
-            EmptyHint(if (items.isEmpty()) "Aún no hay ediciones." else "Sin resultados para la búsqueda.")
+        if (shown.isEmpty()) {
+            EmptyHint(if (items.isEmpty()) "Aún no hay ediciones." else "Sin resultados.")
         } else {
             LazyColumn(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(filtered, key = { it.id }) { c -> PageListRow(vm, c, notebooks, onClick = { onOpenPage(c.id) }) }
+                items(shown, key = { it.id }) { c -> PageListRow(vm, c, notebooks, onClick = { onOpenPage(c.id) }) }
             }
         }
     }
@@ -846,6 +871,13 @@ private fun CaptureActions(
             IconButton({ renaming = true }) { Icon(Icons.Filled.Edit, "Renombrar") }
             IconButton({ formatting = true }) { Icon(Icons.Filled.AspectRatio, "Formato") }
             IconButton({ moving = true }) { Icon(Icons.AutoMirrored.Filled.DriveFileMove, "Mover") }
+            IconButton(onClick = { vm.finalizeCapture(c) }) {
+                Icon(
+                    Icons.Filled.Flag,
+                    if (c.sealed) "Reabrir hoja" else "Finalizar página",
+                    tint = if (c.sealed) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                )
+            }
             IconButton({ deleting = true }) { Icon(Icons.Filled.Delete, "Borrar") }
         }
     } else {
@@ -863,6 +895,10 @@ private fun CaptureActions(
                 DropdownMenuItem(text = { Text("Renombrar") }, onClick = { menu = false; renaming = true })
                 DropdownMenuItem(text = { Text("Formato de hoja…") }, onClick = { menu = false; formatting = true })
                 DropdownMenuItem(text = { Text("Mover a cuaderno") }, onClick = { menu = false; moving = true })
+                DropdownMenuItem(
+                    text = { Text(if (c.sealed) "Reabrir hoja" else "Finalizar página") },
+                    onClick = { menu = false; vm.finalizeCapture(c) },
+                )
                 DropdownMenuItem(text = { Text("Borrar") }, onClick = { menu = false; deleting = true })
             }
         }
@@ -1228,9 +1264,15 @@ private fun SettingsScreen(vm: MainViewModel) {
                 syncMode = syncMode, syncIntervalMin = interval.toIntOrNull() ?: 30,
                 appMode = if (isLocal) AppMode.LOCAL else mode, setupComplete = true,
                 importOnConnect = importOnConnect,
+                // Conserva ajustes gestionados aparte (no se editan en este formulario).
+                recentShowCount = settings.recentShowCount,
+                recentClearedAt = settings.recentClearedAt,
+                finishMode = settings.finishMode,
             ),
         )
     }
+
+    LaunchedEffect(Unit) { vm.refreshFinishMode() }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -1302,6 +1344,21 @@ private fun SettingsScreen(vm: MainViewModel) {
                 FilterChip(mode == AppMode.BRIDGE, { mode = AppMode.BRIDGE }, label = { Text("Solo puente") })
             }
         }
+
+        HorizontalDivider()
+        // --- Al finalizar una hoja ---
+        Text("Al finalizar una hoja", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(settings.finishMode == "newSheet", { vm.setFinishMode("newSheet") }, label = { Text("Nueva hoja") })
+            FilterChip(settings.finishMode == "newNotebook", { vm.setFinishMode("newNotebook") }, label = { Text("Nuevo cuaderno") })
+        }
+        Text(
+            if (settings.finishMode == "newNotebook")
+                "Finalizar cierra el cuaderno entero; al volver a escribir en él arranca un cuaderno nuevo (copia). Para libretas Ncode reutilizadas."
+            else
+                "La hoja finalizada se cierra; al volver a escribir en la misma hoja física crea una hoja nueva en el mismo cuaderno. Recomendado.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         HorizontalDivider()
         // --- Sincronización del boli ---

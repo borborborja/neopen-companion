@@ -85,10 +85,17 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+/** v3→v4: añade la columna `sealed` (hoja finalizada) a captures. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE captures ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
-        .addMigrations(MIGRATION_2_3)
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
         .fallbackToDestructiveMigration()
         .build()
     val settings = SettingsStore(app)

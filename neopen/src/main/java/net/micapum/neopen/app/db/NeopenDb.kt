@@ -37,6 +37,7 @@ data class CaptureEntity(
     val position: Int = 0,
     val paperJson: String? = null,
     val kind: String? = null,
+    val sealed: Boolean = false,
 )
 
 @Entity(tableName = "notebooks")
@@ -128,8 +129,14 @@ interface CaptureDao {
     @Query("SELECT * FROM captures WHERE notebookId = :notebookId")
     suspend fun getByNotebook(notebookId: String): List<CaptureEntity>
 
-    @Query("SELECT * FROM captures WHERE section = :s AND owner = :o AND book = :b AND page = :p LIMIT 1")
+    @Query("SELECT * FROM captures WHERE section = :s AND owner = :o AND book = :b AND page = :p AND sealed = 0 ORDER BY importedAt DESC LIMIT 1")
     suspend fun findBySobp(s: Int, o: Int, b: Int, p: Int): CaptureEntity?
+
+    @Query("UPDATE captures SET sealed = :sealed, updatedAt = :now WHERE id = :id")
+    suspend fun setSealed(id: String, sealed: Boolean, now: String)
+
+    @Query("UPDATE captures SET sealed = 1, updatedAt = :now WHERE notebookId = :notebookId")
+    suspend fun sealByNotebook(notebookId: String, now: String)
 
     @Query("SELECT * FROM captures")
     suspend fun getAll(): List<CaptureEntity>
@@ -236,7 +243,7 @@ interface PageBackgroundDao {
         CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
         SyncMetaEntity::class, PageBackgroundEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {

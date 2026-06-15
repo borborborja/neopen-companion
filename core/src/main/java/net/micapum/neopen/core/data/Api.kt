@@ -98,6 +98,7 @@ data class CaptureDto(
     val position: Int = 0,
     val paper: PaperDto? = null,
     val kind: String? = null,
+    val sealed: Boolean = false,
 )
 
 data class NotebookDto(
@@ -143,10 +144,15 @@ data class CapturePatchDto(
     val position: Int? = null,
     val kind: String? = null,
     val paper: PaperDto? = null,
+    val sealed: Boolean? = null,
 )
 
 /** Cuerpo de PUT /api/notebooks/{id}/paper (formato del cuaderno; re-sella sus hojas). */
 data class NotebookPaperBody(val paper: PaperDto, val source: String? = null)
+
+/** Modo al finalizar una hoja (GET/PUT /api/finish-mode). */
+data class FinishModeDto(val mode: String = "newSheet")
+data class FinishModeBody(val mode: String)
 
 data class NotebookCreateDto(
     val name: String,
@@ -331,6 +337,22 @@ interface NeopenApi {
         @Path("id") id: String,
         @Body body: NotebookPaperBody,
     ): NotebookDto
+
+    /** Finaliza el cuaderno (modo "nuevo cuaderno"): sella sus hojas y crea una copia. */
+    @POST("api/notebooks/{id}/finalize")
+    suspend fun finalizeNotebook(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+    ): NotebookDto
+
+    @GET("api/finish-mode")
+    suspend fun getFinishMode(@Header("X-Auth-Password") password: String): FinishModeDto
+
+    @PUT("api/finish-mode")
+    suspend fun setFinishMode(
+        @Header("X-Auth-Password") password: String,
+        @Body body: FinishModeBody,
+    ): FinishModeDto
 
     @Multipart
     @POST("api/captures/{id}/transcribe")
