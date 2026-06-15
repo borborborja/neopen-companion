@@ -42,6 +42,12 @@ data class AppSettings(
     val recentClearedAt: String = "",
     /** Qué pasa al finalizar una hoja: "newSheet" | "newNotebook". */
     val finishMode: String = "newSheet",
+    /** Detección de trazos superpuestos (avisa al escribir encima de lo anterior). */
+    val overlapEnabled: Boolean = true,
+    /** Nº mínimo de trazos superpuestos para avisar. */
+    val overlapMinStrokes: Int = 3,
+    /** % mínimo de área superpuesta para avisar. */
+    val overlapMinAreaPercent: Int = 25,
     /** Vista de la pestaña Cuadernos: "Mosaic" | "Compact" | "List". */
     val notebookView: String = "Mosaic",
     /** Tema de la app: "system" | "light" | "dark". */
@@ -63,6 +69,9 @@ class SettingsStore(private val context: Context) {
         val recentCount = intPreferencesKey("recent_count")
         val recentCleared = stringPreferencesKey("recent_cleared")
         val finishMode = stringPreferencesKey("finish_mode")
+        val overlapEnabled = booleanPreferencesKey("overlap_enabled")
+        val overlapMinStrokes = intPreferencesKey("overlap_min_strokes")
+        val overlapMinArea = intPreferencesKey("overlap_min_area")
         val notebookView = stringPreferencesKey("notebook_view")
         val themeMode = stringPreferencesKey("theme_mode")
     }
@@ -83,6 +92,9 @@ class SettingsStore(private val context: Context) {
             recentShowCount = p[Keys.recentCount] ?: 10,
             recentClearedAt = p[Keys.recentCleared] ?: "",
             finishMode = p[Keys.finishMode] ?: "newSheet",
+            overlapEnabled = p[Keys.overlapEnabled] ?: true,
+            overlapMinStrokes = p[Keys.overlapMinStrokes] ?: 3,
+            overlapMinAreaPercent = p[Keys.overlapMinArea] ?: 25,
             notebookView = p[Keys.notebookView] ?: "Mosaic",
             themeMode = p[Keys.themeMode] ?: "system",
         )
@@ -101,6 +113,9 @@ class SettingsStore(private val context: Context) {
             p[Keys.recentCount] = s.recentShowCount
             p[Keys.recentCleared] = s.recentClearedAt
             p[Keys.finishMode] = s.finishMode
+            p[Keys.overlapEnabled] = s.overlapEnabled
+            p[Keys.overlapMinStrokes] = s.overlapMinStrokes
+            p[Keys.overlapMinArea] = s.overlapMinAreaPercent
             p[Keys.notebookView] = s.notebookView
             p[Keys.themeMode] = s.themeMode
         }

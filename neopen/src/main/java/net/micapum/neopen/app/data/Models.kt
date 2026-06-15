@@ -8,6 +8,7 @@ import net.micapum.neopen.core.data.CreateCaptureInput
 import net.micapum.neopen.core.data.NotebookCreateDto
 import net.micapum.neopen.core.data.NotebookPatchDto
 import net.micapum.neopen.core.data.OcrResultDto
+import net.micapum.neopen.core.data.OverlapDto
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.ReorderDto
 import net.micapum.neopen.core.data.StrokeDto
@@ -34,6 +35,7 @@ data class Capture(
     val paper: PaperDto?,
     val kind: String?,
     val sealed: Boolean = false,
+    val overlap: OverlapDto? = null,
 ) {
     val sobpLabel get() = "$section.$owner.$book.$page"
 }
@@ -81,6 +83,7 @@ object Json {
     val strokeList = moshi.adapter<List<StrokeDto>>(strokeListType)
     val paper = moshi.adapter(PaperDto::class.java)
     val ocr = moshi.adapter(OcrResultDto::class.java)
+    val overlap = moshi.adapter(OverlapDto::class.java)
 
     // Adaptadores de los payloads del outbox (Fase 3/4).
     val capturePatch = moshi.adapter(CapturePatchDto::class.java)
@@ -100,6 +103,11 @@ object Json {
 
     fun ocrOf(json: String?): OcrResultDto? =
         json?.let { runCatching { ocr.fromJson(it) }.getOrNull() }
+
+    fun overlapOf(json: String?): OverlapDto? =
+        json?.let { runCatching { overlap.fromJson(it) }.getOrNull() }
+
+    fun overlapJson(o: OverlapDto?): String? = o?.let { overlap.toJson(it) }
 
     fun tagsJson(tags: List<String>): String = stringList.toJson(tags)
     fun strokesJson(strokes: List<StrokeDto>): String = strokeList.toJson(strokes)

@@ -169,6 +169,50 @@ private fun DrawScope.drawBgPreset(id: String, left: Float, top: Float, w: Float
 }
 
 /**
+ * Preview del resolver de superposición: dibuja los trazos `< cut` en tinta y los
+ * `>= cut` (los que se moverán a la hoja nueva) en naranja. `strokes` debe venir
+ * ordenado por startTime, igual que el índice de corte.
+ */
+@Composable
+fun OverlapPreview(
+    strokes: List<StrokeDto>,
+    paper: PaperDto?,
+    cut: Int,
+    modifier: Modifier = Modifier,
+    keptColor: Color = Color(0xFF111111),
+    movedColor: Color = Color(0xFFEA580C),
+) {
+    val model = remember(strokes, paper) { buildModel(strokes, paper) }
+    Canvas(modifier) {
+        if (model.width <= 0f || model.height <= 0f || size.minDimension <= 0f) return@Canvas
+        val s = minOf(size.width / model.width, size.height / model.height)
+        val dx = (size.width - model.width * s) / 2f
+        val dy = (size.height - model.height * s) / 2f
+        val style = Stroke(
+            width = (model.strokeWidth * s).coerceAtLeast(1f),
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        )
+        model.polylines.forEachIndexed { i, pts ->
+            if (pts.isEmpty()) return@forEachIndexed
+            val color = if (i >= cut) movedColor else keptColor
+            if (pts.size == 1) {
+                val p = pts[0]
+                drawCircle(color, radius = style.width / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
+                return@forEachIndexed
+            }
+            val path = Path()
+            pts.forEachIndexed { j, p ->
+                val x = p.x * s + dx
+                val y = p.y * s + dy
+                if (j == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, color, style = style)
+        }
+    }
+}
+
+/**
  * Dibuja los trazos sobre una hoja, conservando proporción. Si se pasa un fondo
  * (`bgImage` rasterizado o `bgPreset` del catálogo) se pinta TENUE debajo.
  */

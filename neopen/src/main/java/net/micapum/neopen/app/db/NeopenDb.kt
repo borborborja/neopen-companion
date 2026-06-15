@@ -38,6 +38,8 @@ data class CaptureEntity(
     val paperJson: String? = null,
     val kind: String? = null,
     val sealed: Boolean = false,
+    /** Aviso de trazos superpuestos (JSON de OverlapDto); null = sin aviso. */
+    val overlapJson: String? = null,
 )
 
 @Entity(tableName = "notebooks")
@@ -243,7 +245,7 @@ interface PageBackgroundDao {
         CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
         SyncMetaEntity::class, PageBackgroundEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {

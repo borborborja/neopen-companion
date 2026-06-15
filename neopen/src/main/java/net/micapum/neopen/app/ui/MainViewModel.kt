@@ -31,7 +31,9 @@ import net.micapum.neopen.core.data.BackgroundUploadInput
 import net.micapum.neopen.core.data.FinishModeBody
 import net.micapum.neopen.core.data.CreateSobpScanInput
 import net.micapum.neopen.core.data.NotebookPaperBody
+import net.micapum.neopen.core.data.OverlapConfigDto
 import net.micapum.neopen.core.data.PaperDto
+import net.micapum.neopen.core.data.SplitBody
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.SobpScanDto
 import net.micapum.neopen.core.data.StudioItemDto
@@ -558,6 +560,73 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 if (local) graph.repo.setCaptureSealedLocal(c.id, true)
                 else { graph.repo.setCaptureSealed(c.id, true); graph.syncNow() }
+            }
+        }
+    }
+
+    /** Cambia el umbral de superposición; en modo completo lo sincroniza con el servidor. */
+    fun setOverlapConfig(enabled: Boolean, minStrokes: Int, minAreaPercent: Int) {
+        viewModelScope.launch {
+            graph.settings.update(
+                settings.value.copy(
+                    overlapEnabled = enabled,
+                    overlapMinStrokes = minStrokes,
+                    overlapMinAreaPercent = minAreaPercent,
+                ),
+            )
+            if (hasServer()) {
+                val s = settings.value
+                runCatching {
+                    ApiFactory.create(s.serverUrl)
+                        .setOverlapConfig(s.password, OverlapConfigDto(enabled, minStrokes, minAreaPercent))
+                }
+            }
+        }
+    }
+
+    /** Al abrir Ajustes en modo completo, refleja el umbral del servidor (consistencia con web). */
+    fun refreshOverlapConfig() {
+        if (!hasServer()) return
+        viewModelScope.launch {
+            val s = settings.value
+            val cfg = runCatching { ApiFactory.create(s.serverUrl).getOverlapConfig(s.password) }.getOrNull() ?: return@launch
+            graph.settings.update(
+                settings.value.copy(
+                    overlapEnabled = cfg.enabled,
+                    overlapMinStrokes = cfg.minStrokes,
+                    overlapMinAreaPercent = cfg.minAreaPercent,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Resuelve el aviso de trazos superpuestos de una hoja:
+     * - "same": descarta el aviso (continuar en la misma página).
+     * - "newSheet" / "newNotebook": corta en `cutIndex` (sella la original, crea hoja nueva).
+     */
+    fun resolveOverlap(c: Capture, cutIndex: Int, action: String) {
+        viewModelScope.launch {
+            val s = settings.value
+            val local = !hasServer()
+            if (action == "same") {
+                if (local) {
+                    graph.repo.dismissOverlapLocal(c.id)
+                } else {
+                    val dto = runCatching { ApiFactory.create(s.serverUrl).dismissOverlap(s.password, c.id) }.getOrNull()
+                    if (dto != null) { graph.repo.applyServerCapture(dto); graph.syncNow() }
+                    else _status.value = "No se pudo descartar el aviso (¿sin conexión?)"
+                }
+                return@launch
+            }
+            if (local) {
+                graph.repo.splitCaptureLocal(c.id, cutIndex, action)
+            } else {
+                val res = runCatching {
+                    ApiFactory.create(s.serverUrl).splitCapture(s.password, c.id, SplitBody(cutIndex, action))
+                }.getOrNull()
+                if (res != null) { graph.repo.applySplitResult(res.original, res.created); graph.syncNow() }
+                else _status.value = "No se pudo cortar la hoja (¿sin conexión?)"
             }
         }
     }

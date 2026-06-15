@@ -31,6 +31,7 @@ fun CaptureDto.toEntity(): CaptureEntity = CaptureEntity(
     paperJson = Json.paperJson(paper),
     kind = kind,
     sealed = sealed,
+    overlapJson = Json.overlapJson(overlap),
 )
 
 fun NotebookDto.toEntity(): NotebookEntity = NotebookEntity(
@@ -73,6 +74,7 @@ fun CaptureEntity.toDomain(): Capture = Capture(
     paper = Json.paperOf(paperJson),
     kind = kind,
     sealed = sealed,
+    overlap = Json.overlapOf(overlapJson),
 )
 
 fun PageBackgroundEntity.toDomain(): PageBackground = PageBackground(

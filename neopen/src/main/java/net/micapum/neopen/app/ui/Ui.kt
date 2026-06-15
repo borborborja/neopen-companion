@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ViewDay
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -91,6 +92,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SecondaryTabRow
@@ -134,7 +136,9 @@ import net.micapum.neopen.app.data.PaperPreset
 import net.micapum.neopen.app.data.paperFromPreset
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.InkCanvas
+import net.micapum.neopen.app.render.OverlapPreview
 import net.micapum.neopen.app.render.buildModel
+import kotlin.math.roundToInt
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.SyncMode
@@ -1064,6 +1068,7 @@ private fun CaptureActions(
     var tagging by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var formatting by remember { mutableStateOf(false) }
+    var resolvingOverlap by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf<ExportMode?>(null) }
 
     fun doExport(fmt: ExportFormat, modeSel: ExportMode) {
@@ -1115,6 +1120,13 @@ private fun CaptureActions(
                 label = { Text("Mover") },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null, iconMod) },
             )
+            if (c.overlap != null) {
+                AssistChip(
+                    onClick = { resolvingOverlap = true },
+                    label = { Text("Superpuestos") },
+                    leadingIcon = { Icon(Icons.Filled.Warning, null, iconMod, tint = Color(0xFFEA580C)) },
+                )
+            }
             AssistChip(
                 onClick = { vm.finalizeCapture(c) },
                 label = { Text(if (c.sealed) "Reabrir" else "Finalizar") },
@@ -1152,6 +1164,13 @@ private fun CaptureActions(
                     text = { Text(if (c.sealed) "Reabrir hoja" else "Finalizar página") },
                     onClick = { menu = false; vm.finalizeCapture(c) },
                 )
+                if (c.overlap != null) {
+                    DropdownMenuItem(
+                        text = { Text("Trazos superpuestos…") },
+                        onClick = { menu = false; resolvingOverlap = true },
+                        leadingIcon = { Icon(Icons.Filled.Warning, null, tint = Color(0xFFEA580C)) },
+                    )
+                }
                 DropdownMenuItem(text = { Text("Borrar") }, onClick = { menu = false; deleting = true })
             }
         }
@@ -1179,6 +1198,9 @@ private fun CaptureActions(
             onPick = { p -> vm.setCapturePaper(c.id, paperFromPreset(p)); formatting = false },
             onDismiss = { formatting = false },
         )
+    }
+    if (resolvingOverlap) {
+        OverlapResolverDialog(c, vm, onDismiss = { resolvingOverlap = false })
     }
     val mode = exporting
     if (mode != null) {
@@ -1521,13 +1543,16 @@ private fun SettingsScreen(vm: MainViewModel) {
                 recentShowCount = settings.recentShowCount,
                 recentClearedAt = settings.recentClearedAt,
                 finishMode = settings.finishMode,
+                overlapEnabled = settings.overlapEnabled,
+                overlapMinStrokes = settings.overlapMinStrokes,
+                overlapMinAreaPercent = settings.overlapMinAreaPercent,
                 notebookView = settings.notebookView,
                 themeMode = settings.themeMode,
             ),
         )
     }
 
-    LaunchedEffect(Unit) { vm.refreshFinishMode() }
+    LaunchedEffect(Unit) { vm.refreshFinishMode(); vm.refreshOverlapConfig() }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -1624,6 +1649,29 @@ private fun SettingsScreen(vm: MainViewModel) {
                 "La hoja finalizada se cierra; al volver a escribir en la misma hoja física crea una hoja nueva en el mismo cuaderno. Recomendado.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        HorizontalDivider()
+        // --- Trazos superpuestos ---
+        Text("Trazos superpuestos", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        PenToggleRow(
+            "Detectar trazos superpuestos",
+            "Avisa cuando al seguir escribiendo en la misma hoja los trazos caen encima de los anteriores",
+            settings.overlapEnabled,
+        ) { vm.setOverlapConfig(it, settings.overlapMinStrokes, settings.overlapMinAreaPercent) }
+        if (settings.overlapEnabled) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    settings.overlapMinStrokes.toString(),
+                    { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(1, 100)?.let { n -> vm.setOverlapConfig(true, n, settings.overlapMinAreaPercent) } },
+                    label = { Text("Trazos mín.") }, singleLine = true, modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    settings.overlapMinAreaPercent.toString(),
+                    { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(0, 100)?.let { n -> vm.setOverlapConfig(true, settings.overlapMinStrokes, n) } },
+                    label = { Text("% área mín.") }, singleLine = true, modifier = Modifier.weight(1f),
+                )
+            }
+        }
 
         HorizontalDivider()
         // --- Sincronización del boli ---
@@ -1877,6 +1925,66 @@ private fun MoveDialog(notebooks: List<Notebook>, onPick: (String) -> Unit, onDi
         },
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+/**
+ * "Reproductor" para resolver una hoja con trazos superpuestos: dibuja la página
+ * y, con un slider tipo línea de tiempo (trazos ordenados por startTime), elige el
+ * punto de corte — lo posterior (naranja) se moverá. Tres salidas: misma página
+ * (descartar), nueva hoja o continuar en otro cuaderno.
+ */
+@Composable
+private fun OverlapResolverDialog(c: Capture, vm: MainViewModel, onDismiss: () -> Unit) {
+    val sorted = remember(c.strokes) { c.strokes.sortedBy { it.startTime } }
+    val o = c.overlap
+    val suggested = remember(c) {
+        if (o == null) sorted.size
+        else sorted.count { it.startTime < o.atTime }.let { if (it == 0) o.strokeIndex else it }.coerceIn(0, sorted.size)
+    }
+    var cut by remember { mutableIntStateOf(suggested) }
+    val moved = sorted.size - cut
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Trazos superpuestos · ${c.sobpLabel}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Se han detectado ${o?.overlappingStrokes ?: 0} trazos encima del contenido anterior " +
+                        "(${o?.areaPercent ?: 0}% del área). Elige dónde cortar: lo posterior (naranja) " +
+                        "pasará a una hoja nueva.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(
+                    Modifier.fillMaxWidth().height(220.dp).background(Color.White, RoundedCornerShape(6.dp)),
+                ) {
+                    OverlapPreview(sorted, c.paper, cut, Modifier.fillMaxSize().padding(6.dp))
+                }
+                Slider(
+                    value = cut.toFloat(),
+                    onValueChange = { cut = it.roundToInt().coerceIn(0, sorted.size) },
+                    valueRange = 0f..sorted.size.toFloat().coerceAtLeast(1f),
+                )
+                Text(
+                    "$moved trazos se moverán (en naranja).",
+                    style = MaterialTheme.typography.bodySmall, color = Color(0xFFEA580C),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { vm.resolveOverlap(c, cut, "newSheet"); onDismiss() },
+                        enabled = moved > 0, modifier = Modifier.weight(1f),
+                    ) { Text("Nueva hoja") }
+                    Button(
+                        onClick = { vm.resolveOverlap(c, cut, "newNotebook"); onDismiss() },
+                        enabled = moved > 0, modifier = Modifier.weight(1f),
+                    ) { Text("Otro cuaderno") }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = { vm.resolveOverlap(c, cut, "same"); onDismiss() }) { Text("Misma página") }
+        },
     )
 }
 

@@ -32,6 +32,7 @@ import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.sync.SyncWorker
 import net.micapum.neopen.core.data.AppMode
+import net.micapum.neopen.core.data.OverlapConfig
 import net.micapum.neopen.core.data.SettingsStore
 import net.micapum.neopen.core.data.SyncMode
 import net.micapum.neopen.core.data.SyncStatusStore
@@ -92,10 +93,17 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+/** v4→v5: añade la columna `overlapJson` (aviso de trazos superpuestos) a captures. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE captures ADD COLUMN overlapJson TEXT")
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
-        .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
         .fallbackToDestructiveMigration()
         .build()
     val settings = SettingsStore(app)
@@ -133,6 +141,12 @@ class Graph(app: Application) {
             settings.flow.collect {
                 pen.autoImportOnConnect = it.importOnConnect
                 localMode = it.appMode == AppMode.LOCAL
+                // El umbral de superposición lo lee la ingesta local (modo local).
+                repo.overlapConfig = OverlapConfig(
+                    enabled = it.overlapEnabled,
+                    minStrokes = it.overlapMinStrokes,
+                    minAreaPercent = it.overlapMinAreaPercent,
+                )
             }
         }
         val cm = app.getSystemService(ConnectivityManager::class.java)
