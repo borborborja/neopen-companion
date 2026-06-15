@@ -505,6 +505,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.settings.update(settings.value.copy(notebookView = view)) }
     }
 
+    /** Tema de la app (system/light/dark), persistido. */
+    fun setThemeMode(mode: String) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(themeMode = mode)) }
+    }
+
     /** Oculta lo actual de "Últimas ediciones"; una edición posterior lo trae de vuelta. */
     fun clearRecent() {
         viewModelScope.launch { graph.settings.update(settings.value.copy(recentClearedAt = nowIso())) }
