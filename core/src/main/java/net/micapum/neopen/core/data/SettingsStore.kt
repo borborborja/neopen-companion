@@ -36,6 +36,12 @@ data class AppSettings(
     val setupComplete: Boolean = false,
     /** Volcar la memoria offline del boli automáticamente al conectar. */
     val importOnConnect: Boolean = true,
+    /** Cuántas mostrar en "Últimas ediciones" (5/10/20). */
+    val recentShowCount: Int = 10,
+    /** ISO de "limpiar últimas ediciones": oculta lo anterior hasta una nueva edición. */
+    val recentClearedAt: String = "",
+    /** Qué pasa al finalizar una hoja: "newSheet" | "newNotebook". */
+    val finishMode: String = "newSheet",
 ) {
     val configured get() = serverUrl.isNotBlank() && password.isNotBlank()
 }
@@ -50,6 +56,9 @@ class SettingsStore(private val context: Context) {
         val appMode = stringPreferencesKey("app_mode")
         val setup = booleanPreferencesKey("setup_complete")
         val importOnConnect = booleanPreferencesKey("import_on_connect")
+        val recentCount = intPreferencesKey("recent_count")
+        val recentCleared = stringPreferencesKey("recent_cleared")
+        val finishMode = stringPreferencesKey("finish_mode")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -65,6 +74,9 @@ class SettingsStore(private val context: Context) {
             // Migración: quien ya tenía servidor+contraseña no debe pasar por el wizard.
             setupComplete = p[Keys.setup] ?: (url.isNotBlank() && pw.isNotBlank()),
             importOnConnect = p[Keys.importOnConnect] ?: true,
+            recentShowCount = p[Keys.recentCount] ?: 10,
+            recentClearedAt = p[Keys.recentCleared] ?: "",
+            finishMode = p[Keys.finishMode] ?: "newSheet",
         )
     }
 
@@ -78,6 +90,9 @@ class SettingsStore(private val context: Context) {
             p[Keys.appMode] = s.appMode.name
             p[Keys.setup] = s.setupComplete
             p[Keys.importOnConnect] = s.importOnConnect
+            p[Keys.recentCount] = s.recentShowCount
+            p[Keys.recentCleared] = s.recentClearedAt
+            p[Keys.finishMode] = s.finishMode
         }
     }
 }

@@ -30,6 +30,7 @@ fun CaptureDto.toEntity(): CaptureEntity = CaptureEntity(
     position = position,
     paperJson = Json.paperJson(paper),
     kind = kind,
+    sealed = sealed,
 )
 
 fun NotebookDto.toEntity(): NotebookEntity = NotebookEntity(
@@ -71,6 +72,7 @@ fun CaptureEntity.toDomain(): Capture = Capture(
     position = position,
     paper = Json.paperOf(paperJson),
     kind = kind,
+    sealed = sealed,
 )
 
 fun PageBackgroundEntity.toDomain(): PageBackground = PageBackground(

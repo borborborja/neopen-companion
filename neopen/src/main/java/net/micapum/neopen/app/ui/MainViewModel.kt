@@ -28,6 +28,7 @@ import net.micapum.neopen.core.data.ApiFactory
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.BackgroundUploadInput
+import net.micapum.neopen.core.data.FinishModeBody
 import net.micapum.neopen.core.data.CreateSobpScanInput
 import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.PaperDto
@@ -490,6 +491,64 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val img = bg.bgImage
             if (img != null && img.startsWith("file://")) runCatching { java.io.File(img.removePrefix("file://")).delete() }
             graph.repo.deleteBackground(bg.id)
+        }
+    }
+
+    // --- Últimas ediciones + finalizar hoja ------------------------------------
+
+    fun setRecentShowCount(n: Int) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(recentShowCount = n)) }
+    }
+
+    /** Oculta lo actual de "Últimas ediciones"; una edición posterior lo trae de vuelta. */
+    fun clearRecent() {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(recentClearedAt = nowIso())) }
+    }
+
+    /** Cambia el modo al finalizar; en modo completo lo sincroniza con el servidor (= web). */
+    fun setFinishMode(mode: String) {
+        viewModelScope.launch {
+            graph.settings.update(settings.value.copy(finishMode = mode))
+            if (hasServer()) {
+                val s = settings.value
+                runCatching { ApiFactory.create(s.serverUrl).setFinishMode(s.password, FinishModeBody(mode)) }
+            }
+        }
+    }
+
+    /** Al abrir Ajustes en modo completo, refleja el modo del servidor (consistencia con web). */
+    fun refreshFinishMode() {
+        if (!hasServer()) return
+        viewModelScope.launch {
+            val s = settings.value
+            val mode = runCatching { ApiFactory.create(s.serverUrl).getFinishMode(s.password).mode }.getOrNull()
+            if (mode != null && mode != settings.value.finishMode) {
+                graph.settings.update(settings.value.copy(finishMode = mode))
+            }
+        }
+    }
+
+    /** Finaliza (sella) la hoja o, si ya está sellada, la reabre. Efecto según finishMode. */
+    fun finalizeCapture(c: Capture) {
+        viewModelScope.launch {
+            val s = settings.value
+            val local = !hasServer()
+            if (c.sealed) {
+                if (local) graph.repo.setCaptureSealedLocal(c.id, false)
+                else { graph.repo.setCaptureSealed(c.id, false); graph.syncNow() }
+                return@launch
+            }
+            if (s.finishMode == "newNotebook" && c.notebookId != null) {
+                if (local) {
+                    graph.repo.finalizeNotebookLocal(c.notebookId)
+                } else {
+                    val ok = runCatching { ApiFactory.create(s.serverUrl).finalizeNotebook(s.password, c.notebookId) }.isSuccess
+                    if (ok) graph.syncNow() else _status.value = "No se pudo finalizar el cuaderno (¿sin conexión?)"
+                }
+            } else {
+                if (local) graph.repo.setCaptureSealedLocal(c.id, true)
+                else { graph.repo.setCaptureSealed(c.id, true); graph.syncNow() }
+            }
         }
     }
 

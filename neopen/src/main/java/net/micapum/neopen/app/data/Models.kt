@@ -33,6 +33,7 @@ data class Capture(
     val position: Int,
     val paper: PaperDto?,
     val kind: String?,
+    val sealed: Boolean = false,
 ) {
     val sobpLabel get() = "$section.$owner.$book.$page"
 }
