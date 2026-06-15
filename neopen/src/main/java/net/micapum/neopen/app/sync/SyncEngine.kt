@@ -53,6 +53,8 @@ class SyncEngine(
             }
             // Garantiza que "Sin clasificar" exista en local (se muestra aunque esté vacío).
             runCatching { repo.applyServerNotebook(api.unclassifiedNotebook(s.password)) }
+            // Fondos (anclajes) del servidor → caché local (la web gestiona la BBDD).
+            runCatching { repo.applyServerAnchors(api.listAnchors(s.password)) }
             Result(ok = true, pulled = pulled)
         } catch (e: Exception) {
             Result(ok = false, pulled = pulled, error = e.message ?: e.javaClass.simpleName)

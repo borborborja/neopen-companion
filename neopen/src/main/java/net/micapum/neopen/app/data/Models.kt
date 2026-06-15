@@ -56,6 +56,19 @@ data class Notebook(
     val pageCount: Int = 0,
 )
 
+/** Fondo (plantilla) resuelto para un cuaderno o una hoja. */
+data class PageBackground(
+    val id: String,
+    val bookKey: String,
+    val page: Int?,
+    val scope: String,
+    val bgPreset: String?,
+    val bgImage: String?,
+    val label: String,
+    val source: String,
+    val remote: Boolean,
+)
+
 /** Adaptadores Moshi compartidos para (de)serializar los campos JSON de Room. */
 object Json {
     val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()

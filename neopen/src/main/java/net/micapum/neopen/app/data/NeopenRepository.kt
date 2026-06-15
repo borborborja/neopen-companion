@@ -7,7 +7,9 @@ import net.micapum.neopen.app.db.CaptureEntity
 import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.db.NotebookEntity
 import net.micapum.neopen.app.db.OutboxEntity
+import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.db.SyncMetaEntity
+import net.micapum.neopen.core.data.AnchorDto
 import net.micapum.neopen.core.data.CapturePatchDto
 import net.micapum.neopen.core.data.CaptureDto
 import net.micapum.neopen.core.data.ChangesResponseDto
@@ -96,7 +98,46 @@ class NeopenRepository(private val db: NeopenDb) {
         db.captures().clear()
         db.notebooks().clear()
         db.outbox().clear()
+        db.backgrounds().clear()
         db.syncMeta().upsert(SyncMetaEntity())
+    }
+
+    // --- Fondos (plantilla detrás de los trazos) -------------------------------
+
+    /** Fondo que aplica a una hoja: gana el de página sobre el de cuaderno. */
+    suspend fun backgroundForSheet(bookKey: String, page: Int): PageBackground? {
+        val rows = db.backgrounds().forBook(bookKey)
+        val pageHit = rows.firstOrNull { it.scope == "page" && it.page == page }
+        val bookHit = rows.firstOrNull { it.scope == "book" }
+        return (pageHit ?: bookHit)?.toDomain()
+    }
+
+    fun observeBookBackground(bookKey: String): Flow<PageBackground?> =
+        db.backgrounds().observeForBook(bookKey).map { rows -> rows.firstOrNull { it.scope == "book" }?.toDomain() }
+
+    /** Fondo que aplica a una hoja (página > cuaderno), reactivo a cambios en Room. */
+    fun observeSheetBackground(bookKey: String, page: Int): Flow<PageBackground?> =
+        db.backgrounds().observeForBook(bookKey).map { rows ->
+            (rows.firstOrNull { it.scope == "page" && it.page == page } ?: rows.firstOrNull { it.scope == "book" })?.toDomain()
+        }
+
+    suspend fun pageBackground(bookKey: String, page: Int): PageBackground? =
+        db.backgrounds().forBook(bookKey).firstOrNull { it.scope == "page" && it.page == page }?.toDomain()
+
+    suspend fun bookBackground(bookKey: String): PageBackground? =
+        db.backgrounds().forBook(bookKey).firstOrNull { it.scope == "book" }?.toDomain()
+
+    suspend fun upsertBackground(row: PageBackgroundEntity) = db.backgrounds().upsert(row)
+    suspend fun deleteBackground(id: String) = db.backgrounds().deleteById(id)
+    suspend fun backgroundById(id: String): PageBackground? = db.backgrounds().getById(id)?.toDomain()
+
+    /** Reemplaza los fondos venidos del servidor (modo completo) con los actuales. */
+    suspend fun applyServerAnchors(list: List<AnchorDto>) {
+        db.backgrounds().clearRemote()
+        for (a in list) {
+            if (a.bgImage == null && a.bgPreset == null) continue // anclajes solo-vectoriales: no aplican en Android
+            db.backgrounds().upsert(a.toBackgroundEntity())
+        }
     }
 
     // --- Mutaciones locales optimistas (Room + outbox) -------------------------

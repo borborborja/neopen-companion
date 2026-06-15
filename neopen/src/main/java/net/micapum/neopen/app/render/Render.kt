@@ -8,10 +8,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.StrokeDto
 
@@ -116,13 +120,66 @@ fun rasterizePng(strokes: List<StrokeDto>, paper: PaperDto?, dpiScale: Float = 2
     return out.toByteArray()
 }
 
-/** Dibuja los trazos en un Canvas, encajando el modelo y conservando proporción. */
+/** Ids del catálogo de fondos preestablecidos (espejo de BG_PRESETS de la web). */
+object BgPresets {
+    const val LINED = "lined"
+    const val GRID = "grid"
+    const val DOTS = "dots"
+    const val MUSIC = "music"
+    val ALL = listOf(LINED, GRID, DOTS, MUSIC)
+}
+
+/** Pinta un preset del catálogo (patrón tenue) dentro del recuadro de la hoja. */
+private fun DrawScope.drawBgPreset(id: String, left: Float, top: Float, w: Float, h: Float) {
+    val color = Color(0xFF64748B)
+    val a = 0.45f
+    val line = (h / 220f).coerceIn(0.8f, 2f)
+    when (id) {
+        BgPresets.LINED -> {
+            val step = h / 26f
+            var y = top + step
+            while (y < top + h) { drawLine(color, Offset(left, y), Offset(left + w, y), line, alpha = a); y += step }
+        }
+        BgPresets.GRID -> {
+            val step = h / 26f
+            var y = top + step
+            while (y < top + h) { drawLine(color, Offset(left, y), Offset(left + w, y), line, alpha = a); y += step }
+            var x = left + step
+            while (x < left + w) { drawLine(color, Offset(x, top), Offset(x, top + h), line, alpha = a); x += step }
+        }
+        BgPresets.DOTS -> {
+            val step = h / 26f
+            var y = top + step
+            while (y < top + h) {
+                var x = left + step
+                while (x < left + w) { drawCircle(color, radius = line * 0.9f, center = Offset(x, y), alpha = a); x += step }
+                y += step
+            }
+        }
+        BgPresets.MUSIC -> {
+            val gap = h / 70f
+            val groupGap = gap * 4
+            var y = top + gap * 2
+            while (y + gap * 4 < top + h) {
+                for (i in 0 until 5) drawLine(color, Offset(left, y + i * gap), Offset(left + w, y + i * gap), line, alpha = a)
+                y += gap * 4 + groupGap
+            }
+        }
+    }
+}
+
+/**
+ * Dibuja los trazos sobre una hoja, conservando proporción. Si se pasa un fondo
+ * (`bgImage` rasterizado o `bgPreset` del catálogo) se pinta TENUE debajo.
+ */
 @Composable
 fun InkCanvas(
     strokes: List<StrokeDto>,
     paper: PaperDto?,
     modifier: Modifier = Modifier,
     inkColor: Color = Color(0xFF111111),
+    bgImage: ImageBitmap? = null,
+    bgPreset: String? = null,
 ) {
     val model = remember(strokes, paper) { buildModel(strokes, paper) }
     Canvas(modifier) {
@@ -130,6 +187,21 @@ fun InkCanvas(
         val s = minOf(size.width / model.width, size.height / model.height)
         val dx = (size.width - model.width * s) / 2f
         val dy = (size.height - model.height * s) / 2f
+        val boxW = model.width * s
+        val boxH = model.height * s
+        // Fondo (imagen o preset) DEBAJO de los trazos, encajado en el recuadro.
+        if (bgImage != null) {
+            drawImage(
+                image = bgImage,
+                srcOffset = IntOffset.Zero,
+                srcSize = IntSize(bgImage.width, bgImage.height),
+                dstOffset = IntOffset(dx.toInt(), dy.toInt()),
+                dstSize = IntSize(boxW.toInt().coerceAtLeast(1), boxH.toInt().coerceAtLeast(1)),
+                alpha = 0.6f,
+            )
+        } else if (bgPreset != null) {
+            drawBgPreset(bgPreset, dx, dy, boxW, boxH)
+        }
         val style = Stroke(
             width = (model.strokeWidth * s).coerceAtLeast(1f),
             cap = StrokeCap.Round,
