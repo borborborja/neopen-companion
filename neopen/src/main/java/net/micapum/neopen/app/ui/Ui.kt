@@ -46,7 +46,13 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
@@ -121,7 +127,6 @@ import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.data.PAPER_PRESETS
 import net.micapum.neopen.app.data.PaperPreset
 import net.micapum.neopen.app.data.paperFromPreset
-import net.micapum.neopen.app.data.paperLabel
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.InkCanvas
 import net.micapum.neopen.core.data.AppMode
@@ -135,6 +140,8 @@ private val NotebookColors = listOf(
 )
 
 private enum class PageView { Grid, List, Large }
+
+private enum class NotebookView { Mosaic, Compact, List }
 private enum class ExportMode { Share, Save }
 
 private fun parseTags(s: String): List<String> =
@@ -434,24 +441,64 @@ private fun NotebooksScreen(
     onOpen: (String) -> Unit,
     onEdit: (String) -> Unit,
 ) {
-    if (notebooks.isEmpty()) {
-        EmptyHint("No hay cuadernos todavía.\nSincroniza para descargarlos.")
-        return
-    }
-    // Agrupación por categoría (opt-in): solo se muestran cabeceras si algún
-    // cuaderno tiene categoría. El grupo "Sin categoría" (null) va al final.
-    val hasCategories = notebooks.any { !it.category.isNullOrBlank() }
-    val groups: List<Pair<String?, List<Notebook>>> =
-        if (!hasCategories) {
-            listOf(null to notebooks)
-        } else {
-            notebooks
-                .groupBy { it.category?.trim()?.ifBlank { null } }
-                .toList()
-                .sortedWith(compareBy({ it.first == null }, { it.first?.lowercase() ?: "" }))
+    var mode by rememberSaveable { mutableStateOf(NotebookView.Mosaic) }
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Cuadernos", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            val active = MaterialTheme.colorScheme.primary
+            val muted = MaterialTheme.colorScheme.onSurfaceVariant
+            IconButton({ mode = NotebookView.Mosaic }) { Icon(Icons.Filled.GridView, "Mosaico", tint = if (mode == NotebookView.Mosaic) active else muted) }
+            IconButton({ mode = NotebookView.Compact }) { Icon(Icons.Filled.Apps, "Compacto", tint = if (mode == NotebookView.Compact) active else muted) }
+            IconButton({ mode = NotebookView.List }) { Icon(Icons.AutoMirrored.Filled.ViewList, "Lista", tint = if (mode == NotebookView.List) active else muted) }
         }
+        if (notebooks.isEmpty()) {
+            EmptyHint("No hay cuadernos todavía.\nSincroniza para descargarlos.")
+            return@Column
+        }
+        // Agrupación por categoría (opt-in): solo se muestran cabeceras si algún
+        // cuaderno tiene categoría. El grupo "Sin categoría" (null) va al final.
+        val hasCategories = notebooks.any { !it.category.isNullOrBlank() }
+        val groups: List<Pair<String?, List<Notebook>>> =
+            if (!hasCategories) {
+                listOf(null to notebooks)
+            } else {
+                notebooks
+                    .groupBy { it.category?.trim()?.ifBlank { null } }
+                    .toList()
+                    .sortedWith(compareBy({ it.first == null }, { it.first?.lowercase() ?: "" }))
+            }
+        when (mode) {
+            NotebookView.Mosaic -> NotebookGrid(groups, hasCategories, 150.dp, false, vm, onOpen, onEdit)
+            NotebookView.Compact -> NotebookGrid(groups, hasCategories, 104.dp, true, vm, onOpen, onEdit)
+            NotebookView.List -> LazyColumn(
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                groups.forEach { (category, list) ->
+                    if (hasCategories) item(key = "cat-$category") { CategoryHeader(category ?: "Sin categoría", list.size) }
+                    items(list, key = { it.id }) { nb -> NotebookListRow(vm, nb, onOpen, onEdit) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotebookGrid(
+    groups: List<Pair<String?, List<Notebook>>>,
+    hasCategories: Boolean,
+    minCell: Dp,
+    compact: Boolean,
+    vm: MainViewModel,
+    onOpen: (String) -> Unit,
+    onEdit: (String) -> Unit,
+) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(160.dp),
+        columns = GridCells.Adaptive(minCell),
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -459,11 +506,11 @@ private fun NotebooksScreen(
     ) {
         groups.forEach { (category, items) ->
             if (hasCategories) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "cat-$category") {
                     CategoryHeader(category ?: "Sin categoría", items.size)
                 }
             }
-            gridItems(items, key = { it.id }) { nb -> NotebookCard(vm, nb, onOpen, onEdit) }
+            gridItems(items, key = { it.id }) { nb -> NotebookCard(vm, nb, onOpen, onEdit, compact) }
         }
     }
 }
@@ -489,49 +536,128 @@ private fun CategoryHeader(label: String, count: Int) {
     }
 }
 
+/** Portadas preestablecidas del servidor (espejo de apps/web/src/covers/presets.ts). */
+private val COVER_PRESETS = listOf(
+    "/cover-presets/llibreta1.png",
+    "/cover-presets/llibreta2.png",
+    "/cover-presets/llibreta3.png",
+)
+private const val UNCLASSIFIED_COVER = "/cover-presets/sinclasificar.png"
+
+/** Hash estable (FNV-1a 32-bit) para elegir un preset por id, como en la web. */
+private fun coverHash(s: String): Int {
+    var h = -0x7ee3623b // 0x811c9dc5
+    for (c in s) { h = h xor c.code; h *= 0x01000193 }
+    return h and 0x7fffffff
+}
+
+/**
+ * Modelo de portada para Coil. En modo local (sin servidor) → null (solo color).
+ * En modo completo: portada subida, o preset por hash (o "sin clasificar"),
+ * servidos estáticamente por el servidor.
+ */
+private fun notebookCoverModel(serverUrl: String, nb: Notebook): Any? {
+    if (serverUrl.isBlank()) return null
+    val path = nb.coverUrl
+        ?: if (nb.unclassified) UNCLASSIFIED_COVER
+        else COVER_PRESETS[coverHash(nb.id) % COVER_PRESETS.size]
+    return absoluteUrl(serverUrl, path)
+}
+
+/** Tile de cuaderno: color de fondo + portada por delante + título/menú en overlay abajo. */
 @Composable
-private fun NotebookCard(vm: MainViewModel, nb: Notebook, onOpen: (String) -> Unit, onEdit: (String) -> Unit) {
+private fun NotebookCard(
+    vm: MainViewModel,
+    nb: Notebook,
+    onOpen: (String) -> Unit,
+    onEdit: (String) -> Unit,
+    compact: Boolean = false,
+) {
+    val cover = notebookCoverModel(vm.serverUrl(), nb)
+    val noFormat = nb.paper == null && !nb.unclassified && !nb.custom
     Card(
         onClick = { onOpen(nb.id) },
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        val cover = nb.coverUrl
-        if (cover != null) {
-            AsyncImage(
-                model = absoluteUrl(vm.serverUrl(), cover),
-                contentDescription = nb.name,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1.4f),
-            )
-        } else {
-            Box(Modifier.fillMaxWidth().aspectRatio(1.4f).background(parseColor(nb.color)))
+        Box(Modifier.fillMaxWidth().aspectRatio(0.74f)) {
+            Box(Modifier.matchParentSize().background(parseColor(nb.color)))
+            if (cover != null) {
+                AsyncImage(
+                    model = cover,
+                    contentDescription = nb.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
+            if (noFormat) {
+                Text(
+                    "⚠",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+            CompositionLocalProvider(LocalContentColor provides Color.White) {
+                Row(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))
+                        .padding(start = 10.dp, end = 2.dp, top = 16.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            nb.name,
+                            style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (!compact) {
+                            Text(
+                                "${nb.pageCount} ${if (nb.pageCount == 1) "hoja" else "hojas"}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.85f),
+                            )
+                        }
+                    }
+                    if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
+                }
+            }
         }
+    }
+}
+
+/** Fila de cuaderno (vista lista): miniatura de portada + nombre + nº hojas + menú. */
+@Composable
+private fun NotebookListRow(vm: MainViewModel, nb: Notebook, onOpen: (String) -> Unit, onEdit: (String) -> Unit) {
+    val cover = notebookCoverModel(vm.serverUrl(), nb)
+    Card(onClick = { onOpen(nb.id) }, modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
         Row(
-            Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+            Modifier.padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Box(Modifier.size(40.dp, 52.dp).clip(RoundedCornerShape(6.dp)).background(parseColor(nb.color))) {
+                if (cover != null) {
+                    AsyncImage(cover, nb.name, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+                }
+            }
+            Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(nb.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                OriginBadge(nb)
                 Text(
                     "${nb.pageCount} ${if (nb.pageCount == 1) "hoja" else "hojas"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (nb.paper == null && !nb.unclassified && !nb.custom) {
-                    Text(
-                        "⚠ Sin formato — proporciones aproximadas",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                } else paperLabel(nb.paper)?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
             }
             if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
-        }
-        if (nb.tags.isNotEmpty()) {
-            TagChips(nb.tags, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp))
         }
     }
 }
