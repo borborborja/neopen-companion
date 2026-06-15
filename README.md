@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icono.svg" width="128" alt="neopen" />
+</p>
+
 # neopen companion (Android)
 
 App Android **companion** del proyecto [neopen](https://github.com/borborborja/neopen).
