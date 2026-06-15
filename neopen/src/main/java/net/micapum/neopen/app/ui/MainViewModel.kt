@@ -500,6 +500,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.settings.update(settings.value.copy(recentShowCount = n)) }
     }
 
+    /** Vista de la pestaña Cuadernos (Mosaic/Compact/List), persistida. */
+    fun setNotebookView(view: String) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(notebookView = view)) }
+    }
+
     /** Oculta lo actual de "Últimas ediciones"; una edición posterior lo trae de vuelta. */
     fun clearRecent() {
         viewModelScope.launch { graph.settings.update(settings.value.copy(recentClearedAt = nowIso())) }
