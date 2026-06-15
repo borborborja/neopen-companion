@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API ≤ 30. Excluye las credenciales (DataStore) del backup automático. -->
+<full-backup-content>
+    <exclude domain="file" path="datastore/neopen-companion.preferences_pb" />
+</full-backup-content>

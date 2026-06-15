@@ -1,6 +1,9 @@
 package net.micapum.neopen.core.data
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -10,8 +13,66 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "neopen-companion")
+
+/**
+ * Cifra la contraseña del servidor en reposo con una clave AES/GCM del Android
+ * Keystore (ligada al dispositivo, nunca sale en backups). Retrocompatible: un
+ * valor sin el prefijo se trata como texto plano heredado; si el descifrado falla
+ * (p. ej. backup restaurado en otro móvil) devuelve "" → el usuario reentra la
+ * contraseña. Si el cifrado falla en algún dispositivo raro, guarda en claro
+ * (degradado pero funcional).
+ */
+internal object PwCrypto {
+    private const val ALIAS = "neopen_pw_key"
+    private const val PREFIX = "enc1:"
+    private const val TRANSFORM = "AES/GCM/NoPadding"
+    private const val IV_LEN = 12
+    private const val TAG_BITS = 128
+
+    private fun key(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            KeyGenParameterSpec.Builder(
+                ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build(),
+        )
+        return gen.generateKey()
+    }
+
+    fun encrypt(plain: String): String {
+        if (plain.isEmpty()) return ""
+        return runCatching {
+            val cipher = Cipher.getInstance(TRANSFORM)
+            cipher.init(Cipher.ENCRYPT_MODE, key())
+            val out = cipher.iv + cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+            PREFIX + Base64.encodeToString(out, Base64.NO_WRAP)
+        }.getOrDefault(plain)
+    }
+
+    fun decrypt(stored: String): String {
+        if (!stored.startsWith(PREFIX)) return stored // texto plano heredado o vacío
+        return runCatching {
+            val raw = Base64.decode(stored.removePrefix(PREFIX), Base64.NO_WRAP)
+            val cipher = Cipher.getInstance(TRANSFORM)
+            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, raw, 0, IV_LEN))
+            String(cipher.doFinal(raw, IV_LEN, raw.size - IV_LEN), Charsets.UTF_8)
+        }.getOrDefault("")
+    }
+}
 
 /** Modo de sincronización de la escritura offline guardada en el boli. */
 enum class SyncMode { MANUAL, INTERVAL }
@@ -78,7 +139,7 @@ class SettingsStore(private val context: Context) {
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
         val url = p[Keys.url] ?: ""
-        val pw = p[Keys.pw] ?: ""
+        val pw = PwCrypto.decrypt(p[Keys.pw] ?: "")
         AppSettings(
             serverUrl = url,
             password = pw,
@@ -103,7 +164,7 @@ class SettingsStore(private val context: Context) {
     suspend fun update(s: AppSettings) {
         context.dataStore.edit { p ->
             p[Keys.url] = s.serverUrl.trim()
-            p[Keys.pw] = s.password
+            p[Keys.pw] = PwCrypto.encrypt(s.password)
             p[Keys.bg] = s.backgroundEnabled
             p[Keys.mode] = s.syncMode.name
             p[Keys.interval] = s.syncIntervalMin
