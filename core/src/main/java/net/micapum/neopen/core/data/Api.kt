@@ -100,6 +100,8 @@ data class CaptureDto(
     val kind: String? = null,
     val sealed: Boolean = false,
     val overlap: OverlapDto? = null,
+    // Hoja clon (copia en un cuaderno personalizado): nunca recibe fusiones por SOBP.
+    val clonedFrom: String? = null,
 )
 
 /** Aviso de trazos superpuestos detectado en la última fusión (espejo de OverlapInfo). */

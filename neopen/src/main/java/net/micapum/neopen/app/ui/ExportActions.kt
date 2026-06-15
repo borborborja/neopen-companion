@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import net.micapum.neopen.app.R
 import java.io.File
 
 private fun cacheUri(context: Context, file: ExportFile): Uri {
@@ -25,7 +26,7 @@ fun shareExport(context: Context, file: ExportFile) {
         putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(send, "Compartir"))
+    context.startActivity(Intent.createChooser(send, context.getString(R.string.exp_share)))
 }
 
 /** Guarda en Descargas (API 29+); en versiones previas recurre a la hoja de compartir. */
@@ -42,7 +43,7 @@ fun saveExport(context: Context, file: ExportFile) {
     val resolver = context.contentResolver
     val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
     if (uri == null) {
-        Toast.makeText(context, "No se pudo guardar", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.exp_save_failed), Toast.LENGTH_SHORT).show()
         return
     }
     val ok = runCatching {
@@ -51,5 +52,5 @@ fun saveExport(context: Context, file: ExportFile) {
         values.put(MediaStore.Downloads.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
     }.isSuccess
-    Toast.makeText(context, if (ok) "Guardado en Descargas" else "No se pudo guardar", Toast.LENGTH_SHORT).show()
+    Toast.makeText(context, if (ok) context.getString(R.string.exp_saved_to_downloads) else context.getString(R.string.exp_save_failed), Toast.LENGTH_SHORT).show()
 }

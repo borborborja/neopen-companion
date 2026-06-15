@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.micapum.neopen.app.R
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.data.PageBackground
@@ -94,17 +95,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun testServer(url: String, password: String) {
         if (url.isBlank()) {
-            _serverCheck.value = ServerCheck.Unreachable("Falta la URL del servidor")
+            _serverCheck.value = ServerCheck.Unreachable(getApplication<Application>().getString(R.string.vm_missing_server_url))
             return
         }
         _serverCheck.value = ServerCheck.Checking
         viewModelScope.launch {
             val api = runCatching { ApiFactory.create(url.trim()) }.getOrElse {
-                _serverCheck.value = ServerCheck.Unreachable("URL no válida"); return@launch
+                _serverCheck.value = ServerCheck.Unreachable(getApplication<Application>().getString(R.string.vm_invalid_url)); return@launch
             }
             val reachable = runCatching { api.health() }
             if (reachable.isFailure) {
-                _serverCheck.value = ServerCheck.Unreachable(reachable.exceptionOrNull()?.message ?: "Sin respuesta")
+                _serverCheck.value = ServerCheck.Unreachable(reachable.exceptionOrNull()?.message ?: getApplication<Application>().getString(R.string.vm_no_response))
                 return@launch
             }
             _serverCheck.value = runCatching { api.capabilities(password) }.fold(
@@ -112,10 +113,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     when (resp.code()) {
                         in 200..299 -> ServerCheck.Ok
                         401, 403 -> ServerCheck.BadAuth
-                        else -> ServerCheck.Unreachable("HTTP ${resp.code()}")
+                        else -> ServerCheck.Unreachable(getApplication<Application>().getString(R.string.vm_http_error, resp.code()))
                     }
                 },
-                onFailure = { ServerCheck.Unreachable(it.message ?: "Error de red") },
+                onFailure = { ServerCheck.Unreachable(it.message ?: getApplication<Application>().getString(R.string.vm_network_error)) },
             )
         }
     }
@@ -152,17 +153,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val clean = url.trim()
             val api = runCatching { ApiFactory.create(clean) }.getOrNull()
-            if (api == null) { onResult(false, "URL no válida"); return@launch }
+            if (api == null) { onResult(false, getApplication<Application>().getString(R.string.vm_invalid_url)); return@launch }
             val code = runCatching { api.capabilities(password).code() }.getOrElse {
-                onResult(false, "No se pudo conectar al servidor"); return@launch
+                onResult(false, getApplication<Application>().getString(R.string.vm_server_connect_failed)); return@launch
             }
             if (code !in 200..299) {
-                onResult(false, if (code == 401 || code == 403) "Contraseña incorrecta" else "Error del servidor ($code)")
+                onResult(false, if (code == 401 || code == 403) getApplication<Application>().getString(R.string.vm_wrong_password) else getApplication<Application>().getString(R.string.vm_server_error, code))
                 return@launch
             }
             val migrated = runCatching { graph.repo.linkAndMerge(api, password) }
             if (migrated.isFailure) {
-                onResult(false, "No se pudieron migrar los datos: ${migrated.exceptionOrNull()?.message}")
+                onResult(false, getApplication<Application>().getString(R.string.vm_migration_failed, migrated.exceptionOrNull()?.message ?: ""))
                 return@launch
             }
             graph.settings.update(settings.value.copy(serverUrl = clean, password = password, appMode = AppMode.FULL))
@@ -247,7 +248,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 graph.repo.applyNotebookPaperLocal(id, paper)
                 graph.syncNow()
             } else {
-                _status.value = "No se pudo fijar el formato del cuaderno (¿sin conexión?)"
+                _status.value = getApplication<Application>().getString(R.string.vm_set_notebook_paper_failed)
             }
         }
     }
@@ -316,7 +317,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _detectedSobp.value = null
                 loadSobpScans()
             } else {
-                _status.value = "No se pudo guardar el SOBP (¿sin conexión?)"
+                _status.value = getApplication<Application>().getString(R.string.vm_save_sobp_failed)
             }
             onResult(ok)
         }
@@ -343,7 +344,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun transcribe(captureId: String) {
         viewModelScope.launch {
             if (!graph.online.value) {
-                _status.value = "El OCR necesita conexión"
+                _status.value = getApplication<Application>().getString(R.string.vm_ocr_needs_connection)
                 return@launch
             }
             val cap = graph.repo.capture(captureId) ?: return@launch
@@ -354,7 +355,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val part = MultipartBody.Part.createFormData("image", "page.png", body)
                 ApiFactory.create(s.serverUrl).transcribe(s.password, captureId, part, null)
             }.getOrNull()
-            if (dto != null) graph.repo.applyServerCapture(dto) else _status.value = "El OCR falló"
+            if (dto != null) graph.repo.applyServerCapture(dto) else _status.value = getApplication<Application>().getString(R.string.vm_ocr_failed)
         }
     }
 
@@ -457,7 +458,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 is ResolvedBg.ServerUrl -> bgImage = choice.url
                 is ResolvedBg.Png -> {
                     bgImage = if (!hasServer()) saveLocalPng(id, choice.bytes)
-                    else uploadPng(choice.bytes) ?: run { _status.value = "No se pudo subir el fondo (¿sin conexión?)"; return@launch }
+                    else uploadPng(choice.bytes) ?: run { _status.value = getApplication<Application>().getString(R.string.vm_upload_background_failed); return@launch }
                 }
             }
             if (hasServer()) {
@@ -472,7 +473,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         ),
                     ).isSuccessful
                 }.getOrDefault(false)
-                if (!ok) { _status.value = "No se pudo guardar el fondo (¿sin conexión?)"; return@launch }
+                if (!ok) { _status.value = getApplication<Application>().getString(R.string.vm_save_background_failed); return@launch }
             }
             graph.repo.upsertBackground(
                 PageBackgroundEntity(
@@ -555,7 +556,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     graph.repo.finalizeNotebookLocal(c.notebookId)
                 } else {
                     val ok = runCatching { ApiFactory.create(s.serverUrl).finalizeNotebook(s.password, c.notebookId) }.isSuccess
-                    if (ok) graph.syncNow() else _status.value = "No se pudo finalizar el cuaderno (¿sin conexión?)"
+                    if (ok) graph.syncNow() else _status.value = getApplication<Application>().getString(R.string.vm_finalize_notebook_failed)
                 }
             } else {
                 if (local) graph.repo.setCaptureSealedLocal(c.id, true)
@@ -615,7 +616,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     val dto = runCatching { ApiFactory.create(s.serverUrl).dismissOverlap(s.password, c.id) }.getOrNull()
                     if (dto != null) { graph.repo.applyServerCapture(dto); graph.syncNow() }
-                    else _status.value = "No se pudo descartar el aviso (¿sin conexión?)"
+                    else _status.value = getApplication<Application>().getString(R.string.vm_dismiss_overlap_failed)
                 }
                 return@launch
             }
@@ -626,7 +627,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     ApiFactory.create(s.serverUrl).splitCapture(s.password, c.id, SplitBody(cutIndex, action))
                 }.getOrNull()
                 if (res != null) { graph.repo.applySplitResult(res.original, res.created); graph.syncNow() }
-                else _status.value = "No se pudo cortar la hoja (¿sin conexión?)"
+                else _status.value = getApplication<Application>().getString(R.string.vm_split_capture_failed)
             }
         }
     }

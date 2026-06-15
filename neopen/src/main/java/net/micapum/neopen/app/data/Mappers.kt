@@ -32,6 +32,7 @@ fun CaptureDto.toEntity(): CaptureEntity = CaptureEntity(
     kind = kind,
     sealed = sealed,
     overlapJson = Json.overlapJson(overlap),
+    clonedFrom = clonedFrom,
 )
 
 fun NotebookDto.toEntity(): NotebookEntity = NotebookEntity(

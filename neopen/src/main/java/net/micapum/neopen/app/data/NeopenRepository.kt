@@ -1,5 +1,6 @@
 package net.micapum.neopen.app.data
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -225,22 +226,25 @@ class NeopenRepository(private val db: NeopenDb) {
         val nb = db.notebooks().getById(notebookId) ?: return
         val bookKey = nb.bookKey ?: return
         val now = nowIso()
-        db.captures().sealByNotebook(notebookId, now)
-        db.notebooks().upsertOne(nb.copy(bookKey = null, name = "${nb.name} (finalizado)", updatedAt = now))
-        db.notebooks().upsertOne(
-            NotebookEntity(
-                id = "local-" + UUID.randomUUID(),
-                rev = 0,
-                name = nb.name,
-                color = nb.color,
-                createdAt = now,
-                updatedAt = now,
-                bookKey = bookKey,
-                paperJson = nb.paperJson,
-                paperSource = nb.paperSource,
-                category = nb.category,
-            ),
-        )
+        // Atómico: sellar + desligar + crear la copia no debe quedar a medias.
+        db.withTransaction {
+            db.captures().sealByNotebook(notebookId, now)
+            db.notebooks().upsertOne(nb.copy(bookKey = null, name = "${nb.name} (finalizado)", updatedAt = now))
+            db.notebooks().upsertOne(
+                NotebookEntity(
+                    id = "local-" + UUID.randomUUID(),
+                    rev = 0,
+                    name = nb.name,
+                    color = nb.color,
+                    createdAt = now,
+                    updatedAt = now,
+                    bookKey = bookKey,
+                    paperJson = nb.paperJson,
+                    paperSource = nb.paperSource,
+                    category = nb.category,
+                ),
+            )
+        }
     }
 
     /**
@@ -254,74 +258,78 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun splitCaptureLocal(id: String, cutIndex: Int, mode: String) {
         val e = db.captures().getById(id) ?: return
         val sorted = Json.strokes(e.strokesJson).sortedBy { it.startTime }
-        val cut = cutIndex.coerceIn(0, sorted.size)
-        val before = sorted.take(cut)
-        val after = sorted.drop(cut)
+        // Un corte en 0 o al final (o una hoja vacía) no parte nada: no-op.
+        if (sorted.isEmpty() || cutIndex <= 0 || cutIndex >= sorted.size) return
+        val before = sorted.take(cutIndex)
+        val after = sorted.drop(cutIndex)
         val now = nowIso()
-        // 1. La hoja original se queda con lo de antes del corte y se sella.
-        db.captures().upsertOne(
-            e.copy(strokesJson = Json.strokesJson(before), sealed = true, overlapJson = null, updatedAt = now),
-        )
-        // 2. Destino de la hoja nueva.
-        var notebookId = e.notebookId
-        var destination = e.destination
-        if (mode == "newNotebook") {
-            val srcNb = e.notebookId?.let { db.notebooks().getById(it) }
-            if (srcNb?.bookKey != null) {
-                db.notebooks().upsertOne(srcNb.copy(bookKey = null, name = "${srcNb.name} (finalizado)", updatedAt = now))
-                val freshNb = NotebookEntity(
-                    id = "local-" + UUID.randomUUID(),
-                    rev = 0,
-                    name = srcNb.name,
-                    color = srcNb.color,
-                    createdAt = now,
-                    updatedAt = now,
-                    bookKey = srcNb.bookKey,
-                    paperJson = srcNb.paperJson,
-                    paperSource = srcNb.paperSource,
-                    category = srcNb.category,
-                )
-                db.notebooks().upsertOne(freshNb)
-                notebookId = freshNb.id
-                destination = "notebook"
-            } else {
-                val freshNb = NotebookEntity(
-                    id = "local-" + UUID.randomUUID(),
-                    rev = 0,
-                    name = e.name,
-                    color = "#64748b",
-                    createdAt = now,
-                    updatedAt = now,
-                    paperJson = e.paperJson,
-                    custom = true,
-                )
-                db.notebooks().upsertOne(freshNb)
-                notebookId = freshNb.id
-                destination = "notebook"
+        // Atómico: sellar la original + (re)crear cuaderno + insertar la hoja nueva.
+        db.withTransaction {
+            // 1. La hoja original se queda con lo de antes del corte y se sella.
+            db.captures().upsertOne(
+                e.copy(strokesJson = Json.strokesJson(before), sealed = true, overlapJson = null, updatedAt = now),
+            )
+            // 2. Destino de la hoja nueva.
+            var notebookId = e.notebookId
+            var destination = e.destination
+            if (mode == "newNotebook") {
+                val srcNb = e.notebookId?.let { db.notebooks().getById(it) }
+                if (srcNb?.bookKey != null) {
+                    db.notebooks().upsertOne(srcNb.copy(bookKey = null, name = "${srcNb.name} (finalizado)", updatedAt = now))
+                    val freshNb = NotebookEntity(
+                        id = "local-" + UUID.randomUUID(),
+                        rev = 0,
+                        name = srcNb.name,
+                        color = srcNb.color,
+                        createdAt = now,
+                        updatedAt = now,
+                        bookKey = srcNb.bookKey,
+                        paperJson = srcNb.paperJson,
+                        paperSource = srcNb.paperSource,
+                        category = srcNb.category,
+                    )
+                    db.notebooks().upsertOne(freshNb)
+                    notebookId = freshNb.id
+                    destination = "notebook"
+                } else {
+                    val freshNb = NotebookEntity(
+                        id = "local-" + UUID.randomUUID(),
+                        rev = 0,
+                        name = e.name,
+                        color = "#64748b",
+                        createdAt = now,
+                        updatedAt = now,
+                        paperJson = e.paperJson,
+                        custom = true,
+                    )
+                    db.notebooks().upsertOne(freshNb)
+                    notebookId = freshNb.id
+                    destination = "notebook"
+                }
             }
+            // 3. Inserta la hoja nueva con los trazos posteriores al corte.
+            db.captures().upsertOne(
+                CaptureEntity(
+                    id = "local-" + UUID.randomUUID(),
+                    rev = 0,
+                    section = e.section, owner = e.owner, book = e.book, page = e.page,
+                    notebook = e.notebook,
+                    source = e.source,
+                    capturedAt = e.capturedAt,
+                    importedAt = now,
+                    updatedAt = now,
+                    name = e.name,
+                    tagsJson = e.tagsJson,
+                    strokesJson = Json.strokesJson(after),
+                    destination = destination,
+                    notebookId = notebookId,
+                    position = 0,
+                    paperJson = e.paperJson,
+                    kind = e.kind,
+                    sealed = false,
+                ),
+            )
         }
-        // 3. Inserta la hoja nueva con los trazos posteriores al corte.
-        db.captures().upsertOne(
-            CaptureEntity(
-                id = "local-" + UUID.randomUUID(),
-                rev = 0,
-                section = e.section, owner = e.owner, book = e.book, page = e.page,
-                notebook = e.notebook,
-                source = e.source,
-                capturedAt = e.capturedAt,
-                importedAt = now,
-                updatedAt = now,
-                name = e.name,
-                tagsJson = e.tagsJson,
-                strokesJson = Json.strokesJson(after),
-                destination = destination,
-                notebookId = notebookId,
-                position = 0,
-                paperJson = e.paperJson,
-                kind = e.kind,
-                sealed = false,
-            ),
-        )
     }
 
     /** Descarta el aviso de superposición de una hoja en LOCAL (sin cortar). */

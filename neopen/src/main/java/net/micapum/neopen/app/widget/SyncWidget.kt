@@ -57,7 +57,7 @@ class SyncWidget : GlanceAppWidget() {
         val store = SyncStatusStore(context)
         provideContent {
             val status by store.flow.collectAsState(SyncStatus())
-            WidgetUi(status)
+            WidgetUi(context, status)
         }
     }
 
@@ -83,7 +83,7 @@ class ForceSyncAction : ActionCallback {
 }
 
 @Composable
-private fun WidgetUi(status: SyncStatus) {
+private fun WidgetUi(context: Context, status: SyncStatus) {
     val size = LocalSize.current
     val tall = size.height >= MEDIUM.height
     val wide = size.width >= LARGE.width
@@ -103,32 +103,35 @@ private fun WidgetUi(status: SyncStatus) {
         }
         if (tall) {
             Spacer(GlanceModifier.height(10.dp))
-            SyncLine("Boli", status.lastPenSync)
+            SyncLine(context.getString(R.string.wgt_sync_pen), relative(context, status.lastPenSync))
             Spacer(GlanceModifier.height(6.dp))
-            SyncLine("Servidor", status.lastServerSync)
+            SyncLine(context.getString(R.string.wgt_sync_server), relative(context, status.lastServerSync))
             if (wide) {
                 Spacer(GlanceModifier.height(10.dp))
-                Text("Toca para sincronizar ahora", style = TextStyle(color = Muted, fontSize = 12.sp))
+                Text(context.getString(R.string.wgt_sync_tap_now), style = TextStyle(color = Muted, fontSize = 12.sp))
             }
         } else {
             Spacer(GlanceModifier.height(6.dp))
-            Text("Servidor: ${relative(status.lastServerSync)}", style = TextStyle(color = OnBg, fontSize = 13.sp))
-            Text("Toca para sync", style = TextStyle(color = Muted, fontSize = 11.sp))
+            Text(
+                context.getString(R.string.wgt_sync_server_compact, relative(context, status.lastServerSync)),
+                style = TextStyle(color = OnBg, fontSize = 13.sp),
+            )
+            Text(context.getString(R.string.wgt_sync_tap_compact), style = TextStyle(color = Muted, fontSize = 11.sp))
         }
     }
 }
 
 @Composable
-private fun SyncLine(label: String, at: Long) {
+private fun SyncLine(label: String, value: String) {
     Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = TextStyle(color = Muted, fontSize = 13.sp))
         Spacer(GlanceModifier.defaultWeight())
-        Text(relative(at), style = TextStyle(color = OnBg, fontSize = 13.sp, fontWeight = FontWeight.Medium))
+        Text(value, style = TextStyle(color = OnBg, fontSize = 13.sp, fontWeight = FontWeight.Medium))
     }
 }
 
-private fun relative(at: Long): String =
-    if (at <= 0L) "nunca"
+private fun relative(context: Context, at: Long): String =
+    if (at <= 0L) context.getString(R.string.wgt_sync_never)
     else DateUtils.getRelativeTimeSpanString(
         at, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE,
     ).toString()
