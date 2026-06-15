@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,6 +61,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Últimas ediciones: todas las capturas por fecha (para la pestaña Bandeja). */
     val recent: StateFlow<List<Capture>> =
         graph.repo.recent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * SOBP con ≥2 capturas no-clon: sus hojas finalizadas NO se pueden reabrir, porque
+     * al reescribir el mismo código ya se creó otra hoja y reabrir haría ambiguo a
+     * dónde van los trazos del boli. La UI lo usa para ocultar el botón "Reabrir".
+     */
+    val supersededSobps: StateFlow<Set<String>> =
+        graph.repo.recent()
+            .map { caps ->
+                caps.filter { it.clonedFrom == null }
+                    .groupingBy { it.sobpLabel }
+                    .eachCount()
+                    .filterValues { it > 1 }
+                    .keys
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     val pending: StateFlow<Int> =
         graph.repo.pendingCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
@@ -547,6 +564,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val s = settings.value
             val local = !hasServer()
             if (c.sealed) {
+                // No reabrir si ya hay otra hoja con el mismo SOBP (finalizada permanente).
+                if (supersededSobps.value.contains(c.sobpLabel)) return@launch
                 if (local) graph.repo.setCaptureSealedLocal(c.id, false)
                 else { graph.repo.setCaptureSealed(c.id, false); graph.syncNow() }
                 return@launch

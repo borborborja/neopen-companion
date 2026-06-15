@@ -36,6 +36,8 @@ data class Capture(
     val kind: String?,
     val sealed: Boolean = false,
     val overlap: OverlapDto? = null,
+    /** Id de la hoja origen si es un clon; no compite por el enrutado del boli. */
+    val clonedFrom: String? = null,
 ) {
     val sobpLabel get() = "$section.$owner.$book.$page"
 }

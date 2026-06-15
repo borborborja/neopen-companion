@@ -76,6 +76,7 @@ fun CaptureEntity.toDomain(): Capture = Capture(
     kind = kind,
     sealed = sealed,
     overlap = Json.overlapOf(overlapJson),
+    clonedFrom = clonedFrom,
 )
 
 fun PageBackgroundEntity.toDomain(): PageBackground = PageBackground(

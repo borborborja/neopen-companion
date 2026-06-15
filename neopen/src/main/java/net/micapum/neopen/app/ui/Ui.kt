@@ -1072,7 +1072,11 @@ private fun CaptureActions(
     var deleting by remember { mutableStateOf(false) }
     var formatting by remember { mutableStateOf(false) }
     var resolvingOverlap by remember { mutableStateOf(false) }
+    var finalizing by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf<ExportMode?>(null) }
+    // Bloqueada: sellada y ya hay otra hoja con el mismo SOBP → no se puede reabrir.
+    val superseded by vm.supersededSobps.collectAsStateWithLifecycle()
+    val reopenLocked = c.sealed && superseded.contains(c.sobpLabel)
 
     fun doExport(fmt: ExportFormat, modeSel: ExportMode) {
         scope.launch {
@@ -1131,8 +1135,15 @@ private fun CaptureActions(
                 )
             }
             AssistChip(
-                onClick = { vm.finalizeCapture(c) },
-                label = { Text(if (c.sealed) stringResource(R.string.action_reopen) else stringResource(R.string.action_finish)) },
+                onClick = { if (c.sealed) vm.finalizeCapture(c) else finalizing = true },
+                enabled = !reopenLocked,
+                label = {
+                    Text(
+                        if (reopenLocked) stringResource(R.string.action_finished_locked)
+                        else if (c.sealed) stringResource(R.string.action_reopen)
+                        else stringResource(R.string.action_finish),
+                    )
+                },
                 leadingIcon = {
                     Icon(
                         Icons.Filled.Flag,
@@ -1164,8 +1175,15 @@ private fun CaptureActions(
                 DropdownMenuItem(text = { Text(stringResource(R.string.action_sheet_format)) }, onClick = { menu = false; formatting = true })
                 DropdownMenuItem(text = { Text(stringResource(R.string.action_move_to_notebook)) }, onClick = { menu = false; moving = true })
                 DropdownMenuItem(
-                    text = { Text(if (c.sealed) stringResource(R.string.action_reopen_sheet) else stringResource(R.string.action_finish_page)) },
-                    onClick = { menu = false; vm.finalizeCapture(c) },
+                    text = {
+                        Text(
+                            if (reopenLocked) stringResource(R.string.action_finished_locked)
+                            else if (c.sealed) stringResource(R.string.action_reopen_sheet)
+                            else stringResource(R.string.action_finish_page),
+                        )
+                    },
+                    enabled = !reopenLocked,
+                    onClick = { menu = false; if (c.sealed) vm.finalizeCapture(c) else finalizing = true },
                 )
                 if (c.overlap != null) {
                     DropdownMenuItem(
@@ -1204,6 +1222,16 @@ private fun CaptureActions(
     }
     if (resolvingOverlap) {
         OverlapResolverDialog(c, vm, onDismiss = { resolvingOverlap = false })
+    }
+    if (finalizing) {
+        ConfirmDialog(
+            stringResource(R.string.finish_warn_title),
+            stringResource(R.string.finish_warn_body),
+            confirmText = stringResource(R.string.action_finish),
+            destructive = false,
+            onConfirm = { vm.finalizeCapture(c); finalizing = false },
+            onDismiss = { finalizing = false },
+        )
     }
     val mode = exporting
     if (mode != null) {
@@ -1910,12 +1938,23 @@ private fun TextPromptDialog(
 }
 
 @Composable
-private fun ConfirmDialog(title: String, body: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+private fun ConfirmDialog(
+    title: String,
+    body: String,
+    confirmText: String = stringResource(R.string.action_delete),
+    destructive: Boolean = true,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(body) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) } },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmText, color = if (destructive) MaterialTheme.colorScheme.error else Color.Unspecified)
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }

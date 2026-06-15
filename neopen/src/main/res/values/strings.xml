@@ -40,6 +40,9 @@
     <string name="action_finish_page">Finalizar página</string>
     <string name="action_reopen">Reabrir</string>
     <string name="action_reopen_sheet">Reabrir hoja</string>
+    <string name="action_finished_locked">Finalizada</string>
+    <string name="finish_warn_title">¿Finalizar la hoja?</string>
+    <string name="finish_warn_body">Si vuelves a escribir en una hoja con el mismo código (SOBP), se creará una hoja nueva y esta quedará finalizada de forma PERMANENTE: no podrás reabrirla.</string>
     <string name="action_sheet_format">Formato de hoja…</string>
     <string name="action_background">Fondo</string>
     <string name="action_collapse">Contraer</string>
