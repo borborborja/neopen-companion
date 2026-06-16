@@ -102,6 +102,21 @@ data class PageBackgroundEntity(
     val createdAt: String,
 )
 
+/**
+ * Estado de la sincronización local a conectores (espejo de `sync_state` del
+ * servidor): qué fichero ya está subido y con qué hash, para no re-subir lo que
+ * no cambió y poder borrar lo que se deja de desear. Clave: ítem+conector+formato.
+ */
+@Entity(tableName = "connector_sync_state", primaryKeys = ["itemId", "connectorId", "format"])
+data class ConnectorSyncStateEntity(
+    val itemId: String,
+    val connectorId: String,
+    val format: String,
+    val remotePath: String,
+    val sourceHash: String,
+    val syncedAt: Long,
+)
+
 // --- DAOs --------------------------------------------------------------------
 
 @Dao
@@ -242,12 +257,27 @@ interface PageBackgroundDao {
     suspend fun clear()
 }
 
+@Dao
+interface ConnectorSyncStateDao {
+    @Query("SELECT * FROM connector_sync_state")
+    suspend fun all(): List<ConnectorSyncStateEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: ConnectorSyncStateEntity)
+
+    @Query("DELETE FROM connector_sync_state WHERE itemId = :itemId AND connectorId = :connectorId AND format = :format")
+    suspend fun delete(itemId: String, connectorId: String, format: String)
+
+    @Query("DELETE FROM connector_sync_state")
+    suspend fun clear()
+}
+
 @Database(
     entities = [
         CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
-        SyncMetaEntity::class, PageBackgroundEntity::class,
+        SyncMetaEntity::class, PageBackgroundEntity::class, ConnectorSyncStateEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {
@@ -256,4 +286,5 @@ abstract class NeopenDb : RoomDatabase() {
     abstract fun outbox(): OutboxDao
     abstract fun syncMeta(): SyncMetaDao
     abstract fun backgrounds(): PageBackgroundDao
+    abstract fun connectorSyncState(): ConnectorSyncStateDao
 }

@@ -20,6 +20,8 @@ import net.micapum.neopen.core.data.NotebookCreateDto
 import net.micapum.neopen.core.data.DotDto
 import net.micapum.neopen.core.data.NotebookDto
 import net.micapum.neopen.core.data.NotebookPaperBody
+import net.micapum.neopen.core.data.OcrResultDto
+import net.micapum.neopen.core.data.TranscriptionPushDto
 import net.micapum.neopen.core.data.NotebookPatchDto
 import net.micapum.neopen.core.data.OverlapConfig
 import net.micapum.neopen.core.data.PaperDto
@@ -41,6 +43,8 @@ object OutboxKind {
     const val PATCH_NOTEBOOK = "patchNotebook"
     const val DELETE_NOTEBOOK = "deleteNotebook"
     const val REORDER_NOTEBOOK = "reorderNotebook"
+    /** Sube al servidor una transcripción generada en el teléfono (failover del OCR). */
+    const val PUSH_TRANSCRIPTION = "pushTranscription"
 }
 
 /**
@@ -590,6 +594,48 @@ class NeopenRepository(private val db: NeopenDb) {
 
     suspend fun applyServerCapture(dto: CaptureDto) = db.captures().upsertOne(dto.toEntity())
     suspend fun applyServerNotebook(dto: NotebookDto) = db.notebooks().upsertOne(dto.toEntity())
+
+    /**
+     * Aplica localmente el resultado de un OCR hecho en el teléfono: escribe la
+     * transcripción y, si la detección de marcadores aportó algo, sobrescribe
+     * tags/título/kind (igual que el servidor en `setTranscription` + `applyDetection`).
+     * No encola nada; el dispatcher decide si además hay que subirlo (Fase 3).
+     */
+    suspend fun applyLocalTranscription(
+        id: String,
+        transcription: OcrResultDto,
+        tags: List<String>? = null,
+        name: String? = null,
+        kind: String? = null,
+    ) {
+        val e = db.captures().getById(id) ?: return
+        db.captures().upsertOne(
+            e.copy(
+                transcriptionJson = Json.ocrJson(transcription),
+                tagsJson = if (tags != null) Json.tagsJson(tags) else e.tagsJson,
+                name = name ?: e.name,
+                kind = kind ?: e.kind,
+                updatedAt = nowIso(),
+            ),
+        )
+    }
+
+    /**
+     * Encola la subida al servidor de la transcripción local actual de [id]
+     * (failover del OCR: se hizo en el teléfono y hay que sincronizarla). Toma el
+     * estado ya aplicado por [applyLocalTranscription]. No-op si no hay transcripción.
+     */
+    suspend fun enqueueTranscription(id: String) {
+        val cap = db.captures().getById(id)?.toDomain() ?: return
+        val transcription = cap.transcription ?: return
+        val push = TranscriptionPushDto(
+            transcription = transcription,
+            tags = cap.tags,
+            name = cap.name,
+            kind = cap.kind,
+        )
+        enqueue(OutboxKind.PUSH_TRANSCRIPTION, id, Json.transcriptionPush.toJson(push))
+    }
 
     /** Sustituye un cuaderno temporal por el real del servidor (repunta sus hojas). */
     suspend fun replaceTempNotebook(tempId: String, dto: NotebookDto) {

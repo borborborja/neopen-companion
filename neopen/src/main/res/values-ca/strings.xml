@@ -246,4 +246,42 @@
     <string name="wgt_notebooks_empty">Encara no hi ha quaderns.</string>
     <string name="pensvc_notif_text">Connexió del boli en segon pla</string>
     <string name="appsvc_channel_pen">Boli</string>
+
+    <string name="vm_ocr_off">La transcripció està desactivada</string>
+
+    <!-- Capacitats (IA, correcció, connectors) -->
+    <string name="settings_tab_capabilities">Capacitats</string>
+    <string name="settings_cap_title">Capacitats</string>
+    <string name="settings_cap_intro">Tria qui executa cada funció: desactivada, al telèfon (amb les teves credencials locals) o al servidor. En mode Servidor, si el servidor falla i tens credencials locals, ho fa el telèfon i després se sincronitza.</string>
+    <string name="cap_ocr">Transcripció (OCR)</string>
+    <string name="cap_ocr_help">Converteix l\'escriptura en text amb títol, etiquetes, tasques i dates.</string>
+    <string name="cap_lt">Correcció (LanguageTool)</string>
+    <string name="cap_lt_help">Corregeix ortografia i gramàtica del text transcrit.</string>
+    <string name="cap_marker">Detecció de marcadors</string>
+    <string name="cap_marker_help">Llegeix #etiquetes, *títol* i [TIPUS] a la capçalera de la nota.</string>
+    <string name="cap_connector">Sincronització a connectors</string>
+    <string name="cap_connector_help">Exporta les pàgines a WebDAV (Nextcloud/Obsidian) o FTP/SFTP.</string>
+    <string name="cap_source_off">Desactivat</string>
+    <string name="cap_source_phone">Telèfon</string>
+    <string name="cap_source_server">Servidor</string>
+    <string name="cap_note_server_failover">Ho fa el servidor; si falla i hi ha credencials locals, ho fa el telèfon i se sincronitza.</string>
+    <string name="cap_note_no_server">Sense servidor disponible (mode local o sense connexió).</string>
+    <string name="cap_note_no_phone">Sense credencials locals: afegeix-les a sota.</string>
+    <string name="settings_cap_creds_title">Credencials locals (telèfon)</string>
+    <string name="settings_cap_creds_desc">Es desen xifrades al dispositiu. Les contrasenyes no es mostren després de desar.</string>
+    <string name="cap_section_webdav">WebDAV (Nextcloud/Obsidian)</string>
+    <string name="cap_section_ftp">FTP / SFTP</string>
+    <string name="cap_field_ocr_url">URL base (compatible amb OpenAI)</string>
+    <string name="cap_field_ocr_model">Model</string>
+    <string name="cap_field_ocr_key">Clau API</string>
+    <string name="cap_field_ocr_instr">Instruccions (opcional)</string>
+    <string name="cap_field_lt_url">URL base de LanguageTool</string>
+    <string name="cap_field_lt_user">Usuari (opcional)</string>
+    <string name="cap_field_lt_key">Clau API (opcional)</string>
+    <string name="cap_field_webdav_url">URL de WebDAV</string>
+    <string name="cap_field_ftp_url">URL (ftp:// · ftps:// · sftp://)</string>
+    <string name="cap_field_user">Usuari</string>
+    <string name="cap_field_password">Contrasenya</string>
+    <string name="cap_field_basepath">Carpeta base</string>
+    <string name="cap_save_creds">Desa les credencials</string>
 </resources>

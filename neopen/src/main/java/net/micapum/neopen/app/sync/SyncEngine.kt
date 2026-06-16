@@ -109,6 +109,11 @@ class SyncEngine(
                     repo.applyServerCapture(api.patchCapture(pw, op.targetId!!, dto))
                     Outcome.Done
                 }
+                OutboxKind.PUSH_TRANSCRIPTION -> {
+                    val dto = Json.transcriptionPush.fromJson(op.payloadJson) ?: return Outcome.Drop
+                    repo.applyServerCapture(api.putTranscription(pw, op.targetId!!, dto))
+                    Outcome.Done
+                }
                 OutboxKind.DELETE_CAPTURE -> interpret(api.deleteCapture(pw, op.targetId!!))
                 OutboxKind.CREATE_NOTEBOOK -> {
                     val dto = Json.notebookCreate.fromJson(op.payloadJson) ?: return Outcome.Drop

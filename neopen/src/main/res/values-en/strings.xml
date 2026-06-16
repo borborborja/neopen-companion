@@ -246,4 +246,42 @@
     <string name="wgt_notebooks_empty">No notebooks yet.</string>
     <string name="pensvc_notif_text">Pen connection in the background</string>
     <string name="appsvc_channel_pen">Pen</string>
+
+    <string name="vm_ocr_off">Transcription is off</string>
+
+    <!-- Capabilities (AI, correction, connectors) -->
+    <string name="settings_tab_capabilities">Capabilities</string>
+    <string name="settings_cap_title">Capabilities</string>
+    <string name="settings_cap_intro">Choose who runs each feature: off, on the phone (with your local credentials) or on the server. In Server mode, if the server fails and you have local credentials, the phone does it and then syncs.</string>
+    <string name="cap_ocr">Transcription (OCR)</string>
+    <string name="cap_ocr_help">Turns handwriting into text with title, tags, to-dos and dates.</string>
+    <string name="cap_lt">Correction (LanguageTool)</string>
+    <string name="cap_lt_help">Fixes spelling and grammar in the transcribed text.</string>
+    <string name="cap_marker">Marker detection</string>
+    <string name="cap_marker_help">Reads #tags, *title* and [TYPE] in the note header.</string>
+    <string name="cap_connector">Connector sync</string>
+    <string name="cap_connector_help">Exports pages to WebDAV (Nextcloud/Obsidian) or FTP/SFTP.</string>
+    <string name="cap_source_off">Off</string>
+    <string name="cap_source_phone">Phone</string>
+    <string name="cap_source_server">Server</string>
+    <string name="cap_note_server_failover">The server does it; if it fails and local credentials exist, the phone does it and syncs.</string>
+    <string name="cap_note_no_server">No server available (local mode or offline).</string>
+    <string name="cap_note_no_phone">No local credentials: add them below.</string>
+    <string name="settings_cap_creds_title">Local credentials (phone)</string>
+    <string name="settings_cap_creds_desc">Stored encrypted on the device. Passwords are hidden after saving.</string>
+    <string name="cap_section_webdav">WebDAV (Nextcloud/Obsidian)</string>
+    <string name="cap_section_ftp">FTP / SFTP</string>
+    <string name="cap_field_ocr_url">Base URL (OpenAI-compatible)</string>
+    <string name="cap_field_ocr_model">Model</string>
+    <string name="cap_field_ocr_key">API key</string>
+    <string name="cap_field_ocr_instr">Instructions (optional)</string>
+    <string name="cap_field_lt_url">LanguageTool base URL</string>
+    <string name="cap_field_lt_user">Username (optional)</string>
+    <string name="cap_field_lt_key">API key (optional)</string>
+    <string name="cap_field_webdav_url">WebDAV URL</string>
+    <string name="cap_field_ftp_url">URL (ftp:// · ftps:// · sftp://)</string>
+    <string name="cap_field_user">Username</string>
+    <string name="cap_field_password">Password</string>
+    <string name="cap_field_basepath">Base folder</string>
+    <string name="cap_save_creds">Save credentials</string>
 </resources>

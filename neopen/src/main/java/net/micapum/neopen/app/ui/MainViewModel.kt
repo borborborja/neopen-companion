@@ -21,6 +21,7 @@ import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.sync.PenService
+import net.micapum.neopen.app.capability.OcrOutcome
 import net.micapum.neopen.app.render.rasterizePng
 import net.micapum.neopen.app.render.renderNotebookPdf
 import net.micapum.neopen.app.render.renderPagePdf
@@ -365,23 +366,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // --- OCR (solo online) ---
+    // --- OCR (teléfono / servidor según el conmutador de capacidades) ---
 
     fun transcribe(captureId: String) {
         viewModelScope.launch {
-            if (!graph.online.value) {
-                _status.value = getApplication<Application>().getString(R.string.vm_ocr_needs_connection)
-                return@launch
+            when (graph.dispatcher.runOcr(captureId)) {
+                is OcrOutcome.Failed -> _status.value = getApplication<Application>().getString(R.string.vm_ocr_failed)
+                OcrOutcome.Skipped -> _status.value = getApplication<Application>().getString(R.string.vm_ocr_off)
+                OcrOutcome.Applied -> Unit // el Flow de Room refresca la UI
             }
-            val cap = graph.repo.capture(captureId) ?: return@launch
-            val s = settings.value
-            val dto = runCatching {
-                val png = rasterizePng(cap.strokes, cap.paper)
-                val body = png.toRequestBody("image/png".toMediaType())
-                val part = MultipartBody.Part.createFormData("image", "page.png", body)
-                ApiFactory.create(s.serverUrl).transcribe(s.password, captureId, part, null)
-            }.getOrNull()
-            if (dto != null) graph.repo.applyServerCapture(dto) else _status.value = getApplication<Application>().getString(R.string.vm_ocr_failed)
         }
     }
 
