@@ -6,7 +6,8 @@ name: Build LIVE APK (escritura en vivo)
 
 on:
   push:
-    branches: ["feat/live-writing-ime"]
+    branches: ["main"]
+    paths: ["live/**", "core/**", ".github/workflows/build-live-apk.yml"]
   workflow_dispatch:
 
 permissions:
@@ -52,7 +53,7 @@ jobs:
           name: Escritura en vivo (build de prueba)
           prerelease: true
           body: |
-            App slim **neopen Live** (boli + teclado de escritura en vivo), desde `feat/live-writing-ime`.
+            App slim **neopen Live** (boli + teclado de escritura en vivo), build de `main`.
 
             - **neopen-live.apk** — applicationId `net.micapum.neopen.live`, nombre **"neopen Live"**.
             - App aparte y ligera (~13 MB, arm64 + R8): se instala EN PARALELO a la app oficial.
