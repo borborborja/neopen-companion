@@ -1320,6 +1320,10 @@ private fun PenTabContent(vm: MainViewModel) {
         }
 
         HorizontalDivider()
+        // Bolis emparejados + estilo de trazo: SIEMPRE visible (editable aunque estén apagados).
+        PairedPensSection(vm)
+
+        HorizontalDivider()
         OutlinedButton(onClick = { showLogs = true }, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.pen_view_log, logs.size))
         }
@@ -1345,9 +1349,6 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
                 FilterChip(selected = current == m, onClick = { vm.setAutoShutdown(m) }, label = { Text(stringResource(R.string.pen_minutes, m)) })
             }
         }
-        Spacer(Modifier.size(8.dp))
-        // Estilo del trazo de ESTE boli (color + grueso); se congela en cada trazo al capturarlo.
-        PenStyleSection(stringResource(R.string.pen_style_title), state.mac, vm)
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
         state.mac?.let { Text(stringResource(R.string.pen_mac, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         state.firmware?.let { Text(stringResource(R.string.pen_firmware, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -1359,6 +1360,38 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
         }
         if (readingSobp) SobpReaderDialog(vm) { readingSobp = false }
     }
+}
+
+/**
+ * Bolis emparejados + estilo de trazo. SIEMPRE visible (no requiere conexión): permite
+ * personalizar el color/grueso de cada boli aunque esté apagado, y el estilo por defecto.
+ */
+@Composable
+private fun PairedPensSection(vm: MainViewModel) {
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    Text(stringResource(R.string.pen_paired_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    if (settings.knownPens.isEmpty()) {
+        Text(stringResource(R.string.pen_paired_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else {
+        settings.knownPens.forEach { kp ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(kp.alias, style = MaterialTheme.typography.titleSmall)
+                        TextButton(onClick = { vm.forgetPen(kp.mac) }) {
+                            Text(stringResource(R.string.pen_forget), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    PenStyleSection(stringResource(R.string.pen_style_title), kp.mac, vm)
+                }
+            }
+        }
+    }
+    PenStyleSection(stringResource(R.string.pen_style_default_title), null, vm)
 }
 
 /** Paleta + grueso del trazo. `mac` = boli concreto; null = estilo por defecto. */
