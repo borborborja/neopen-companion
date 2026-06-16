@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">neopen Live</string>
+    <string name="channel_name">Conexión del boli</string>
+    <string name="pensvc_notif_text">Conexión del boli en segundo plano</string>
+
+    <!-- Teclado IME -->
+    <string name="ime_label">neopen — escritura en vivo</string>
+
+    <!-- Pantalla principal -->
+    <string name="home_subtitle">Escribe en papel Ncode → el texto aparece en cualquier app.</string>
+    <string name="pen_connect">Conectar boli</string>
+    <string name="pen_disconnect">Desconectar</string>
+    <string name="pen_status_idle">Sin conectar</string>
+    <string name="pen_status_scanning">Buscando boli…</string>
+    <string name="pen_status_connecting">Conectando…</string>
+    <string name="pen_status_connected">Boli conectado</string>
+    <string name="pen_status_disconnected">Desconectado</string>
+
+    <!-- Sección Live -->
+    <string name="live_language">Idioma de reconocimiento</string>
+    <string name="live_newlines">Saltos de línea</string>
+    <string name="live_newlines_desc">Insertar saltos de línea reales al cambiar de renglón (si no, un espacio).</string>
+    <string name="live_model_download">Descargar modelo</string>
+    <string name="live_model_delete">Borrar modelo</string>
+    <string name="live_model_ready">Modelo descargado ✓</string>
+    <string name="live_model_missing">Modelo no descargado (~20 MB)</string>
+    <string name="live_model_busy">Descargando modelo…</string>
+    <string name="live_enable_keyboard">Activar el teclado en Ajustes de Android</string>
+    <string name="live_steps">1) Conecta el boli  ·  2) Activa y selecciona el teclado «neopen — escritura en vivo»  ·  3) Enfoca un campo en cualquier app  ·  4) Escribe en el papel.</string>
+</resources>
