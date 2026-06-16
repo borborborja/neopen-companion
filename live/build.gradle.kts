@@ -13,7 +13,9 @@ android {
         applicationId = "net.micapum.neopen.live"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // ≥ 18 para instalar por encima del build de prueba anterior (que heredó el 17 de
+        // :neopen) sin que Android lo bloquee como downgrade.
+        versionCode = 18
         versionName = "0.1.0"
         vectorDrawables { useSupportLibrary = true }
         // Solo arm64-v8a: el nativo de ML Kit (libdigitalink.so) pesa ~11 MB/ABI; con un
