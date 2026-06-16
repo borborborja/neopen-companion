@@ -272,4 +272,17 @@
     <string name="pen_paired_title">Bolis emparejados</string>
     <string name="pen_paired_empty">Aún no hay bolis emparejados. Conecta uno y aparecerá aquí; podrás cambiar su color aunque esté apagado.</string>
     <string name="pen_forget">Olvidar</string>
+
+    <!-- Notificación de control -->
+    <string name="settings_control_notif_title">Notificación de control</string>
+    <string name="settings_control_notif_desc">Muestra una notificación permanente para cambiar color, grueso, boli y el segundo plano sin abrir la app.</string>
+    <string name="ctrlnotif_title">neopen · %1$s</string>
+    <string name="ctrlnotif_text">Color: %1$s · Grueso: %2$s</string>
+    <string name="ctrlnotif_bg_on">Segundo plano: activado</string>
+    <string name="ctrlnotif_bg_off">Segundo plano: desactivado</string>
+    <string name="ctrlnotif_action_color">🎨 %1$s</string>
+    <string name="ctrlnotif_action_width">✏ %1$s</string>
+    <string name="ctrlnotif_action_pen">🖊 %1$s</string>
+    <string name="ctrlnotif_action_bg_on">🔗 2.º plano ON</string>
+    <string name="ctrlnotif_action_bg_off">🔗 2.º plano OFF</string>
 </resources>

@@ -202,7 +202,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             graph.settings.update(s)
             graph.applySyncSchedule(s.syncMode, s.syncIntervalMin)
             val ctx = getApplication<Application>()
-            if (s.backgroundEnabled) PenService.start(ctx) else PenService.stop(ctx)
+            // El servicio en primer plano se necesita para el segundo plano O para mostrar la
+            // notificación de control persistente.
+            if (s.backgroundEnabled || s.controlNotification) PenService.start(ctx) else PenService.stop(ctx)
         }
     }
 

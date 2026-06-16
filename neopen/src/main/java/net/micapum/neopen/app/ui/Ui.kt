@@ -1400,17 +1400,13 @@ private fun PairedPensSection(vm: MainViewModel) {
 private fun PenStyleSection(title: String, mac: String?, vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val style = settings.styleFor(mac)
-    val palette = remember {
-        listOf(0xFF111111, 0xFF2563EB, 0xFFDC2626, 0xFF16A34A, 0xFFEA580C, 0xFF7C3AED).map { it.toInt() }
-    }
-    val widths = listOf(1.0f to "Fino", 1.6f to "Medio", 2.6f to "Grueso")
     fun apply(s: net.micapum.neopen.core.pen.StrokeStyle) {
         if (mac != null) vm.setPenStyle(mac, s) else vm.setDefaultStyle(s)
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            palette.forEach { c ->
+            net.micapum.neopen.core.pen.StrokePresets.COLORS.forEach { (c, _) ->
                 val selected = style.color == c
                 Box(
                     Modifier
@@ -1427,7 +1423,7 @@ private fun PenStyleSection(title: String, mac: String?, vm: MainViewModel) {
             }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            widths.forEach { (w, label) ->
+            net.micapum.neopen.core.pen.StrokePresets.WIDTHS.forEach { (w, label) ->
                 FilterChip(style.width == w, { apply(style.copy(width = w)) }, label = { Text(label) })
             }
         }
@@ -1642,28 +1638,25 @@ private fun SettingsScreen(vm: MainViewModel) {
     var interval by rememberSaveable(settings.syncIntervalMin) { mutableStateOf(settings.syncIntervalMin.toString()) }
     var background by rememberSaveable(settings.backgroundEnabled) { mutableStateOf(settings.backgroundEnabled) }
     var importOnConnect by rememberSaveable(settings.importOnConnect) { mutableStateOf(settings.importOnConnect) }
+    var controlNotif by rememberSaveable(settings.controlNotification) { mutableStateOf(settings.controlNotification) }
     var backupMsg by rememberSaveable { mutableStateOf<String?>(null) }
     var linking by rememberSaveable { mutableStateOf(false) }
     var linkMsg by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun persist() {
         val isLocal = settings.appMode == AppMode.LOCAL
+        // copy() sobre los ajustes actuales: preserva todo lo no editado aquí (knownPens, estilos,
+        // idioma de escritura en vivo, etc.) y solo cambia los campos de este formulario.
         vm.saveSettings(
-            AppSettings(
-                serverUrl = if (isLocal) "" else url, password = if (isLocal) "" else pw,
+            settings.copy(
+                serverUrl = if (isLocal) "" else url,
+                password = if (isLocal) "" else pw,
                 backgroundEnabled = background,
-                syncMode = syncMode, syncIntervalMin = interval.toIntOrNull() ?: 30,
-                appMode = settings.appMode, setupComplete = true,
+                controlNotification = controlNotif,
+                syncMode = syncMode,
+                syncIntervalMin = interval.toIntOrNull() ?: 30,
+                setupComplete = true,
                 importOnConnect = importOnConnect,
-                // Conserva ajustes gestionados aparte (no se editan en este formulario).
-                recentShowCount = settings.recentShowCount,
-                recentClearedAt = settings.recentClearedAt,
-                finishMode = settings.finishMode,
-                overlapEnabled = settings.overlapEnabled,
-                overlapMinStrokes = settings.overlapMinStrokes,
-                overlapMinAreaPercent = settings.overlapMinAreaPercent,
-                notebookView = settings.notebookView,
-                themeMode = settings.themeMode,
             ),
         )
     }
@@ -1779,6 +1772,7 @@ private fun SettingsScreen(vm: MainViewModel) {
                     Text(stringResource(R.string.settings_bluetooth_sync_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                     PenToggleRow(stringResource(R.string.settings_background_title), stringResource(R.string.settings_background_desc), background) { background = it }
                     PenToggleRow(stringResource(R.string.settings_import_on_connect_title), stringResource(R.string.settings_import_on_connect_desc), importOnConnect) { importOnConnect = it }
+                    PenToggleRow(stringResource(R.string.settings_control_notif_title), stringResource(R.string.settings_control_notif_desc), controlNotif) { controlNotif = it }
 
                     HorizontalDivider()
                     Text(stringResource(R.string.settings_offline_dump), style = MaterialTheme.typography.bodyMedium)
