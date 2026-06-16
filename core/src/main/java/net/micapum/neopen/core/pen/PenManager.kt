@@ -80,6 +80,14 @@ class PenManager(
      */
     var onStroke: ((Stroke) -> Unit)? = null
     private var liveMode = false
+
+    /** Estilo de trazo del boli (por MAC). Lo provee el grafo desde los ajustes. */
+    var styleProvider: (String?) -> StrokeStyle = { StrokeStyle() }
+    /** Notifica un boli recién autorizado (MAC, nombre) para registrarlo si es nuevo. */
+    var onPenSeen: (String, String?) -> Unit = { _, _ -> }
+
+    /** Estilo a sellar en los trazos capturados por el boli conectado. */
+    private fun currentStyle(): StrokeStyle = styleProvider(_state.value.mac)
     /** Valor de `offlineData` antes de entrar en modo-vivo, para restaurarlo al salir. */
     private var offlineDataBeforeLive: Boolean? = null
 
@@ -413,6 +421,8 @@ class PenManager(
                 update { it.copy(status = PenStatus.AUTHORIZED, error = null, settings = settings) }
                 if (firstTime) {
                     log("✓ AUTORIZADO (batería ${settings.battery}%) → pido datos en tiempo real")
+                    // Registra el boli (si es nuevo) para el historial de bolis emparejados.
+                    _state.value.mac?.let { onPenSeen(it, _state.value.name) }
                     write(Protocol.reqOnlineDataAll())
                     if (autoImportOnConnect) {
                         // Vuelca la memoria offline al conectar: lista y luego importa.
@@ -474,7 +484,9 @@ class PenManager(
 
     private fun endStroke() {
         if (strokeDots.isEmpty()) return
-        val stroke = Stroke(strokeStart, strokeDots.last().t, strokeDots.toList())
+        // Sella el estilo del boli en el trazo (congelado al capturar).
+        val s = currentStyle()
+        val stroke = Stroke(strokeStart, strokeDots.last().t, strokeDots.toList(), s.color, s.width)
         // Modo escritura en vivo: entrega el trazo de inmediato y NO acumula/sube páginas.
         if (liveMode) {
             strokeDots.clear()
@@ -501,7 +513,7 @@ class PenManager(
         val sobp = pageSobp ?: return
         if (pageStrokes.isEmpty()) return
         log("📄 Página completa sobp ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}: ${pageStrokes.size} trazos → subiendo al servidor…")
-        onPage(StrokePage(sobp, "realtime", iso.format(System.currentTimeMillis()), pageStrokes.toList()))
+        onPage(StrokePage(sobp, "realtime", iso.format(System.currentTimeMillis()), pageStrokes.toList(), _state.value.mac))
         pageStrokes.clear()
         pageSobp = null
         update { it.copy(capturedPages = 0) }
@@ -602,11 +614,15 @@ class PenManager(
         try {
             val chunk = Protocol.parseOfflineChunk(data)
             val raw = if (chunk.isCompressed) inflateZlib(chunk.data, chunk.beforeSize) else chunk.data
-            val strokes = Protocol.parseOfflineStrokes(raw, chunk.section, chunk.owner, chunk.note, chunk.strokeCount)
+            val parsed = Protocol.parseOfflineStrokes(raw, chunk.section, chunk.owner, chunk.note, chunk.strokeCount)
+            // Híbrido: sella en los trazos volcados el estilo ACTUAL del boli al volcar.
+            val s = currentStyle()
+            val mac = _state.value.mac
+            val strokes = parsed.map { it.first to it.second.copy(color = s.color, width = s.width) }
             // Agrupa por página física y sube una StrokePage por SOBP.
             strokes.groupBy({ it.first }, { it.second }).forEach { (sobp, pageStrokes) ->
                 log("📄 Offline sobp ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}: ${pageStrokes.size} trazos → subiendo…")
-                onPage(StrokePage(sobp, "offline", iso.format(System.currentTimeMillis()), pageStrokes))
+                onPage(StrokePage(sobp, "offline", iso.format(System.currentTimeMillis()), pageStrokes, mac))
             }
             // Acusa para recibir el siguiente (el último no se acusa, como el SDK).
             if (chunk.transPosition != 2) write(Protocol.resOfflinePacket(chunk.packetId))

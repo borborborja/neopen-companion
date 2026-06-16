@@ -31,7 +31,15 @@ data class SobpDto(val section: Int, val owner: Int, val book: Int, val page: In
 // `t` es opcional en el servidor (las capturas de la web pueden no traerlo).
 data class DotDto(val x: Float, val y: Float, val f: Float, val t: Long? = null)
 
-data class StrokeDto(val startTime: Long, val endTime: Long, val dots: List<DotDto>)
+// `color` (ARGB) y `width` son el estilo del trazo; opcionales y retrocompatibles
+// (null → render por defecto #111 / 1.6). El servidor/web pueden ignorarlos hasta portar.
+data class StrokeDto(
+    val startTime: Long,
+    val endTime: Long,
+    val dots: List<DotDto>,
+    val color: Int? = null,
+    val width: Float? = null,
+)
 
 data class CreateCaptureInput(
     val sobp: SobpDto,

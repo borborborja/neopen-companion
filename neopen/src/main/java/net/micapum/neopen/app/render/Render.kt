@@ -19,12 +19,19 @@ import androidx.compose.ui.unit.IntSize
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.StrokeDto
 
+/** Una polilínea ya en px con su estilo resuelto (color ARGB + grueso en px). */
+data class StyledPolyline(
+    val points: List<Offset>,
+    val color: Int,
+    val width: Float,
+)
+
 /** Modelo de render: polilíneas ya en px dentro de un bounding box. */
 data class RenderModel(
     val width: Float,
     val height: Float,
-    val strokeWidth: Float,
-    val polylines: List<List<Offset>>,
+    val strokeWidth: Float,            // grueso por defecto (fallback)
+    val polylines: List<StyledPolyline>,
 )
 
 private data class Bounds(val minX: Float, val minY: Float, val maxX: Float, val maxY: Float)
@@ -45,8 +52,16 @@ fun buildModel(
     } else {
         computeBounds(strokes)
     }
+    // Factor de escala del grueso: el `strokeWidth` recibido ya viene escalado (p. ej. ×dpi)
+    // respecto al base 1.6, así que el grueso por trazo escala igual.
+    val wScale = strokeWidth / 1.6f
     val polylines = strokes.map { st ->
-        st.dots.map { d -> Offset((d.x - b.minX) * scale + padding, (d.y - b.minY) * scale + padding) }
+        val pts = st.dots.map { d -> Offset((d.x - b.minX) * scale + padding, (d.y - b.minY) * scale + padding) }
+        StyledPolyline(
+            points = pts,
+            color = st.color ?: INK,
+            width = (st.width ?: 1.6f) * wScale,
+        )
     }
     return RenderModel(
         width = maxOf(1f, (b.maxX - b.minX) * scale + padding * 2),
@@ -78,14 +93,15 @@ internal const val INK = 0xFF111111.toInt()
 /** Pinta las polilíneas del modelo en un Canvas de android.graphics (PNG/PDF). */
 internal fun drawModelTo(canvas: android.graphics.Canvas, m: RenderModel) {
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = INK
         style = Paint.Style.STROKE
-        strokeWidth = m.strokeWidth
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    for (pts in m.polylines) {
+    for (poly in m.polylines) {
+        val pts = poly.points
         if (pts.isEmpty()) continue
+        paint.color = poly.color
+        paint.strokeWidth = poly.width
         if (pts.size == 1) {
             canvas.drawPoint(pts[0].x, pts[0].y, paint)
             continue
@@ -188,14 +204,16 @@ fun OverlapPreview(
         val s = minOf(size.width / model.width, size.height / model.height)
         val dx = (size.width - model.width * s) / 2f
         val dy = (size.height - model.height * s) / 2f
-        val style = Stroke(
-            width = (model.strokeWidth * s).coerceAtLeast(1f),
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        )
-        model.polylines.forEachIndexed { i, pts ->
+        model.polylines.forEachIndexed { i, poly ->
+            val pts = poly.points
             if (pts.isEmpty()) return@forEachIndexed
+            // El color lo decide el corte (mantener/mover); el grueso, el del trazo.
             val color = if (i >= cut) movedColor else keptColor
+            val style = Stroke(
+                width = (poly.width * s).coerceAtLeast(1f),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            )
             if (pts.size == 1) {
                 val p = pts[0]
                 drawCircle(color, radius = style.width / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
@@ -246,16 +264,18 @@ fun InkCanvas(
         } else if (bgPreset != null) {
             drawBgPreset(bgPreset, dx, dy, boxW, boxH)
         }
-        val style = Stroke(
-            width = (model.strokeWidth * s).coerceAtLeast(1f),
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        )
-        for (pts in model.polylines) {
+        for (poly in model.polylines) {
+            val pts = poly.points
             if (pts.isEmpty()) continue
+            val color = Color(poly.color)
+            val style = Stroke(
+                width = (poly.width * s).coerceAtLeast(1f),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            )
             if (pts.size == 1) {
                 val p = pts[0]
-                drawCircle(inkColor, radius = style.width / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
+                drawCircle(color, radius = style.width / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
                 continue
             }
             val path = Path()
@@ -264,7 +284,7 @@ fun InkCanvas(
                 val y = p.y * s + dy
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, inkColor, style = style)
+            drawPath(path, color, style = style)
         }
     }
 }

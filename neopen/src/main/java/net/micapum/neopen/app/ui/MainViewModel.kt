@@ -40,8 +40,10 @@ import net.micapum.neopen.core.data.SyncStatus
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.SobpScanDto
 import net.micapum.neopen.core.data.StudioItemDto
+import net.micapum.neopen.core.pen.KnownPen
 import net.micapum.neopen.core.pen.OfflineNote
 import net.micapum.neopen.core.pen.PenState
+import net.micapum.neopen.core.pen.StrokeStyle
 import net.micapum.neopen.core.pen.Sobp
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -533,6 +535,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Tema de la app (system/light/dark), persistido. */
     fun setThemeMode(mode: String) {
         viewModelScope.launch { graph.settings.update(settings.value.copy(themeMode = mode)) }
+    }
+
+    // --- Estilo de trazo por boli ---
+
+    /** Fija el estilo (color/grueso) de un boli; lo registra si aún no estaba. */
+    fun setPenStyle(mac: String, style: StrokeStyle) {
+        viewModelScope.launch {
+            val cur = settings.value
+            val pens = if (cur.knownPens.any { it.mac == mac })
+                cur.knownPens.map { if (it.mac == mac) it.copy(style = style) else it }
+            else cur.knownPens + KnownPen(mac, mac, style)
+            graph.settings.update(cur.copy(knownPens = pens))
+        }
+    }
+
+    fun setDefaultStyle(style: StrokeStyle) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(defaultStyle = style)) }
+    }
+
+    fun renamePen(mac: String, alias: String) {
+        viewModelScope.launch {
+            val cur = settings.value
+            graph.settings.update(cur.copy(knownPens = cur.knownPens.map { if (it.mac == mac) it.copy(alias = alias) else it }))
+        }
+    }
+
+    fun forgetPen(mac: String) {
+        viewModelScope.launch {
+            val cur = settings.value
+            graph.settings.update(cur.copy(knownPens = cur.knownPens.filterNot { it.mac == mac }))
+        }
     }
 
     /** Oculta lo actual de "Últimas ediciones"; una edición posterior lo trae de vuelta. */

@@ -32,6 +32,8 @@ import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.sync.SyncWorker
 import net.micapum.neopen.core.data.AppMode
+import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.pen.KnownPen
 import net.micapum.neopen.core.data.OverlapConfig
 import net.micapum.neopen.core.data.SettingsStore
 import net.micapum.neopen.core.data.SyncMode
@@ -145,10 +147,27 @@ class Graph(app: Application) {
     /** Hay conexión a Internet (para habilitar acciones online como el OCR). */
     val online: StateFlow<Boolean> = _online
 
+    /** Últimos ajustes observados (para que el PenManager resuelva el estilo por boli). */
+    @Volatile
+    private var lastSettings = AppSettings()
+
     init {
+        // El estilo de trazo a sellar depende del boli (MAC) y de los ajustes actuales.
+        pen.styleProvider = { mac -> lastSettings.styleFor(mac) }
+        // Registra un boli recién visto en el historial de bolis emparejados (si es nuevo).
+        pen.onPenSeen = { mac, name ->
+            val cur = lastSettings
+            if (cur.knownPens.none { it.mac == mac } && cur.knownPens.size < 2) {
+                val alias = name?.takeIf { it.isNotBlank() } ?: mac
+                scope.launch {
+                    settings.update(cur.copy(knownPens = cur.knownPens + KnownPen(mac, alias, cur.defaultStyle)))
+                }
+            }
+        }
         // Mantén al día el flag de auto-volcado y el modo local desde los ajustes.
         scope.launch {
             settings.flow.collect {
+                lastSettings = it
                 pen.autoImportOnConnect = it.importOnConnect
                 localMode = it.appMode == AppMode.LOCAL
                 // El umbral de superposición lo lee la ingesta local (modo local).

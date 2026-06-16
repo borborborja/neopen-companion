@@ -1345,6 +1345,9 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
                 FilterChip(selected = current == m, onClick = { vm.setAutoShutdown(m) }, label = { Text(stringResource(R.string.pen_minutes, m)) })
             }
         }
+        Spacer(Modifier.size(8.dp))
+        // Estilo del trazo de ESTE boli (color + grueso); se congela en cada trazo al capturarlo.
+        PenStyleSection(stringResource(R.string.pen_style_title), state.mac, vm)
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
         state.mac?.let { Text(stringResource(R.string.pen_mac, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         state.firmware?.let { Text(stringResource(R.string.pen_firmware, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -1355,6 +1358,46 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
             Text(stringResource(R.string.pen_read_sobp), style = MaterialTheme.typography.bodySmall)
         }
         if (readingSobp) SobpReaderDialog(vm) { readingSobp = false }
+    }
+}
+
+/** Paleta + grueso del trazo. `mac` = boli concreto; null = estilo por defecto. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PenStyleSection(title: String, mac: String?, vm: MainViewModel) {
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val style = settings.styleFor(mac)
+    val palette = remember {
+        listOf(0xFF111111, 0xFF2563EB, 0xFFDC2626, 0xFF16A34A, 0xFFEA580C, 0xFF7C3AED).map { it.toInt() }
+    }
+    val widths = listOf(1.0f to "Fino", 1.6f to "Medio", 2.6f to "Grueso")
+    fun apply(s: net.micapum.neopen.core.pen.StrokeStyle) {
+        if (mac != null) vm.setPenStyle(mac, s) else vm.setDefaultStyle(s)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            palette.forEach { c ->
+                val selected = style.color == c
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(c))
+                        .border(
+                            width = if (selected) 3.dp else 1.dp,
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                            shape = CircleShape,
+                        )
+                        .clickable { apply(style.copy(color = c)) },
+                )
+            }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            widths.forEach { (w, label) ->
+                FilterChip(style.width == w, { apply(style.copy(width = w)) }, label = { Text(label) })
+            }
+        }
     }
 }
 
