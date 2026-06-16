@@ -426,7 +426,7 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun ingestPenPage(page: StrokePage) {
         val s = page.sobp
         val strokes = page.strokes.map { st ->
-            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) })
+            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
         }
         val name = "Nota ${s.section}.${s.owner}.${s.book}.${s.page}"
         // Detección del formato real (NeoLAB) para sembrar el del cuaderno nuevo:
@@ -474,7 +474,7 @@ class NeopenRepository(private val db: NeopenDb) {
         val detected = PaperLookup.lookup(s.section, s.owner, s.book, s.page)
         val nb = db.notebooks().findByBookKey(bookKey) ?: createLocalNotebook(bookKey, detected)
         val incoming = page.strokes.map { st ->
-            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) })
+            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
         }
         val now = nowIso()
         val existing = db.captures().findBySobp(s.section, s.owner, s.book, s.page)

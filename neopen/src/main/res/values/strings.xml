@@ -267,4 +267,5 @@
     <string name="settings_delete_desc">Elimina los cuadernos, capturas y ajustes guardados en este móvil.</string>
     <string name="settings_delete_button">Borrar contenido del móvil</string>
     <string name="settings_delete_dialog_body">Se borrarán los cuadernos, capturas y ajustes guardados en ESTE móvil, y volverás al asistente inicial.\n\nNO se borra nada del servidor ni de la memoria del boli, y no se desconecta el boli.</string>
+    <string name="pen_style_title">Estilo del trazo (color y grueso)</string>
 </resources>

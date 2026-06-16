@@ -19,16 +19,22 @@ enum class ExportFormat(val ext: String, val mime: String) {
 
 fun renderSvg(strokes: List<StrokeDto>, paper: PaperDto?): String {
     val m = buildModel(strokes, paper)
+    // Estilo por <path> (color + grueso del trazo) en vez de global en el <g>.
     val paths = m.polylines
-        .filter { it.isNotEmpty() }
-        .joinToString("") { pts -> "<path d=\"${toPathData(pts)}\" />" }
+        .filter { it.points.isNotEmpty() }
+        .joinToString("") { poly ->
+            "<path d=\"${toPathData(poly.points)}\" stroke=\"${svgColor(poly.color)}\" " +
+                "stroke-width=\"${poly.width}\" />"
+        }
     val w = roundCoord(m.width)
     val h = roundCoord(m.height)
     return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$w\" height=\"$h\" " +
         "viewBox=\"0 0 $w $h\">" +
-        "<g fill=\"none\" stroke=\"#111\" stroke-width=\"${m.strokeWidth}\" " +
-        "stroke-linecap=\"round\" stroke-linejoin=\"round\">$paths</g></svg>"
+        "<g fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\">$paths</g></svg>"
 }
+
+/** ARGB Int → "#RRGGBB" para SVG (se ignora el alfa). */
+private fun svgColor(argb: Int): String = "#%06X".format(argb and 0xFFFFFF)
 
 private fun toPathData(pts: List<Offset>): String {
     if (pts.size == 1) {

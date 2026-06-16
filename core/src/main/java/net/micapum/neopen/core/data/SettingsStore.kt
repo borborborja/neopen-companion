@@ -13,6 +13,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import net.micapum.neopen.core.pen.KnownPen
+import net.micapum.neopen.core.pen.StrokeStyle
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -117,8 +121,16 @@ data class AppSettings(
     val liveLanguage: String = "es",
     /** Emitir saltos de línea reales al detectar nueva línea en modo escritura en vivo. */
     val liveNewlines: Boolean = false,
+    /** Bolis emparejados (MAC + alias + estilo de trazo). Tope práctico: 2. */
+    val knownPens: List<KnownPen> = emptyList(),
+    /** Estilo de trazo por defecto para bolis sin estilo propio (color ARGB + grueso). */
+    val defaultStyle: StrokeStyle = StrokeStyle(),
 ) {
     val configured get() = serverUrl.isNotBlank() && password.isNotBlank()
+
+    /** Estilo del boli (por MAC) o el por defecto si no está registrado. */
+    fun styleFor(mac: String?): StrokeStyle =
+        knownPens.firstOrNull { it.mac == mac }?.style ?: defaultStyle
 }
 
 class SettingsStore(private val context: Context) {
@@ -141,6 +153,9 @@ class SettingsStore(private val context: Context) {
         val themeMode = stringPreferencesKey("theme_mode")
         val liveLanguage = stringPreferencesKey("live_language")
         val liveNewlines = booleanPreferencesKey("live_newlines")
+        val knownPens = stringPreferencesKey("known_pens")          // JSON
+        val defaultColor = intPreferencesKey("default_stroke_color")
+        val defaultWidth = stringPreferencesKey("default_stroke_width") // Float como texto
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -166,6 +181,11 @@ class SettingsStore(private val context: Context) {
             themeMode = p[Keys.themeMode] ?: "system",
             liveLanguage = p[Keys.liveLanguage] ?: "es",
             liveNewlines = p[Keys.liveNewlines] ?: false,
+            knownPens = decodeKnownPens(p[Keys.knownPens]),
+            defaultStyle = StrokeStyle(
+                color = p[Keys.defaultColor] ?: 0xFF111111.toInt(),
+                width = p[Keys.defaultWidth]?.toFloatOrNull() ?: 1.6f,
+            ),
         )
     }
 
@@ -189,6 +209,41 @@ class SettingsStore(private val context: Context) {
             p[Keys.themeMode] = s.themeMode
             p[Keys.liveLanguage] = s.liveLanguage
             p[Keys.liveNewlines] = s.liveNewlines
+            p[Keys.knownPens] = encodeKnownPens(s.knownPens)
+            p[Keys.defaultColor] = s.defaultStyle.color
+            p[Keys.defaultWidth] = s.defaultStyle.width.toString()
         }
+    }
+
+    private fun encodeKnownPens(pens: List<KnownPen>): String {
+        val arr = JSONArray()
+        for (p in pens) {
+            arr.put(
+                JSONObject()
+                    .put("mac", p.mac)
+                    .put("alias", p.alias)
+                    .put("color", p.style.color)
+                    .put("width", p.style.width.toDouble()),
+            )
+        }
+        return arr.toString()
+    }
+
+    private fun decodeKnownPens(json: String?): List<KnownPen> {
+        if (json.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                KnownPen(
+                    mac = o.getString("mac"),
+                    alias = o.optString("alias", o.getString("mac")),
+                    style = StrokeStyle(
+                        color = o.optInt("color", 0xFF111111.toInt()),
+                        width = o.optDouble("width", 1.6).toFloat(),
+                    ),
+                )
+            }
+        }.getOrDefault(emptyList())
     }
 }

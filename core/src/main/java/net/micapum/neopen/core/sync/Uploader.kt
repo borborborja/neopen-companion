@@ -23,7 +23,7 @@ class Uploader(private val settings: SettingsStore) {
             capturedAt = page.capturedAt,
             name = "Nota ${page.sobp.section}.${page.sobp.owner}.${page.sobp.book}.${page.sobp.page}",
             strokes = page.strokes.map { st ->
-                StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) })
+                StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
             },
         )
         return runCatching { api.createCapture(s.password, input) }.isSuccess
