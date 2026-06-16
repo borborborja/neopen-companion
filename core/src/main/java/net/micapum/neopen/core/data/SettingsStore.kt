@@ -127,6 +127,23 @@ data class AppSettings(
     val knownPens: List<KnownPen> = emptyList(),
     /** Estilo de trazo por defecto para bolis sin estilo propio (color ARGB + grueso). */
     val defaultStyle: StrokeStyle = StrokeStyle(),
+    // --- Capacidades despachables (teléfono / servidor / apagado) ---
+    /** Quién hace el OCR. SERVER por defecto = comportamiento histórico. */
+    val ocrSource: CapabilitySource = CapabilitySource.SERVER,
+    /** Quién corrige el texto con LanguageTool. */
+    val languageToolSource: CapabilitySource = CapabilitySource.OFF,
+    /** Quién detecta marcadores (#tag, *título*, [TIPO]) en la transcripción. */
+    val markerDetectionSource: CapabilitySource = CapabilitySource.SERVER,
+    /** Quién sincroniza a conectores (WebDAV/FTP). */
+    val connectorSyncSource: CapabilitySource = CapabilitySource.OFF,
+    /** Credenciales locales del OCR (API compatible con OpenAI). */
+    val ocrLocal: OcrLocalConfig = OcrLocalConfig(),
+    /** Credenciales locales de LanguageTool. */
+    val ltLocal: LanguageToolLocalConfig = LanguageToolLocalConfig(),
+    /** Credenciales locales del conector WebDAV. */
+    val webdavLocal: WebdavLocalConfig = WebdavLocalConfig(),
+    /** Credenciales locales del conector FTP/SFTP. */
+    val ftpLocal: FtpLocalConfig = FtpLocalConfig(),
 ) {
     val configured get() = serverUrl.isNotBlank() && password.isNotBlank()
 
@@ -159,7 +176,19 @@ class SettingsStore(private val context: Context) {
         val knownPens = stringPreferencesKey("known_pens")          // JSON
         val defaultColor = intPreferencesKey("default_stroke_color")
         val defaultWidth = stringPreferencesKey("default_stroke_width") // Float como texto
+        // Capacidades: conmutadores (enum.name) + credenciales (JSON, secreto cifrado)
+        val ocrSource = stringPreferencesKey("cap_ocr")
+        val ltSource = stringPreferencesKey("cap_lt")
+        val markerSource = stringPreferencesKey("cap_marker")
+        val connectorSource = stringPreferencesKey("cap_connector")
+        val ocrLocal = stringPreferencesKey("ocr_local")            // JSON
+        val ltLocal = stringPreferencesKey("lt_local")              // JSON
+        val webdavLocal = stringPreferencesKey("webdav_local")      // JSON
+        val ftpLocal = stringPreferencesKey("ftp_local")            // JSON
     }
+
+    private fun capSource(raw: String?, default: CapabilitySource): CapabilitySource =
+        runCatching { CapabilitySource.valueOf(raw ?: default.name) }.getOrDefault(default)
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
         val url = p[Keys.url] ?: ""
@@ -190,6 +219,14 @@ class SettingsStore(private val context: Context) {
                 color = p[Keys.defaultColor] ?: 0xFF111111.toInt(),
                 width = p[Keys.defaultWidth]?.toFloatOrNull() ?: 1.6f,
             ),
+            ocrSource = capSource(p[Keys.ocrSource], CapabilitySource.SERVER),
+            languageToolSource = capSource(p[Keys.ltSource], CapabilitySource.OFF),
+            markerDetectionSource = capSource(p[Keys.markerSource], CapabilitySource.SERVER),
+            connectorSyncSource = capSource(p[Keys.connectorSource], CapabilitySource.OFF),
+            ocrLocal = decodeOcrLocal(p[Keys.ocrLocal]),
+            ltLocal = decodeLtLocal(p[Keys.ltLocal]),
+            webdavLocal = decodeWebdavLocal(p[Keys.webdavLocal]),
+            ftpLocal = decodeFtpLocal(p[Keys.ftpLocal]),
         )
     }
 
@@ -217,7 +254,95 @@ class SettingsStore(private val context: Context) {
             p[Keys.knownPens] = encodeKnownPens(s.knownPens)
             p[Keys.defaultColor] = s.defaultStyle.color
             p[Keys.defaultWidth] = s.defaultStyle.width.toString()
+            p[Keys.ocrSource] = s.ocrSource.name
+            p[Keys.ltSource] = s.languageToolSource.name
+            p[Keys.markerSource] = s.markerDetectionSource.name
+            p[Keys.connectorSource] = s.connectorSyncSource.name
+            p[Keys.ocrLocal] = encodeOcrLocal(s.ocrLocal)
+            p[Keys.ltLocal] = encodeLtLocal(s.ltLocal)
+            p[Keys.webdavLocal] = encodeWebdavLocal(s.webdavLocal)
+            p[Keys.ftpLocal] = encodeFtpLocal(s.ftpLocal)
         }
+    }
+
+    // --- Credenciales de capacidades (JSON; solo el campo secreto va cifrado) ---
+
+    private fun encodeOcrLocal(c: OcrLocalConfig): String = JSONObject()
+        .put("baseUrl", c.baseUrl)
+        .put("model", c.model)
+        .put("instructions", c.instructions)
+        .put("apiKey", PwCrypto.encrypt(c.apiKey))
+        .toString()
+
+    private fun decodeOcrLocal(json: String?): OcrLocalConfig {
+        if (json.isNullOrBlank()) return OcrLocalConfig()
+        return runCatching {
+            val o = JSONObject(json)
+            OcrLocalConfig(
+                baseUrl = o.optString("baseUrl"),
+                apiKey = PwCrypto.decrypt(o.optString("apiKey")),
+                model = o.optString("model"),
+                instructions = o.optString("instructions"),
+            )
+        }.getOrDefault(OcrLocalConfig())
+    }
+
+    private fun encodeLtLocal(c: LanguageToolLocalConfig): String = JSONObject()
+        .put("baseUrl", c.baseUrl)
+        .put("username", c.username)
+        .put("apiKey", PwCrypto.encrypt(c.apiKey))
+        .toString()
+
+    private fun decodeLtLocal(json: String?): LanguageToolLocalConfig {
+        if (json.isNullOrBlank()) return LanguageToolLocalConfig()
+        return runCatching {
+            val o = JSONObject(json)
+            LanguageToolLocalConfig(
+                baseUrl = o.optString("baseUrl", "https://api.languagetool.org/v2"),
+                username = o.optString("username"),
+                apiKey = PwCrypto.decrypt(o.optString("apiKey")),
+            )
+        }.getOrDefault(LanguageToolLocalConfig())
+    }
+
+    private fun encodeWebdavLocal(c: WebdavLocalConfig): String = JSONObject()
+        .put("url", c.url)
+        .put("username", c.username)
+        .put("password", PwCrypto.encrypt(c.password))
+        .put("basePath", c.basePath)
+        .toString()
+
+    private fun decodeWebdavLocal(json: String?): WebdavLocalConfig {
+        if (json.isNullOrBlank()) return WebdavLocalConfig()
+        return runCatching {
+            val o = JSONObject(json)
+            WebdavLocalConfig(
+                url = o.optString("url"),
+                username = o.optString("username"),
+                password = PwCrypto.decrypt(o.optString("password")),
+                basePath = o.optString("basePath", "/neopen"),
+            )
+        }.getOrDefault(WebdavLocalConfig())
+    }
+
+    private fun encodeFtpLocal(c: FtpLocalConfig): String = JSONObject()
+        .put("url", c.url)
+        .put("username", c.username)
+        .put("password", PwCrypto.encrypt(c.password))
+        .put("basePath", c.basePath)
+        .toString()
+
+    private fun decodeFtpLocal(json: String?): FtpLocalConfig {
+        if (json.isNullOrBlank()) return FtpLocalConfig()
+        return runCatching {
+            val o = JSONObject(json)
+            FtpLocalConfig(
+                url = o.optString("url"),
+                username = o.optString("username"),
+                password = PwCrypto.decrypt(o.optString("password")),
+                basePath = o.optString("basePath", "/neopen"),
+            )
+        }.getOrDefault(FtpLocalConfig())
     }
 
     private fun encodeKnownPens(pens: List<KnownPen>): String {

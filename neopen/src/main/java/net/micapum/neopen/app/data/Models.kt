@@ -4,6 +4,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import net.micapum.neopen.core.data.CapturePatchDto
+import net.micapum.neopen.core.data.TranscriptionPushDto
 import net.micapum.neopen.core.data.CreateCaptureInput
 import net.micapum.neopen.core.data.NotebookCreateDto
 import net.micapum.neopen.core.data.NotebookPatchDto
@@ -93,6 +94,7 @@ object Json {
     val notebookPatch = moshi.adapter(NotebookPatchDto::class.java)
     val reorder = moshi.adapter(ReorderDto::class.java)
     val createCapture = moshi.adapter(CreateCaptureInput::class.java)
+    val transcriptionPush = moshi.adapter(TranscriptionPushDto::class.java)
 
     fun tags(json: String?): List<String> =
         json?.let { runCatching { stringList.fromJson(it) }.getOrNull() }.orEmpty()

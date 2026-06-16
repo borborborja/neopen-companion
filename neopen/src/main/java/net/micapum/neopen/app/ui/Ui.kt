@@ -69,6 +69,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ViewDay
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -84,6 +87,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -97,6 +101,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -144,6 +151,14 @@ import net.micapum.neopen.app.render.buildModel
 import kotlin.math.roundToInt
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.data.Capability
+import net.micapum.neopen.core.data.CapabilitySource
+import net.micapum.neopen.core.data.FtpLocalConfig
+import net.micapum.neopen.core.data.LanguageToolLocalConfig
+import net.micapum.neopen.core.data.OcrLocalConfig
+import net.micapum.neopen.core.data.WebdavLocalConfig
+import net.micapum.neopen.core.data.availabilityOf
+import net.micapum.neopen.core.data.sourceOf
 import net.micapum.neopen.core.data.SyncMode
 import net.micapum.neopen.app.widget.TAB_NOTEBOOKS
 import net.micapum.neopen.core.pen.PenStatus
@@ -1687,6 +1702,7 @@ private fun SettingsScreen(vm: MainViewModel) {
             listOf(
                 stringResource(R.string.settings_tab_general),
                 stringResource(R.string.settings_tab_connection),
+                stringResource(R.string.settings_tab_capabilities),
                 stringResource(R.string.settings_tab_other),
                 stringResource(R.string.settings_tab_server),
             ).forEachIndexed { i, label ->
@@ -1788,8 +1804,30 @@ private fun SettingsScreen(vm: MainViewModel) {
                     Button(onClick = { persist() }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.settings_save)) }
                 }
 
-                // ============================ OTROS ============================
+                // ========================= CAPACIDADES =========================
                 2 -> {
+                    Text(stringResource(R.string.settings_cap_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.settings_cap_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    CapabilityRow(stringResource(R.string.cap_ocr), stringResource(R.string.cap_ocr_help), Capability.OCR, settings, online) {
+                        vm.saveSettings(settings.copy(ocrSource = it))
+                    }
+                    CapabilityRow(stringResource(R.string.cap_lt), stringResource(R.string.cap_lt_help), Capability.LANGUAGE_TOOL, settings, online) {
+                        vm.saveSettings(settings.copy(languageToolSource = it))
+                    }
+                    CapabilityRow(stringResource(R.string.cap_marker), stringResource(R.string.cap_marker_help), Capability.MARKER_DETECTION, settings, online) {
+                        vm.saveSettings(settings.copy(markerDetectionSource = it))
+                    }
+                    CapabilityRow(stringResource(R.string.cap_connector), stringResource(R.string.cap_connector_help), Capability.CONNECTOR_SYNC, settings, online) {
+                        vm.saveSettings(settings.copy(connectorSyncSource = it))
+                    }
+
+                    HorizontalDivider()
+                    LocalCredentialsEditor(settings) { vm.saveSettings(it) }
+                }
+
+                // ============================ OTROS ============================
+                3 -> {
                     // --- Copia de seguridad ---
                     Text(stringResource(R.string.settings_backup_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                     Text(stringResource(R.string.settings_backup_desc),
@@ -1897,6 +1935,135 @@ private fun SettingsScreen(vm: MainViewModel) {
             },
         )
     }
+}
+
+/**
+ * Conmutador de 3 estados (Desactivado / Teléfono / Servidor) de una capacidad.
+ * Atenúa la fila y deshabilita los segmentos no disponibles, y explica el estado
+ * efectivo bajo el control.
+ */
+@Composable
+private fun CapabilityRow(
+    title: String,
+    help: String,
+    cap: Capability,
+    settings: AppSettings,
+    online: Boolean,
+    onSelect: (CapabilitySource) -> Unit,
+) {
+    val avail = settings.availabilityOf(cap, online)
+    val current = settings.sourceOf(cap)
+    val usable = avail.phoneAvailable || avail.serverAvailable || current == CapabilitySource.OFF
+    Column(
+        Modifier.fillMaxWidth().alpha(if (usable) 1f else 0.5f),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyMedium)
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = current == CapabilitySource.OFF,
+                onClick = { onSelect(CapabilitySource.OFF) },
+                shape = SegmentedButtonDefaults.itemShape(0, 3),
+                icon = { Icon(Icons.Filled.Block, null, Modifier.size(18.dp)) },
+            ) { Text(stringResource(R.string.cap_source_off)) }
+            SegmentedButton(
+                selected = current == CapabilitySource.PHONE,
+                onClick = { onSelect(CapabilitySource.PHONE) },
+                enabled = avail.phoneAvailable,
+                shape = SegmentedButtonDefaults.itemShape(1, 3),
+                icon = { Icon(Icons.Filled.Smartphone, null, Modifier.size(18.dp)) },
+            ) { Text(stringResource(R.string.cap_source_phone)) }
+            SegmentedButton(
+                selected = current == CapabilitySource.SERVER,
+                onClick = { onSelect(CapabilitySource.SERVER) },
+                enabled = avail.serverAvailable,
+                shape = SegmentedButtonDefaults.itemShape(2, 3),
+                icon = { Icon(Icons.Filled.Cloud, null, Modifier.size(18.dp)) },
+            ) { Text(stringResource(R.string.cap_source_server)) }
+        }
+        val note = when {
+            current == CapabilitySource.SERVER && avail.serverAvailable && avail.phoneAvailable ->
+                stringResource(R.string.cap_note_server_failover)
+            current == CapabilitySource.SERVER && !avail.serverAvailable ->
+                stringResource(R.string.cap_note_no_server)
+            current == CapabilitySource.PHONE && !avail.phoneAvailable ->
+                stringResource(R.string.cap_note_no_phone)
+            else -> help
+        }
+        Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Editores de credenciales locales (teléfono) para OCR, LanguageTool, WebDAV y FTP. */
+@Composable
+private fun LocalCredentialsEditor(settings: AppSettings, onSave: (AppSettings) -> Unit) {
+    var ocrUrl by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.baseUrl) }
+    var ocrModel by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.model) }
+    var ocrKey by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.apiKey) }
+    var ocrInstr by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.instructions) }
+
+    var ltUrl by rememberSaveable(settings.ltLocal) { mutableStateOf(settings.ltLocal.baseUrl) }
+    var ltUser by rememberSaveable(settings.ltLocal) { mutableStateOf(settings.ltLocal.username) }
+    var ltKey by rememberSaveable(settings.ltLocal) { mutableStateOf(settings.ltLocal.apiKey) }
+
+    var wdUrl by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.url) }
+    var wdUser by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.username) }
+    var wdPass by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.password) }
+    var wdBase by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.basePath) }
+
+    var ftpUrl by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.url) }
+    var ftpUser by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.username) }
+    var ftpPass by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.password) }
+    var ftpBase by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.basePath) }
+
+    val fieldMod = Modifier.fillMaxWidth()
+
+    Text(stringResource(R.string.settings_cap_creds_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    Text(stringResource(R.string.settings_cap_creds_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+    // OCR
+    Text(stringResource(R.string.cap_ocr), style = MaterialTheme.typography.bodyMedium)
+    OutlinedTextField(ocrUrl, { ocrUrl = it }, label = { Text(stringResource(R.string.cap_field_ocr_url)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ocrModel, { ocrModel = it }, label = { Text(stringResource(R.string.cap_field_ocr_model)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ocrKey, { ocrKey = it }, label = { Text(stringResource(R.string.cap_field_ocr_key)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ocrInstr, { ocrInstr = it }, label = { Text(stringResource(R.string.cap_field_ocr_instr)) }, modifier = fieldMod)
+
+    HorizontalDivider()
+    // LanguageTool
+    Text(stringResource(R.string.cap_lt), style = MaterialTheme.typography.bodyMedium)
+    OutlinedTextField(ltUrl, { ltUrl = it }, label = { Text(stringResource(R.string.cap_field_lt_url)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ltUser, { ltUser = it }, label = { Text(stringResource(R.string.cap_field_lt_user)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ltKey, { ltKey = it }, label = { Text(stringResource(R.string.cap_field_lt_key)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+
+    HorizontalDivider()
+    // WebDAV
+    Text(stringResource(R.string.cap_section_webdav), style = MaterialTheme.typography.bodyMedium)
+    OutlinedTextField(wdUrl, { wdUrl = it }, label = { Text(stringResource(R.string.cap_field_webdav_url)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(wdUser, { wdUser = it }, label = { Text(stringResource(R.string.cap_field_user)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(wdPass, { wdPass = it }, label = { Text(stringResource(R.string.cap_field_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+    OutlinedTextField(wdBase, { wdBase = it }, label = { Text(stringResource(R.string.cap_field_basepath)) }, singleLine = true, modifier = fieldMod)
+
+    HorizontalDivider()
+    // FTP / SFTP
+    Text(stringResource(R.string.cap_section_ftp), style = MaterialTheme.typography.bodyMedium)
+    OutlinedTextField(ftpUrl, { ftpUrl = it }, label = { Text(stringResource(R.string.cap_field_ftp_url)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ftpUser, { ftpUser = it }, label = { Text(stringResource(R.string.cap_field_user)) }, singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ftpPass, { ftpPass = it }, label = { Text(stringResource(R.string.cap_field_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+    OutlinedTextField(ftpBase, { ftpBase = it }, label = { Text(stringResource(R.string.cap_field_basepath)) }, singleLine = true, modifier = fieldMod)
+
+    Button(
+        onClick = {
+            onSave(
+                settings.copy(
+                    ocrLocal = OcrLocalConfig(ocrUrl.trim(), ocrKey, ocrModel.trim(), ocrInstr),
+                    ltLocal = LanguageToolLocalConfig(ltUrl.trim(), ltUser, ltKey),
+                    webdavLocal = WebdavLocalConfig(wdUrl.trim(), wdUser, wdPass, wdBase.trim()),
+                    ftpLocal = FtpLocalConfig(ftpUrl.trim(), ftpUser, ftpPass, ftpBase.trim()),
+                ),
+            )
+        },
+        modifier = fieldMod,
+    ) { Text(stringResource(R.string.cap_save_creds)) }
 }
 
 // --- Diálogos y piezas reutilizables -----------------------------------------

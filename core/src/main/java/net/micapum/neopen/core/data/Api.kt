@@ -166,6 +166,14 @@ data class CapturePatchDto(
     val sealed: Boolean? = null,
 )
 
+/** Cuerpo de PUT /api/captures/{id}/transcription (transcripción hecha en el teléfono). */
+data class TranscriptionPushDto(
+    val transcription: OcrResultDto,
+    val tags: List<String>? = null,
+    val name: String? = null,
+    val kind: String? = null,
+)
+
 /** Cuerpo de PUT /api/notebooks/{id}/paper (formato del cuaderno; re-sella sus hojas). */
 data class NotebookPaperBody(val paper: PaperDto, val source: String? = null)
 
@@ -417,6 +425,14 @@ interface NeopenApi {
         @Path("id") id: String,
         @Part image: MultipartBody.Part,
         @Part("instructions") instructions: RequestBody?,
+    ): CaptureDto
+
+    /** Sube una transcripción YA generada en el teléfono (failover del OCR local). */
+    @PUT("api/captures/{id}/transcription")
+    suspend fun putTranscription(
+        @Header("X-Auth-Password") password: String,
+        @Path("id") id: String,
+        @Body body: TranscriptionPushDto,
     ): CaptureDto
 
     @POST("api/pens")

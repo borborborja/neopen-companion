@@ -21,12 +21,15 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import net.micapum.neopen.app.capability.CapabilityDispatcher
+import net.micapum.neopen.app.capability.LocalConnectorSync
 import net.micapum.neopen.app.data.NeopenRepository
 import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.sync.SyncEngine
@@ -109,10 +112,29 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+/** v6→v7: tabla de estado de la sincronización local a conectores (WebDAV/FTP). */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS connector_sync_state (
+                itemId TEXT NOT NULL,
+                connectorId TEXT NOT NULL,
+                format TEXT NOT NULL,
+                remotePath TEXT NOT NULL,
+                sourceHash TEXT NOT NULL,
+                syncedAt INTEGER NOT NULL,
+                PRIMARY KEY (itemId, connectorId, format)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
-        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
         // Solo permite recrear la BD desde la v1 efímera (dev, nunca publicada; el
         // esquema arrancó en v2). De v2 en adelante SIEMPRE hay migración explícita,
         // así que jamás se borran datos del usuario en una actualización.
@@ -122,8 +144,16 @@ class Graph(app: Application) {
     val syncStatus = SyncStatusStore(app)
     val repo = NeopenRepository(db)
     val sync = SyncEngine(repo, settings)
+    /** Despacha las capacidades (OCR/LanguageTool/marcadores) entre teléfono y servidor. */
+    val dispatcher = CapabilityDispatcher(this)
+    /** Espejo local a conectores (WebDAV/FTP) cuando la capacidad está en TELÉFONO. */
+    val connectorSync = LocalConnectorSync(this)
     private val workManager = WorkManager.getInstance(app)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Debounce del espejo a conectores (colapsa ráfagas de cambios). */
+    @Volatile
+    private var connectorSyncJob: Job? = null
 
     /** Modo local activo (sin servidor): el archivado se hace en el dispositivo. */
     @Volatile
@@ -151,6 +181,7 @@ class Graph(app: Application) {
                 syncStatus.markPenSync(System.currentTimeMillis())
                 syncNow()
             }
+            scheduleConnectorSync()
         }
     }
 
@@ -232,6 +263,14 @@ class Graph(app: Application) {
         }
     }
 
+    /** Encola la subida de una transcripción hecha en el teléfono y sincroniza. */
+    fun enqueueTranscriptionSync(captureId: String) {
+        scope.launch {
+            repo.enqueueTranscription(captureId)
+            syncNow()
+        }
+    }
+
     /** Sincronización inmediata (al abrir la app, recuperar red o editar). */
     fun syncNow() {
         val once = OneTimeWorkRequestBuilder<SyncWorker>()
@@ -239,6 +278,20 @@ class Graph(app: Application) {
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
         workManager.enqueueUniqueWork("neopen-sync-now", ExistingWorkPolicy.REPLACE, once)
+        scheduleConnectorSync()
+    }
+
+    /**
+     * Programa una pasada del espejo a conectores con debounce de 1,5 s (igual que
+     * el servidor). Solo hace trabajo si la capacidad está en TELÉFONO; si no, sale
+     * enseguida. Colapsa ráfagas de ediciones/ingestas en una sola pasada.
+     */
+    fun scheduleConnectorSync() {
+        connectorSyncJob?.cancel()
+        connectorSyncJob = scope.launch {
+            kotlinx.coroutines.delay(1500)
+            runCatching { connectorSync.sync() }
+        }
     }
 }
 

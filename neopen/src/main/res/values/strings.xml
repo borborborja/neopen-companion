@@ -212,6 +212,7 @@
     <string name="vm_save_sobp_failed">No se pudo guardar el SOBP (¿sin conexión?)</string>
     <string name="vm_ocr_needs_connection">El OCR necesita conexión</string>
     <string name="vm_ocr_failed">El OCR falló</string>
+    <string name="vm_ocr_off">La transcripción está desactivada</string>
     <string name="vm_upload_background_failed">No se pudo subir el fondo (¿sin conexión?)</string>
     <string name="vm_save_background_failed">No se pudo guardar el fondo (¿sin conexión?)</string>
     <string name="vm_finalize_notebook_failed">No se pudo finalizar el cuaderno (¿sin conexión?)</string>
@@ -249,8 +250,44 @@
     <!-- Ajustes en pestañas -->
     <string name="settings_tab_general">General</string>
     <string name="settings_tab_connection">Conexión</string>
+    <string name="settings_tab_capabilities">Capacidades</string>
     <string name="settings_tab_other">Otros</string>
     <string name="settings_tab_server">Servidor</string>
+
+    <!-- Capacidades (IA, corrección, conectores) -->
+    <string name="settings_cap_title">Capacidades</string>
+    <string name="settings_cap_intro">Elige quién ejecuta cada función: desactivada, en el teléfono (con tus credenciales locales) o en el servidor. En modo Servidor, si el servidor falla y tienes credenciales locales, lo hace el teléfono y luego se sincroniza.</string>
+    <string name="cap_ocr">Transcripción (OCR)</string>
+    <string name="cap_ocr_help">Convierte la escritura a texto con título, etiquetas, tareas y fechas.</string>
+    <string name="cap_lt">Corrección (LanguageTool)</string>
+    <string name="cap_lt_help">Corrige ortografía y gramática del texto transcrito.</string>
+    <string name="cap_marker">Detección de marcadores</string>
+    <string name="cap_marker_help">Lee #etiquetas, *título* y [TIPO] en la cabecera de la nota.</string>
+    <string name="cap_connector">Sincronización a conectores</string>
+    <string name="cap_connector_help">Exporta las páginas a WebDAV (Nextcloud/Obsidian) o FTP/SFTP.</string>
+    <string name="cap_source_off">Desactivado</string>
+    <string name="cap_source_phone">Teléfono</string>
+    <string name="cap_source_server">Servidor</string>
+    <string name="cap_note_server_failover">El servidor lo hace; si falla y hay credenciales locales, lo hace el teléfono y se sincroniza.</string>
+    <string name="cap_note_no_server">Sin servidor disponible (modo local o sin conexión).</string>
+    <string name="cap_note_no_phone">Sin credenciales locales: añádelas abajo.</string>
+    <string name="settings_cap_creds_title">Credenciales locales (teléfono)</string>
+    <string name="settings_cap_creds_desc">Se guardan cifradas en el dispositivo. Las contraseñas no se muestran tras guardar.</string>
+    <string name="cap_section_webdav">WebDAV (Nextcloud/Obsidian)</string>
+    <string name="cap_section_ftp">FTP / SFTP</string>
+    <string name="cap_field_ocr_url">URL base (compatible con OpenAI)</string>
+    <string name="cap_field_ocr_model">Modelo</string>
+    <string name="cap_field_ocr_key">Clave API</string>
+    <string name="cap_field_ocr_instr">Instrucciones (opcional)</string>
+    <string name="cap_field_lt_url">URL base de LanguageTool</string>
+    <string name="cap_field_lt_user">Usuario (opcional)</string>
+    <string name="cap_field_lt_key">Clave API (opcional)</string>
+    <string name="cap_field_webdav_url">URL de WebDAV</string>
+    <string name="cap_field_ftp_url">URL (ftp:// · ftps:// · sftp://)</string>
+    <string name="cap_field_user">Usuario</string>
+    <string name="cap_field_password">Contraseña</string>
+    <string name="cap_field_basepath">Carpeta base</string>
+    <string name="cap_save_creds">Guardar credenciales</string>
 
     <string name="settings_app_mode_full_desc">Completo: cuadernos, capturas y sincronización con el servidor en el propio móvil.</string>
     <string name="settings_app_mode_bridge_desc">Solo puente: el boli se vuelca al servidor y la app no guarda cuadernos en el móvil.</string>

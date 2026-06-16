@@ -31,4 +31,12 @@ dependencies {
 
     // Corrutinas / Flow (usadas por PenManager, SettingsStore, SyncStatusStore)
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Conectores locales: FTP/FTPS (Commons Net) y SFTP (JSch, fork mantenido).
+    // WebDAV no añade dependencias (va sobre OkHttp, ya presente).
+    implementation("commons-net:commons-net:3.11.1")
+    implementation("com.github.mwiede:jsch:0.2.21")
+
+    // Tests unitarios de la lógica pura (marcadores, LanguageTool).
+    testImplementation("junit:junit:4.13.2")
 }
