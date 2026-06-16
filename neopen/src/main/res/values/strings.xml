@@ -245,4 +245,26 @@
     <string name="wgt_notebooks_empty">Sin cuadernos todavía.</string>
     <string name="pensvc_notif_text">Conexión del boli en segundo plano</string>
     <string name="appsvc_channel_pen">Boli</string>
+
+    <!-- Ajustes en pestañas -->
+    <string name="settings_tab_general">General</string>
+    <string name="settings_tab_connection">Conexión</string>
+    <string name="settings_tab_other">Otros</string>
+    <string name="settings_tab_server">Servidor</string>
+
+    <string name="settings_app_mode_full_desc">Completo: cuadernos, capturas y sincronización con el servidor en el propio móvil.</string>
+    <string name="settings_app_mode_bridge_desc">Solo puente: el boli se vuelca al servidor y la app no guarda cuadernos en el móvil.</string>
+    <string name="settings_app_mode_local_note">Estás en modo local (sin servidor). Para cambiar de modo, vincula un servidor en la pestaña «Servidor».</string>
+
+    <string name="settings_offline_dump_desc">Cómo se vuelca al servidor la escritura que el boli guardó sin conexión: manualmente o de forma automática cada cierto tiempo.</string>
+
+    <string name="settings_server_sync_title">Sincronización con el servidor</string>
+    <string name="settings_last_server_sync">Última sincronización: %1$s</string>
+    <string name="settings_last_sync_never">nunca</string>
+    <string name="settings_server_actions_note">La transcripción, la IA y los conectores (WebDAV, FTP, correo…) se configuran en la web del servidor.</string>
+
+    <string name="settings_delete_title">Borrar contenido</string>
+    <string name="settings_delete_desc">Elimina los cuadernos, capturas y ajustes guardados en este móvil.</string>
+    <string name="settings_delete_button">Borrar contenido del móvil</string>
+    <string name="settings_delete_dialog_body">Se borrarán los cuadernos, capturas y ajustes guardados en ESTE móvil, y volverás al asistente inicial.\n\nNO se borra nada del servidor ni de la memoria del boli, y no se desconecta el boli.</string>
 </resources>
