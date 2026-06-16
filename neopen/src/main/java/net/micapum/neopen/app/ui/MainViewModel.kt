@@ -36,6 +36,7 @@ import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.OverlapConfigDto
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.SplitBody
+import net.micapum.neopen.core.data.SyncStatus
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.SobpScanDto
 import net.micapum.neopen.core.data.StudioItemDto
@@ -80,6 +81,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val pending: StateFlow<Int> =
         graph.repo.pendingCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    /** Marcas de última sincronización (boli/servidor) para mostrar en Ajustes → Servidor. */
+    val syncStatus: StateFlow<SyncStatus> =
+        graph.syncStatus.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SyncStatus())
 
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()

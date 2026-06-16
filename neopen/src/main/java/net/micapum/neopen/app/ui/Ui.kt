@@ -1545,18 +1545,23 @@ private fun penStatusLabel(status: PenStatus): String = when (status) {
 
 // --- Ajustes -----------------------------------------------------------------
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val check by vm.serverCheck.collectAsStateWithLifecycle()
+    val online by vm.online.collectAsStateWithLifecycle()
+    val sync by vm.syncStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    var settingsTab by rememberSaveable { mutableIntStateOf(0) }
+    var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
+
     var url by rememberSaveable(settings.serverUrl) { mutableStateOf(settings.serverUrl) }
     var pw by rememberSaveable(settings.password) { mutableStateOf(settings.password) }
-    var mode by rememberSaveable(settings.appMode) { mutableStateOf(settings.appMode) }
     var syncMode by rememberSaveable(settings.syncMode) { mutableStateOf(settings.syncMode) }
     var interval by rememberSaveable(settings.syncIntervalMin) { mutableStateOf(settings.syncIntervalMin.toString()) }
     var background by rememberSaveable(settings.backgroundEnabled) { mutableStateOf(settings.backgroundEnabled) }
@@ -1572,7 +1577,7 @@ private fun SettingsScreen(vm: MainViewModel) {
                 serverUrl = if (isLocal) "" else url, password = if (isLocal) "" else pw,
                 backgroundEnabled = background,
                 syncMode = syncMode, syncIntervalMin = interval.toIntOrNull() ?: 30,
-                appMode = if (isLocal) AppMode.LOCAL else mode, setupComplete = true,
+                appMode = settings.appMode, setupComplete = true,
                 importOnConnect = importOnConnect,
                 // Conserva ajustes gestionados aparte (no se editan en este formulario).
                 recentShowCount = settings.recentShowCount,
@@ -1608,152 +1613,219 @@ private fun SettingsScreen(vm: MainViewModel) {
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        // --- Tema ---
-        Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val opts = listOf(
-                "system" to stringResource(R.string.theme_system),
-                "light" to stringResource(R.string.theme_light),
-                "dark" to stringResource(R.string.theme_dark),
-            )
-            opts.forEach { (value, label) ->
-                FilterChip(settings.themeMode == value, { vm.setThemeMode(value) }, label = { Text(label) })
+    Column(Modifier.fillMaxSize()) {
+        SecondaryTabRow(selectedTabIndex = settingsTab) {
+            listOf(
+                stringResource(R.string.settings_tab_general),
+                stringResource(R.string.settings_tab_connection),
+                stringResource(R.string.settings_tab_other),
+                stringResource(R.string.settings_tab_server),
+            ).forEachIndexed { i, label ->
+                Tab(settingsTab == i, { settingsTab = i }, text = { Text(label) })
             }
         }
-        HorizontalDivider()
-
-        if (settings.appMode == AppMode.LOCAL) {
-            // --- Modo local: vincular un servidor (migra los datos sin perderlos) ---
-            Text(stringResource(R.string.settings_local_mode_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            Text(
-                stringResource(R.string.settings_local_mode_desc),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(url, { url = it }, label = { Text(stringResource(R.string.server_url_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(pw, { pw = it }, label = { Text(stringResource(R.string.server_password_label)) },
-                visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-            val linkOkMsg = stringResource(R.string.settings_link_ok)
-            val linkFailMsg = stringResource(R.string.settings_link_failed)
-            Button(
-                onClick = {
-                    linking = true; linkMsg = null
-                    vm.linkServer(url, pw) { ok, err ->
-                        linking = false
-                        linkMsg = if (ok) linkOkMsg else (err ?: linkFailMsg)
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when (settingsTab) {
+                // ============================ GENERAL ============================
+                0 -> {
+                    // --- Tema ---
+                    Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val opts = listOf(
+                            "system" to stringResource(R.string.theme_system),
+                            "light" to stringResource(R.string.theme_light),
+                            "dark" to stringResource(R.string.theme_dark),
+                        )
+                        opts.forEach { (value, label) ->
+                            FilterChip(settings.themeMode == value, { vm.setThemeMode(value) }, label = { Text(label) })
+                        }
                     }
-                },
-                enabled = !linking && url.isNotBlank() && pw.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (linking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Text(stringResource(R.string.settings_link_button))
-            }
-            linkMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        } else {
-            // --- Servidor ---
-            Text(stringResource(R.string.settings_server_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text(stringResource(R.string.server_url_label)) },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text(stringResource(R.string.server_password_label)) },
-                visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedButton(onClick = { vm.testServer(url, pw) }, enabled = check != ServerCheck.Checking,
-                modifier = Modifier.fillMaxWidth()) {
-                if (check == ServerCheck.Checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Text(stringResource(R.string.server_test_connection))
-            }
-            ServerCheckResult(check)
 
-            HorizontalDivider()
-            // --- Modo de la app ---
-            Text(stringResource(R.string.settings_app_mode_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(mode == AppMode.FULL, { mode = AppMode.FULL }, label = { Text(stringResource(R.string.mode_full)) })
-                FilterChip(mode == AppMode.BRIDGE, { mode = AppMode.BRIDGE }, label = { Text(stringResource(R.string.mode_bridge)) })
+                    HorizontalDivider()
+                    // --- Modo de la app ---
+                    Text(stringResource(R.string.settings_app_mode_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    if (settings.appMode == AppMode.LOCAL) {
+                        Text(stringResource(R.string.settings_app_mode_local_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(settings.appMode == AppMode.FULL, { vm.setAppMode(AppMode.FULL) }, label = { Text(stringResource(R.string.mode_full)) })
+                            FilterChip(settings.appMode == AppMode.BRIDGE, { vm.setAppMode(AppMode.BRIDGE) }, label = { Text(stringResource(R.string.mode_bridge)) })
+                        }
+                        Text(
+                            if (settings.appMode == AppMode.BRIDGE) stringResource(R.string.settings_app_mode_bridge_desc)
+                            else stringResource(R.string.settings_app_mode_full_desc),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    HorizontalDivider()
+                    // --- Al finalizar una hoja ---
+                    Text(stringResource(R.string.settings_finish_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(settings.finishMode == "newSheet", { vm.setFinishMode("newSheet") }, label = { Text(stringResource(R.string.finish_new_sheet)) })
+                        FilterChip(settings.finishMode == "newNotebook", { vm.setFinishMode("newNotebook") }, label = { Text(stringResource(R.string.notebook_new)) })
+                    }
+                    Text(
+                        if (settings.finishMode == "newNotebook") stringResource(R.string.settings_finish_desc_notebook)
+                        else stringResource(R.string.settings_finish_desc_sheet),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    HorizontalDivider()
+                    // --- Trazos superpuestos ---
+                    Text(stringResource(R.string.settings_overlap_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    PenToggleRow(
+                        stringResource(R.string.settings_overlap_toggle_title),
+                        stringResource(R.string.settings_overlap_toggle_desc),
+                        settings.overlapEnabled,
+                    ) { vm.setOverlapConfig(it, settings.overlapMinStrokes, settings.overlapMinAreaPercent) }
+                    if (settings.overlapEnabled) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                settings.overlapMinStrokes.toString(),
+                                { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(1, 100)?.let { n -> vm.setOverlapConfig(true, n, settings.overlapMinAreaPercent) } },
+                                label = { Text(stringResource(R.string.settings_overlap_min_strokes)) }, singleLine = true, modifier = Modifier.weight(1f),
+                            )
+                            OutlinedTextField(
+                                settings.overlapMinAreaPercent.toString(),
+                                { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(0, 100)?.let { n -> vm.setOverlapConfig(true, settings.overlapMinStrokes, n) } },
+                                label = { Text(stringResource(R.string.settings_overlap_min_area)) }, singleLine = true, modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+
+                // ========================== CONEXIÓN ===========================
+                1 -> {
+                    Text(stringResource(R.string.settings_bluetooth_sync_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    PenToggleRow(stringResource(R.string.settings_background_title), stringResource(R.string.settings_background_desc), background) { background = it }
+                    PenToggleRow(stringResource(R.string.settings_import_on_connect_title), stringResource(R.string.settings_import_on_connect_desc), importOnConnect) { importOnConnect = it }
+
+                    HorizontalDivider()
+                    Text(stringResource(R.string.settings_offline_dump), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.settings_offline_dump_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(syncMode == SyncMode.MANUAL, { syncMode = SyncMode.MANUAL }, label = { Text(stringResource(R.string.sync_manual)) })
+                        FilterChip(syncMode == SyncMode.INTERVAL, { syncMode = SyncMode.INTERVAL }, label = { Text(stringResource(R.string.sync_interval)) })
+                    }
+                    if (syncMode == SyncMode.INTERVAL) {
+                        OutlinedTextField(interval, { interval = it.filter(Char::isDigit) },
+                            label = { Text(stringResource(R.string.settings_interval_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    }
+                    Button(onClick = { persist() }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.settings_save)) }
+                }
+
+                // ============================ OTROS ============================
+                2 -> {
+                    // --- Copia de seguridad ---
+                    Text(stringResource(R.string.settings_backup_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.settings_backup_desc),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { backupMsg = null; exportLauncher.launch("neopen-backup.json") }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_export)) }
+                        OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_restore)) }
+                    }
+                    backupMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+                    HorizontalDivider()
+                    SobpHistorySection(vm)
+
+                    HorizontalDivider()
+                    // --- Borrar contenido ---
+                    Text(stringResource(R.string.settings_delete_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.settings_delete_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { showDeleteDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.settings_delete_button), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+
+                // =========================== SERVIDOR ==========================
+                else -> {
+                    if (settings.appMode == AppMode.LOCAL) {
+                        // --- Modo local: vincular un servidor (migra los datos sin perderlos) ---
+                        Text(stringResource(R.string.settings_local_mode_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.settings_local_mode_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedTextField(url, { url = it }, label = { Text(stringResource(R.string.server_url_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(pw, { pw = it }, label = { Text(stringResource(R.string.server_password_label)) },
+                            visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+                        val linkOkMsg = stringResource(R.string.settings_link_ok)
+                        val linkFailMsg = stringResource(R.string.settings_link_failed)
+                        Button(
+                            onClick = {
+                                linking = true; linkMsg = null
+                                vm.linkServer(url, pw) { ok, err -> linking = false; linkMsg = if (ok) linkOkMsg else (err ?: linkFailMsg) }
+                            },
+                            enabled = !linking && url.isNotBlank() && pw.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            if (linking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Text(stringResource(R.string.settings_link_button))
+                        }
+                        linkMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    } else {
+                        // --- Servidor: credenciales + probar ---
+                        Text(stringResource(R.string.settings_server_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text(stringResource(R.string.server_url_label)) },
+                            singleLine = true, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text(stringResource(R.string.server_password_label)) },
+                            visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { vm.testServer(url, pw) }, enabled = check != ServerCheck.Checking, modifier = Modifier.weight(1f)) {
+                                if (check == ServerCheck.Checking) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                else Text(stringResource(R.string.server_test_connection))
+                            }
+                            Button(onClick = { persist() }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.settings_save)) }
+                        }
+                        ServerCheckResult(check)
+
+                        HorizontalDivider()
+                        // --- Sincronización con el servidor ---
+                        val connected = settings.configured && online
+                        Text(stringResource(R.string.settings_server_sync_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        val lastSync = if (sync.lastServerSync <= 0L) stringResource(R.string.settings_last_sync_never)
+                            else android.text.format.DateUtils.getRelativeTimeSpanString(sync.lastServerSync).toString()
+                        Text(
+                            stringResource(R.string.settings_last_server_sync, lastSync),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (connected) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline,
+                        )
+                        Text(
+                            stringResource(R.string.settings_pending_upload, pending),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (connected) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline,
+                        )
+                        OutlinedButton(onClick = vm::syncNow, enabled = connected, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.settings_sync_now))
+                        }
+                        if (status != null) {
+                            Text(stringResource(R.string.settings_last_error, status ?: ""), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+
+                        HorizontalDivider()
+                        Text(stringResource(R.string.settings_server_actions_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
+    }
 
-        HorizontalDivider()
-        // --- Al finalizar una hoja ---
-        Text(stringResource(R.string.settings_finish_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(settings.finishMode == "newSheet", { vm.setFinishMode("newSheet") }, label = { Text(stringResource(R.string.finish_new_sheet)) })
-            FilterChip(settings.finishMode == "newNotebook", { vm.setFinishMode("newNotebook") }, label = { Text(stringResource(R.string.notebook_new)) })
-        }
-        Text(
-            if (settings.finishMode == "newNotebook")
-                stringResource(R.string.settings_finish_desc_notebook)
-            else
-                stringResource(R.string.settings_finish_desc_sheet),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text(stringResource(R.string.settings_delete_title)) },
+            text = { Text(stringResource(R.string.settings_delete_dialog_body)) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteDialog = false; vm.logout() }) {
+                    Text(stringResource(R.string.settings_delete_button), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.action_cancel)) }
+            },
         )
-
-        HorizontalDivider()
-        // --- Trazos superpuestos ---
-        Text(stringResource(R.string.settings_overlap_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        PenToggleRow(
-            stringResource(R.string.settings_overlap_toggle_title),
-            stringResource(R.string.settings_overlap_toggle_desc),
-            settings.overlapEnabled,
-        ) { vm.setOverlapConfig(it, settings.overlapMinStrokes, settings.overlapMinAreaPercent) }
-        if (settings.overlapEnabled) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    settings.overlapMinStrokes.toString(),
-                    { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(1, 100)?.let { n -> vm.setOverlapConfig(true, n, settings.overlapMinAreaPercent) } },
-                    label = { Text(stringResource(R.string.settings_overlap_min_strokes)) }, singleLine = true, modifier = Modifier.weight(1f),
-                )
-                OutlinedTextField(
-                    settings.overlapMinAreaPercent.toString(),
-                    { v -> v.filter(Char::isDigit).toIntOrNull()?.coerceIn(0, 100)?.let { n -> vm.setOverlapConfig(true, settings.overlapMinStrokes, n) } },
-                    label = { Text(stringResource(R.string.settings_overlap_min_area)) }, singleLine = true, modifier = Modifier.weight(1f),
-                )
-            }
-        }
-
-        HorizontalDivider()
-        // --- Sincronización del boli ---
-        Text(stringResource(R.string.settings_bluetooth_sync_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        PenToggleRow(stringResource(R.string.settings_background_title), stringResource(R.string.settings_background_desc), background) { background = it }
-        PenToggleRow(stringResource(R.string.settings_import_on_connect_title), stringResource(R.string.settings_import_on_connect_desc), importOnConnect) { importOnConnect = it }
-        Text(stringResource(R.string.settings_offline_dump), style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(syncMode == SyncMode.MANUAL, { syncMode = SyncMode.MANUAL }, label = { Text(stringResource(R.string.sync_manual)) })
-            FilterChip(syncMode == SyncMode.INTERVAL, { syncMode = SyncMode.INTERVAL }, label = { Text(stringResource(R.string.sync_interval)) })
-        }
-        if (syncMode == SyncMode.INTERVAL) {
-            OutlinedTextField(interval, { interval = it.filter(Char::isDigit) },
-                label = { Text(stringResource(R.string.settings_interval_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        }
-
-        Button(onClick = { persist() }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.settings_save)) }
-        OutlinedButton(onClick = vm::syncNow, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.settings_sync_now)) }
-        Text(stringResource(R.string.settings_pending_upload, pending), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (status != null) {
-            Text(stringResource(R.string.settings_last_error, status ?: ""), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-
-        HorizontalDivider()
-        // --- Copia de seguridad ---
-        Text(stringResource(R.string.settings_backup_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Text(stringResource(R.string.settings_backup_desc),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { backupMsg = null; exportLauncher.launch("neopen-backup.json") }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_export)) }
-            OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_restore)) }
-        }
-        backupMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-
-        HorizontalDivider()
-        SobpHistorySection(vm)
-
-        HorizontalDivider()
-        TextButton(onClick = vm::logout, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.settings_logout), color = MaterialTheme.colorScheme.error)
-        }
     }
 }
 
