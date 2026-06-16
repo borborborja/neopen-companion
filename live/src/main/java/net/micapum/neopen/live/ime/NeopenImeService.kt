@@ -1,4 +1,4 @@
-package net.micapum.neopen.app.ime
+package net.micapum.neopen.live.ime
 
 import android.graphics.Color
 import android.graphics.Typeface
@@ -19,12 +19,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import net.micapum.neopen.app.graph
 import net.micapum.neopen.core.data.AppSettings
-import net.micapum.neopen.core.ink.InkLanguage
-import net.micapum.neopen.core.ink.InkRecognizer
-import net.micapum.neopen.core.ink.LiveTranscriber
 import net.micapum.neopen.core.pen.PenManager
+import net.micapum.neopen.live.NeopenLiveApp
+import net.micapum.neopen.live.ink.InkLanguage
+import net.micapum.neopen.live.ink.InkRecognizer
+import net.micapum.neopen.live.ink.LiveTranscriber
 
 /**
  * Teclado (IME) de escritura en vivo. Mientras está activo, suscribe el flujo de trazos del
@@ -50,9 +50,9 @@ class NeopenImeService : InputMethodService() {
 
     override fun onCreate() {
         super.onCreate()
-        pen = applicationContext.graph.pen
+        pen = NeopenLiveApp.from(applicationContext).pen
         scope.launch {
-            applicationContext.graph.settings.flow.collectLatest { settingsCache = it }
+            NeopenLiveApp.from(applicationContext).settings.flow.collectLatest { settingsCache = it }
         }
     }
 
@@ -121,7 +121,6 @@ class NeopenImeService : InputMethodService() {
         super.onStartInputView(info, restarting)
         val lang = InkLanguage.entries.firstOrNull { it.tag == settingsCache.liveLanguage } ?: InkLanguage.ES
         ensureTranscriber(lang)
-        // Arranca el contexto con el texto que ya hay antes del cursor.
         val before = ic()?.getTextBeforeCursor(20, 0)?.toString().orEmpty()
         transcriber?.setPreContext(before)
         pen.enterLiveMode()
@@ -195,7 +194,7 @@ class NeopenImeService : InputMethodService() {
     }
 
     private fun refreshStatus() {
-        val conn = if (pen.state.value.connected) "Boli conectado" else "Boli desconectado — conéctalo en la app"
+        val conn = if (pen.state.value.connected) "Boli conectado" else "Boli desconectado — conéctalo en neopen Live"
         setStatus("$conn · ${currentLang.display}")
     }
 

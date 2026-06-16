@@ -1,4 +1,4 @@
-package net.micapum.neopen.core.ink
+package net.micapum.neopen.live.ink
 
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager

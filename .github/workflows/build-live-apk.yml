@@ -30,12 +30,12 @@ jobs:
       - name: Set up Gradle (con caché)
         uses: gradle/actions/setup-gradle@v4
 
-      # Variante `live`: applicationId .live + nombre "neopen LIVE" (convive con la oficial).
-      - name: Build LIVE APK (neopen)
-        run: ./gradlew :neopen:assembleLive --stacktrace
+      # App slim :live (release con R8 + arm64) → applicationId net.micapum.neopen.live.
+      - name: Build LIVE APK (:live release)
+        run: ./gradlew :live:assembleRelease --stacktrace
 
       - name: Renombrar APK
-        run: cp neopen/build/outputs/apk/live/neopen-live.apk neopen-live.apk
+        run: cp live/build/outputs/apk/release/live-release.apk neopen-live.apk
 
       - name: Subir APK como artifact
         uses: actions/upload-artifact@v4
@@ -52,12 +52,13 @@ jobs:
           name: Escritura en vivo (build de prueba)
           prerelease: true
           body: |
-            APK de la feature de **escritura en vivo**, generado desde `feat/live-writing-ime`.
+            App slim **neopen Live** (boli + teclado de escritura en vivo), desde `feat/live-writing-ime`.
 
-            - **neopen-live.apk** — applicationId `net.micapum.neopen.live`, nombre **"neopen LIVE"**.
-            - Se instala EN PARALELO a la app oficial (`net.micapum.neopen`): puedes tener ambas.
+            - **neopen-live.apk** — applicationId `net.micapum.neopen.live`, nombre **"neopen Live"**.
+            - App aparte y ligera (~13 MB, arm64 + R8): se instala EN PARALELO a la app oficial.
+            - **Solo arm64-v8a** (móviles modernos; no instala en emuladores x86 ni ARM de 32 bits).
 
-            Cómo probar: instala el APK → conecta el boli → en Ajustes de Android activa y
-            selecciona el teclado **"neopen — escritura en vivo"** → abre cualquier app y
-            escribe en la hoja Ncode.
+            Cómo probar: instala el APK → abre "neopen Live" → **Conectar boli** y **Descargar
+            modelo** → en Ajustes de Android activa y selecciona el teclado **"neopen — escritura
+            en vivo"** → abre cualquier app y escribe en la hoja Ncode.
           files: neopen-live.apk

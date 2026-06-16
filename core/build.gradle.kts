@@ -31,10 +31,4 @@ dependencies {
 
     // Corrutinas / Flow (usadas por PenManager, SettingsStore, SyncStatusStore)
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // Reconocimiento de escritura a mano on-device (modo escritura en vivo).
-    // Online HWR: toma los trazos vectoriales del boli (Ink) → texto, offline.
-    api("com.google.mlkit:digital-ink-recognition:18.1.0")
-    // Tareas de ML Kit (Task) ↔ corrutinas
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 }

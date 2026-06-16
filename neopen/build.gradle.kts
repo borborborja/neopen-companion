@@ -16,8 +16,6 @@ android {
         versionCode = 17
         versionName = "0.16.0"
         vectorDrawables { useSupportLibrary = true }
-        // Etiqueta de la app, sustituible por buildType para instalar variantes en paralelo.
-        manifestPlaceholders["appLabel"] = "@string/app_name"
     }
 
     signingConfigs {
@@ -35,17 +33,6 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-        }
-        // Variante "live": misma app pero con applicationId distinto para que conviva en el
-        // mismo dispositivo con la oficial. Para probar la feature de escritura en vivo.
-        create("live") {
-            initWith(getByName("debug"))
-            applicationIdSuffix = ".live"
-            versionNameSuffix = "-live"
-            signingConfig = signingConfigs.getByName("debug")
-            manifestPlaceholders["appLabel"] = "neopen LIVE"
-            // :core solo tiene debug/release → consume su variante debug.
-            matchingFallbacks += "debug"
         }
     }
     compileOptions {

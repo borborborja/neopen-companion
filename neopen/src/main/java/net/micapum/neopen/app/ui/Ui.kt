@@ -1583,13 +1583,11 @@ private fun SettingsScreen(vm: MainViewModel) {
                 overlapMinAreaPercent = settings.overlapMinAreaPercent,
                 notebookView = settings.notebookView,
                 themeMode = settings.themeMode,
-                liveLanguage = settings.liveLanguage,
-                liveNewlines = settings.liveNewlines,
             ),
         )
     }
 
-    LaunchedEffect(Unit) { vm.refreshFinishMode(); vm.refreshOverlapConfig(); vm.refreshLiveModel() }
+    LaunchedEffect(Unit) { vm.refreshFinishMode(); vm.refreshOverlapConfig() }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -1715,45 +1713,6 @@ private fun SettingsScreen(vm: MainViewModel) {
                 )
             }
         }
-
-        HorizontalDivider()
-        // --- Escritura en vivo (IME) ---
-        val liveModelReady by vm.liveModelReady.collectAsStateWithLifecycle()
-        val liveModelBusy by vm.liveModelBusy.collectAsStateWithLifecycle()
-        Text(stringResource(R.string.live_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Text(stringResource(R.string.live_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(stringResource(R.string.live_language), style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("es" to "Español", "ca" to "Català", "en" to "English").forEach { (value, label) ->
-                FilterChip(settings.liveLanguage == value, { vm.setLiveLanguage(value) }, label = { Text(label) })
-            }
-        }
-        Text(
-            stringResource(if (liveModelReady == true) R.string.live_model_ready else R.string.live_model_missing),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = vm::downloadLiveModel, enabled = !liveModelBusy && liveModelReady != true) {
-                Text(stringResource(R.string.live_model_download))
-            }
-            OutlinedButton(onClick = vm::deleteLiveModel, enabled = !liveModelBusy && liveModelReady == true) {
-                Text(stringResource(R.string.live_model_delete))
-            }
-        }
-        PenToggleRow(stringResource(R.string.live_newlines), stringResource(R.string.live_newlines_desc), settings.liveNewlines) { vm.setLiveNewlines(it) }
-        OutlinedButton(
-            onClick = {
-                runCatching {
-                    context.startActivity(
-                        android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)
-                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.live_enable_keyboard)) }
-        Text(stringResource(R.string.live_steps), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         HorizontalDivider()
         // --- Sincronización del boli ---

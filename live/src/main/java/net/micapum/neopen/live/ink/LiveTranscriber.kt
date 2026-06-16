@@ -1,4 +1,4 @@
-package net.micapum.neopen.core.ink
+package net.micapum.neopen.live.ink
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job

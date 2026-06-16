@@ -28,7 +28,7 @@
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="${appLabel}"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Neopen">
 
@@ -47,19 +47,6 @@
             android:name=".sync.PenService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
-
-        <!-- Teclado de escritura en vivo: inyecta en cualquier app el texto reconocido del boli. -->
-        <service
-            android:name=".ime.NeopenImeService"
-            android:exported="true"
-            android:permission="android.permission.BIND_INPUT_METHOD">
-            <intent-filter>
-                <action android:name="android.view.InputMethod" />
-            </intent-filter>
-            <meta-data
-                android:name="android.view.im"
-                android:resource="@xml/method" />
-        </service>
 
         <!-- Widget de sincronización (estado + forzar sync). -->
         <receiver
