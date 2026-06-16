@@ -72,6 +72,17 @@ class PenManager(
 
     /** Volcar la memoria offline automáticamente al autorizar (ajuste del usuario). */
     var autoImportOnConnect = false
+
+    /**
+     * Modo escritura en vivo: cada trazo completo se entrega de inmediato por `onStroke`
+     * (en vez de esperar al `flushPage` de 8 s), y NO se acumulan ni suben páginas — así el
+     * texto de transcripción no ensucia el cuaderno de la app. Lo activa/desactiva el IME.
+     */
+    var onStroke: ((Stroke) -> Unit)? = null
+    private var liveMode = false
+    /** Valor de `offlineData` antes de entrar en modo-vivo, para restaurarlo al salir. */
+    private var offlineDataBeforeLive: Boolean? = null
+
     private var scanner: android.bluetooth.le.BluetoothLeScanner? = null
     private var scanCb: ScanCallback? = null
 
@@ -463,11 +474,20 @@ class PenManager(
 
     private fun endStroke() {
         if (strokeDots.isEmpty()) return
+        val stroke = Stroke(strokeStart, strokeDots.last().t, strokeDots.toList())
+        // Modo escritura en vivo: entrega el trazo de inmediato y NO acumula/sube páginas.
+        if (liveMode) {
+            strokeDots.clear()
+            strokeStart = 0L
+            val cb = onStroke
+            if (cb != null) main.post { cb(stroke) }
+            return
+        }
         val sobp = currentSobp
         // Cambio de página → cierra la anterior antes de acumular en la nueva.
         if (sobp != null && pageSobp != null && pageSobp != sobp) flushPage()
         if (sobp != null) pageSobp = sobp
-        pageStrokes.add(Stroke(strokeStart, strokeDots.last().t, strokeDots.toList()))
+        pageStrokes.add(stroke)
         log("✏ Trazo: ${strokeDots.size} dots (página ${pageStrokes.size}, sobp ${sobp?.section}.${sobp?.owner}.${sobp?.book}.${sobp?.page})")
         strokeDots.clear()
         strokeStart = 0L
@@ -511,6 +531,42 @@ class PenManager(
     fun setAutoShutdown(minutes: Int) {
         write(Protocol.reqSettingShort(Protocol.SET_AUTO_POWER_OFF_TIME, minutes))
         update { it.copy(settings = it.settings.copy(autoShutdownTime = minutes)) }
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Modo escritura en vivo (lo conduce el IME)
+    // ----------------------------------------------------------------------------------
+
+    /**
+     * Entra en modo escritura en vivo. Desactiva el grabado offline del boli (que, si está
+     * activo, guarda los trazos en memoria a la vez que los transmite online) guardando su
+     * valor previo, para que lo escrito en modo-vivo no reaparezca en la próxima importación.
+     */
+    fun enterLiveMode() {
+        if (liveMode) return
+        liveMode = true
+        // Descarta cualquier página a medio acumular: en modo-vivo no se suben.
+        main.removeCallbacks(idleFlush)
+        pageStrokes.clear()
+        pageSobp = null
+        update { it.copy(capturedPages = 0) }
+        offlineDataBeforeLive = _state.value.settings.offlineData
+        if (_state.value.settings.offlineData != false) {
+            log("Modo escritura en vivo: desactivando grabado offline del boli")
+            setOfflineData(false)
+        }
+    }
+
+    /** Sale del modo en vivo y restaura el grabado offline al valor que tenía antes. */
+    fun exitLiveMode() {
+        if (!liveMode) return
+        liveMode = false
+        val prev = offlineDataBeforeLive
+        offlineDataBeforeLive = null
+        if (prev == true && _state.value.settings.offlineData != true) {
+            log("Saliendo de modo en vivo: restaurando grabado offline del boli")
+            setOfflineData(true)
+        }
     }
 
     fun listOffline() {

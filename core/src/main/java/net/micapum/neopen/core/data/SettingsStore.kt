@@ -113,6 +113,10 @@ data class AppSettings(
     val notebookView: String = "Mosaic",
     /** Tema de la app: "system" | "light" | "dark". */
     val themeMode: String = "system",
+    /** Idioma del reconocimiento de escritura en vivo (BCP-47): "es" | "ca" | "en". */
+    val liveLanguage: String = "es",
+    /** Emitir saltos de línea reales al detectar nueva línea en modo escritura en vivo. */
+    val liveNewlines: Boolean = false,
 ) {
     val configured get() = serverUrl.isNotBlank() && password.isNotBlank()
 }
@@ -135,6 +139,8 @@ class SettingsStore(private val context: Context) {
         val overlapMinArea = intPreferencesKey("overlap_min_area")
         val notebookView = stringPreferencesKey("notebook_view")
         val themeMode = stringPreferencesKey("theme_mode")
+        val liveLanguage = stringPreferencesKey("live_language")
+        val liveNewlines = booleanPreferencesKey("live_newlines")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -158,6 +164,8 @@ class SettingsStore(private val context: Context) {
             overlapMinAreaPercent = p[Keys.overlapMinArea] ?: 25,
             notebookView = p[Keys.notebookView] ?: "Mosaic",
             themeMode = p[Keys.themeMode] ?: "system",
+            liveLanguage = p[Keys.liveLanguage] ?: "es",
+            liveNewlines = p[Keys.liveNewlines] ?: false,
         )
     }
 
@@ -179,6 +187,8 @@ class SettingsStore(private val context: Context) {
             p[Keys.overlapMinArea] = s.overlapMinAreaPercent
             p[Keys.notebookView] = s.notebookView
             p[Keys.themeMode] = s.themeMode
+            p[Keys.liveLanguage] = s.liveLanguage
+            p[Keys.liveNewlines] = s.liveNewlines
         }
     }
 }

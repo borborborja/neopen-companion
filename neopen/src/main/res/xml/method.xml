@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Metadatos del IME de escritura en vivo. Un único subtipo (la entrada real es el boli). -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype
+        android:label="@string/ime_label"
+        android:imeSubtypeMode="keyboard" />
+</input-method>

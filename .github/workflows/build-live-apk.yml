@@ -1,0 +1,63 @@
+name: Build LIVE APK (escritura en vivo)
+
+# Pipeline PARALELO al oficial (build-apk.yml). Construye la variante `live`, que tiene
+# applicationId `net.micapum.neopen.live` y se llama "neopen LIVE", para poder instalarla
+# JUNTO a la app oficial en el mismo dispositivo y probar la feature de escritura en vivo.
+
+on:
+  push:
+    branches: ["feat/live-writing-ime"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle (con caché)
+        uses: gradle/actions/setup-gradle@v4
+
+      # Variante `live`: applicationId .live + nombre "neopen LIVE" (convive con la oficial).
+      - name: Build LIVE APK (neopen)
+        run: ./gradlew :neopen:assembleLive --stacktrace
+
+      - name: Renombrar APK
+        run: cp neopen/build/outputs/apk/live/neopen-live.apk neopen-live.apk
+
+      - name: Subir APK como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neopen-apk-live
+          path: neopen-live.apk
+          if-no-files-found: error
+
+      # Release "rolling" para descargar fácil al móvil (tag `live`, no choca con `latest`).
+      - name: Actualizar release «live»
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: live
+          name: Escritura en vivo (build de prueba)
+          prerelease: true
+          body: |
+            APK de la feature de **escritura en vivo**, generado desde `feat/live-writing-ime`.
+
+            - **neopen-live.apk** — applicationId `net.micapum.neopen.live`, nombre **"neopen LIVE"**.
+            - Se instala EN PARALELO a la app oficial (`net.micapum.neopen`): puedes tener ambas.
+
+            Cómo probar: instala el APK → conecta el boli → en Ajustes de Android activa y
+            selecciona el teclado **"neopen — escritura en vivo"** → abre cualquier app y
+            escribe en la hoja Ncode.
+          files: neopen-live.apk

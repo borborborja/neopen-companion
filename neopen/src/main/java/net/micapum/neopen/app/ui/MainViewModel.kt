@@ -39,6 +39,8 @@ import net.micapum.neopen.core.data.SplitBody
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.SobpScanDto
 import net.micapum.neopen.core.data.StudioItemDto
+import net.micapum.neopen.core.ink.InkLanguage
+import net.micapum.neopen.core.ink.InkRecognizer
 import net.micapum.neopen.core.pen.OfflineNote
 import net.micapum.neopen.core.pen.PenState
 import net.micapum.neopen.core.pen.Sobp
@@ -528,6 +530,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Tema de la app (system/light/dark), persistido. */
     fun setThemeMode(mode: String) {
         viewModelScope.launch { graph.settings.update(settings.value.copy(themeMode = mode)) }
+    }
+
+    // --- Escritura en vivo (IME) ---
+
+    /** null = comprobando/desconocido, true = modelo listo, false = sin descargar. */
+    private val _liveModelReady = MutableStateFlow<Boolean?>(null)
+    val liveModelReady: StateFlow<Boolean?> = _liveModelReady.asStateFlow()
+    private val _liveModelBusy = MutableStateFlow(false)
+    val liveModelBusy: StateFlow<Boolean> = _liveModelBusy.asStateFlow()
+
+    private fun liveLanguage() =
+        InkLanguage.entries.firstOrNull { it.tag == settings.value.liveLanguage } ?: InkLanguage.ES
+
+    /** Idioma del reconocimiento; al cambiarlo, refresca el estado del modelo. */
+    fun setLiveLanguage(tag: String) {
+        viewModelScope.launch {
+            graph.settings.update(settings.value.copy(liveLanguage = tag))
+            refreshLiveModel()
+        }
+    }
+
+    fun setLiveNewlines(on: Boolean) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(liveNewlines = on)) }
+    }
+
+    /** Comprueba si el modelo del idioma actual está descargado. */
+    fun refreshLiveModel() {
+        viewModelScope.launch {
+            val rec = InkRecognizer(liveLanguage())
+            _liveModelReady.value = runCatching { rec.isDownloaded() }.getOrNull()
+            rec.close()
+        }
+    }
+
+    fun downloadLiveModel() {
+        if (_liveModelBusy.value) return
+        viewModelScope.launch {
+            _liveModelBusy.value = true
+            val rec = InkRecognizer(liveLanguage())
+            val ok = runCatching { rec.download() }.isSuccess
+            if (ok) _liveModelReady.value = true
+            rec.close()
+            _liveModelBusy.value = false
+        }
+    }
+
+    fun deleteLiveModel() {
+        if (_liveModelBusy.value) return
+        viewModelScope.launch {
+            _liveModelBusy.value = true
+            val rec = InkRecognizer(liveLanguage())
+            runCatching { rec.delete() }
+            _liveModelReady.value = false
+            rec.close()
+            _liveModelBusy.value = false
+        }
     }
 
     /** Oculta lo actual de "Últimas ediciones"; una edición posterior lo trae de vuelta. */
