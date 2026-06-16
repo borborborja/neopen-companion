@@ -121,6 +121,8 @@ data class AppSettings(
     val liveLanguage: String = "es",
     /** Emitir saltos de línea reales al detectar nueva línea en modo escritura en vivo. */
     val liveNewlines: Boolean = false,
+    /** Notificación de control persistente (cambiar color/grueso/boli/segundo plano sin abrir la app). */
+    val controlNotification: Boolean = false,
     /** Bolis emparejados (MAC + alias + estilo de trazo). Tope práctico: 2. */
     val knownPens: List<KnownPen> = emptyList(),
     /** Estilo de trazo por defecto para bolis sin estilo propio (color ARGB + grueso). */
@@ -153,6 +155,7 @@ class SettingsStore(private val context: Context) {
         val themeMode = stringPreferencesKey("theme_mode")
         val liveLanguage = stringPreferencesKey("live_language")
         val liveNewlines = booleanPreferencesKey("live_newlines")
+        val controlNotification = booleanPreferencesKey("control_notification")
         val knownPens = stringPreferencesKey("known_pens")          // JSON
         val defaultColor = intPreferencesKey("default_stroke_color")
         val defaultWidth = stringPreferencesKey("default_stroke_width") // Float como texto
@@ -181,6 +184,7 @@ class SettingsStore(private val context: Context) {
             themeMode = p[Keys.themeMode] ?: "system",
             liveLanguage = p[Keys.liveLanguage] ?: "es",
             liveNewlines = p[Keys.liveNewlines] ?: false,
+            controlNotification = p[Keys.controlNotification] ?: false,
             knownPens = decodeKnownPens(p[Keys.knownPens]),
             defaultStyle = StrokeStyle(
                 color = p[Keys.defaultColor] ?: 0xFF111111.toInt(),
@@ -209,6 +213,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.themeMode] = s.themeMode
             p[Keys.liveLanguage] = s.liveLanguage
             p[Keys.liveNewlines] = s.liveNewlines
+            p[Keys.controlNotification] = s.controlNotification
             p[Keys.knownPens] = encodeKnownPens(s.knownPens)
             p[Keys.defaultColor] = s.defaultStyle.color
             p[Keys.defaultWidth] = s.defaultStyle.width.toString()

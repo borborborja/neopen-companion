@@ -129,6 +129,17 @@ class Graph(app: Application) {
     @Volatile
     var localMode = false
 
+    /**
+     * Boli al que la notificación de control aplica los cambios de color/grueso. null → se usa el
+     * conectado, o el primero emparejado. Compartido por PenService y el receiver (mismo proceso).
+     */
+    @Volatile
+    var notifSelectedPen: String? = null
+
+    /** MAC efectiva del boli seleccionado en la notificación de control. */
+    fun effectiveNotifPen(): String? =
+        notifSelectedPen ?: pen.state.value.mac ?: lastSettings.knownPens.firstOrNull()?.mac
+
     /** Conexión BLE al boli (una sola, compartida). Cada página → Room (+ sync si hay servidor). */
     val pen = PenManager(app) { page ->
         scope.launch {
@@ -150,6 +161,9 @@ class Graph(app: Application) {
     /** Últimos ajustes observados (para que el PenManager resuelva el estilo por boli). */
     @Volatile
     private var lastSettings = AppSettings()
+
+    /** Instantánea de los ajustes actuales (para el servicio/receiver de la notificación). */
+    val currentSettings: AppSettings get() = lastSettings
 
     init {
         // El estilo de trazo a sellar depende del boli (MAC) y de los ajustes actuales.

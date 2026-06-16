@@ -29,6 +29,43 @@ data class StrokeStyle(val color: Int = 0xFF111111.toInt(), val width: Float = 1
 /** Boli emparejado: identidad (MAC), alias y su estilo de trazo actual. */
 data class KnownPen(val mac: String, val alias: String, val style: StrokeStyle = StrokeStyle())
 
+/**
+ * Presets de estilo compartidos por la UI (paleta) y la notificación de control (ciclado), para
+ * que ambos ofrezcan exactamente las mismas opciones.
+ */
+object StrokePresets {
+    /** Paleta: (color ARGB, nombre). El primero (#111) es el por defecto. */
+    val COLORS: List<Pair<Int, String>> = listOf(
+        0xFF111111.toInt() to "Negro",
+        0xFF2563EB.toInt() to "Azul",
+        0xFFDC2626.toInt() to "Rojo",
+        0xFF16A34A.toInt() to "Verde",
+        0xFFEA580C.toInt() to "Naranja",
+        0xFF7C3AED.toInt() to "Morado",
+    )
+    /** Gruesos: (width, etiqueta). */
+    val WIDTHS: List<Pair<Float, String>> = listOf(
+        1.0f to "Fino",
+        1.6f to "Medio",
+        2.6f to "Grueso",
+    )
+
+    fun colorName(argb: Int): String = COLORS.firstOrNull { it.first == argb }?.second ?: "Personalizado"
+    fun widthLabel(w: Float): String = WIDTHS.firstOrNull { it.first == w }?.second ?: "$w"
+
+    /** Siguiente color de la paleta (cicla). */
+    fun nextColor(argb: Int): Int {
+        val i = COLORS.indexOfFirst { it.first == argb }
+        return COLORS[(if (i < 0) 0 else i + 1) % COLORS.size].first
+    }
+
+    /** Siguiente grueso (cicla). */
+    fun nextWidth(w: Float): Float {
+        val i = WIDTHS.indexOfFirst { it.first == w }
+        return WIDTHS[(if (i < 0) 0 else i + 1) % WIDTHS.size].first
+    }
+}
+
 /** Página de escritura agrupada por SOBP, lista para subir al servidor neopen. */
 data class StrokePage(
     val sobp: Sobp,

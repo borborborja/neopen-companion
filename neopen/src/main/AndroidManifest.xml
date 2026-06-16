@@ -48,6 +48,11 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!-- Procesa los botones de la notificación de control (color/grueso/boli/segundo plano). -->
+        <receiver
+            android:name=".sync.NotificationControlReceiver"
+            android:exported="false" />
+
         <!-- Widget de sincronización (estado + forzar sync). -->
         <receiver
             android:name=".widget.SyncWidgetReceiver"
