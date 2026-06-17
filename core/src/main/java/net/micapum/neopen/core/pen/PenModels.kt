@@ -78,7 +78,7 @@ data class StrokePage(
 /** Una libreta guardada en la memoria del boli (offline). */
 data class OfflineNote(val section: Int, val owner: Int, val note: Int, val pages: Int? = null)
 
-enum class PenStatus { IDLE, SCANNING, CONNECTING, AUTHORIZED, DISCONNECTED }
+enum class PenStatus { IDLE, SCANNING, CONNECTING, LOCKED, AUTHORIZED, DISCONNECTED }
 enum class OfflinePhase { IDLE, LISTING, TRANSFERRING }
 
 /** Ajustes reportados por el boli (SETTING_INFO). Sin color ni sensibilidad (no los usamos). */
@@ -104,6 +104,13 @@ data class PenState(
     val notes: List<OfflineNote>? = null,
     val capturedPages: Int = 0,
     val error: String? = null,
+    /** El boli tiene contraseña configurada (del flag Locked de SETTING_INFO). */
+    val hasPassword: Boolean = false,
+    /** Intentos de PIN usados y máximo (al llegar al máximo el boli se restablece). */
+    val passwordRetry: Int = 0,
+    val passwordMaxRetry: Int = 10,
 ) {
     val connected get() = status == PenStatus.AUTHORIZED
+    /** Conectado pero esperando el PIN para poder usar el boli. */
+    val locked get() = status == PenStatus.LOCKED
 }

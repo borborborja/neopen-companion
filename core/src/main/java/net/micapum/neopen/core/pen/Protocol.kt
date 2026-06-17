@@ -31,7 +31,8 @@ object Protocol {
 
     // --- Comandos host → pen ---
     const val VERSION_REQUEST = 0x01
-    const val PASSWORD_RESPONSE = 0x82
+    const val PASSWORD_INPUT = 0x02          // host envía el PIN (SDK: PASSWORD_REQUEST)
+    const val PASSWORD_CHANGE_REQUEST = 0x03 // poner/cambiar/eliminar contraseña
     const val SETTING_INFO_REQUEST = 0x04
     const val SETTING_CHANGE_REQUEST = 0x05
     const val ONLINE_DATA_REQUEST = 0x11
@@ -43,7 +44,8 @@ object Protocol {
 
     // --- Eventos pen → host ---
     const val VERSION_RESPONSE = 0x81
-    const val PASSWORD_REQUEST = 0x02
+    const val PASSWORD_RESPONSE = 0x82          // resultado de introducir el PIN
+    const val PASSWORD_CHANGE_RESPONSE = 0x83   // resultado de cambiar/eliminar
     const val SETTING_INFO_RESPONSE = 0x84
     const val SETTING_CHANGE_RESPONSE = 0x85
     const val ONLINE_PEN_UPDOWN = 0x63
@@ -163,11 +165,32 @@ object Protocol {
         return buildFrame(VERSION_REQUEST, data)
     }
 
-    fun resPassword(password: String): ByteArray {
+    /** Envía el PIN para desbloquear (host→pen, cmd 0x02). PIN ASCII en 16 bytes. */
+    fun reqInputPassword(password: String): ByteArray {
         val data = ByteArray(16)
         putAscii(data, 0, password, 16)
-        return buildFrame(PASSWORD_RESPONSE, data)
+        return buildFrame(PASSWORD_INPUT, data)
     }
+
+    /**
+     * Poner/cambiar/eliminar contraseña (cmd 0x03, len 33).
+     * data = [flag][old 16][new 16]. flag=1 poner/cambiar, flag=0 eliminar.
+     */
+    fun reqChangePassword(oldPassword: String, newPassword: String): ByteArray {
+        val data = ByteArray(33)
+        data[0] = if (newPassword.isEmpty()) 0 else 1
+        putAscii(data, 1, oldPassword, 16)
+        putAscii(data, 17, newPassword, 16)
+        return buildFrame(PASSWORD_CHANGE_REQUEST, data)
+    }
+
+    /** PASSWORD_RESPONSE (0x82) → (status, retry, reset). status 1 = correcto. */
+    fun parsePasswordResponse(data: ByteArray): Triple<Int, Int, Int> =
+        Triple(u8(data, 0), u8(data, 1), u8(data, 2))
+
+    /** PASSWORD_CHANGE_RESPONSE (0x83) → (status, retry, reset). status 0 = OK. */
+    fun parsePasswordChange(data: ByteArray): Triple<Int, Int, Int> =
+        Triple(u8(data, 2), u8(data, 0), u8(data, 1))
 
     /** ReqPenStatus: pide ajustes/estado (batería, memoria…). Payload vacío. */
     fun reqSettingInfo(): ByteArray = buildFrame(SETTING_INFO_REQUEST, ByteArray(0))
@@ -296,6 +319,10 @@ object Protocol {
             offlineData = u8(data, 21) == 1,
         )
     }
+
+    /** SETTING_INFO_RESPONSE → estado de contraseña: (locked, maxRetry, retry). */
+    fun parseLockInfo(data: ByteArray): Triple<Boolean, Int, Int> =
+        Triple(u8(data, 0) == 1, u8(data, 1), u8(data, 2))
 
     /** VERSION_RESPONSE → identidad (nombre, firmware, MAC). */
     fun parseVersionInfo(data: ByteArray): Triple<String, String, String> {

@@ -334,6 +334,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setOfflineData(on: Boolean) = graph.pen.setOfflineData(on)
     fun setAutoShutdown(min: Int) = graph.pen.setAutoShutdown(min)
 
+    // Contraseña / PIN del boli
+    fun unlockPen(pin: String) = graph.pen.unlockPen(pin)
+    fun setOrChangePenPassword(current: String, new: String) = graph.pen.setOrChangePenPassword(current, new)
+    fun removePenPassword(current: String) = graph.pen.removePenPassword(current)
+
     // Memoria offline
     fun listOffline() = graph.pen.listOffline()
     fun importNote(n: OfflineNote) = graph.pen.importOffline(n)

@@ -32,6 +32,30 @@ Tenlas en cuenta **al programar ahora**: no cierres puertas a estas direcciones.
   aplicar también al servidor (hoy es local-only por decisión del usuario — no lo
   cambies sin pedirlo).
 
+## Boli: solicitadas por el usuario (pendientes)
+
+- **Contraseña/PIN del boli en la WEB** (paridad con Android, ya hecho en
+  `:core`/`:neopen` en v0.x): cablear en `apps/web/src/pen/usePen.ts` (repo `neopen`)
+  los eventos del SDK `PEN_PASSWORD_REQUEST` / `PASSWORD_SETUP_SUCCESS|FAILURE`,
+  exponer `InputPassword`/`SetUpPassword`, añadir estado `locked` y la UI de PIN en
+  `PenPanel.tsx` (desbloquear, cambiar, eliminar, poner). Avisar del reset a los 10 fallos.
+- **Sensibilidad de presión + "la presión modifica el grosor del trazo"** en **ambos
+  proyectos** (Android y web). Mostrar el control de sensibilidad solo en bolis con
+  sensor de presión (FSR; `SettingType.Sensitivity`, `PenSensitivity`/`MaxForce` en
+  SETTING_INFO). El toggle "presión→grosor" es de **render** (usar el `force`/`f` del
+  dot al calcular el ancho del trazo, hoy ignorado en `render/Render.kt` y en el render
+  web/servidor); avisar de que solo aplica en bolis compatibles. La app oficial lo hace.
+- **Gestión de bolis emparejados** en el menú boli (ambos proyectos donde aplique):
+  "olvidar bolígrafo" (que no se reconecte automáticamente), registro de los bolis
+  conectados, y "bloquear la app a un bolígrafo concreto" (conectar solo ese e impedir
+  la conexión automática de otros).
+- **(Solo Android) Wizard para rellenar páginas no digitalizadas con una foto**:
+  conectar el boli y puntear ligeramente la página para detectar su SOBP → buscar si
+  esa página/cuaderno existe → preguntar cómo proceder → el usuario hace una foto →
+  detectar los trazos → pedir que compruebe si son correctos (si no, repetir foto) →
+  marcar unos trazos (inicio/fin) para que el usuario los puntee en el papel y así
+  calibrar y dimensionar correctamente los trazos fotografiados sobre la hoja.
+
 ## Ideas mayores (sin compromiso)
 
 - HTR on-device estructurado (ML Kit da texto plano; el OCR estructurado necesita

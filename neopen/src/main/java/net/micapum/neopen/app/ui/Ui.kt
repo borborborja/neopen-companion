@@ -132,6 +132,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -185,6 +187,7 @@ private fun parseColor(hex: String): Color =
 private fun penDotColor(status: PenStatus): Color = when (status) {
     PenStatus.AUTHORIZED -> Color(0xFF22C55E) // verde: conectado
     PenStatus.SCANNING, PenStatus.CONNECTING -> Color(0xFFF59E0B) // ámbar: conectando
+    PenStatus.LOCKED -> Color(0xFFEF4444) // rojo: bloqueado por PIN
     else -> Color(0xFF9CA3AF) // gris: desconectado
 }
 
@@ -1270,6 +1273,9 @@ private fun PenTabContent(vm: MainViewModel) {
     val context = LocalContext.current
     var penTab by rememberSaveable { mutableIntStateOf(0) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
+    var showPin by rememberSaveable { mutableStateOf(false) }
+    // Cuando el boli queda bloqueado, abre automáticamente el diálogo de PIN.
+    LaunchedEffect(state.status) { if (state.status == PenStatus.LOCKED) showPin = true }
     val perms = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -1315,6 +1321,10 @@ private fun PenTabContent(vm: MainViewModel) {
 
         if (busy) {
             OutlinedButton(onClick = vm::stopConnecting, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pen_stop_connecting)) }
+        } else if (state.locked) {
+            Button(onClick = { showPin = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.pen_locked_enter_pin))
+            }
         } else {
             Button(onClick = connect, modifier = Modifier.fillMaxWidth()) {
                 Text(if (state.connected) stringResource(R.string.pen_reconnect) else stringResource(R.string.pen_connect))
@@ -1351,6 +1361,50 @@ private fun PenTabContent(vm: MainViewModel) {
     if (showLogs) {
         PenDebugLogDialog(logs, onClear = vm::clearLogs, onDismiss = { showLogs = false })
     }
+    if (showPin && state.status == PenStatus.LOCKED) {
+        PinUnlockDialog(state, onUnlock = { vm.unlockPen(it) }, onDismiss = { showPin = false })
+    }
+}
+
+/** Diálogo para introducir el PIN y desbloquear el boli. */
+@Composable
+private fun PinUnlockDialog(
+    state: net.micapum.neopen.core.pen.PenState,
+    onUnlock: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var pin by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.pen_pw_unlock_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { pin = it.filter(Char::isDigit).take(8) },
+                    label = { Text(stringResource(R.string.pen_pw_pin_label)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (state.error == "password-wrong") {
+                    Text(stringResource(R.string.pen_pw_wrong, state.passwordRetry, state.passwordMaxRetry),
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                if (state.error == "password-reset") {
+                    Text(stringResource(R.string.pen_pw_reset_done),
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(stringResource(R.string.pen_pw_reset_warning, state.passwordMaxRetry),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (pin.isNotBlank()) onUnlock(pin) }) { Text(stringResource(R.string.pen_pw_unlock_action)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1369,6 +1423,11 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
+
+        // Contraseña / PIN del boli.
+        PenPasswordSection(state, vm)
+
+        HorizontalDivider(Modifier.padding(vertical = 12.dp))
         state.mac?.let { Text(stringResource(R.string.pen_mac, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         state.firmware?.let { Text(stringResource(R.string.pen_firmware, it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
@@ -1379,6 +1438,102 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
         }
         if (readingSobp) SobpReaderDialog(vm) { readingSobp = false }
     }
+}
+
+/** Gestión de la contraseña del boli: poner / cambiar / eliminar. */
+@Composable
+private fun PenPasswordSection(state: net.micapum.neopen.core.pen.PenState, vm: MainViewModel) {
+    var dialog by remember { mutableStateOf("") } // "", "set", "change", "remove"
+    Text(stringResource(R.string.pen_pw_section), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (state.hasPassword) {
+        TextButton(onClick = { dialog = "change" }, contentPadding = PaddingValues(vertical = 6.dp)) {
+            Text(stringResource(R.string.pen_pw_change), style = MaterialTheme.typography.bodyMedium)
+        }
+        TextButton(onClick = { dialog = "remove" }, contentPadding = PaddingValues(vertical = 6.dp)) {
+            Text(stringResource(R.string.pen_pw_remove), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        }
+    } else {
+        TextButton(onClick = { dialog = "set" }, contentPadding = PaddingValues(vertical = 6.dp)) {
+            Text(stringResource(R.string.pen_pw_set), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+    Text(stringResource(R.string.pen_pw_reset_warning, state.passwordMaxRetry),
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+    when (dialog) {
+        "set" -> PinFormDialog(
+            title = stringResource(R.string.pen_pw_set),
+            askCurrent = false,
+            onConfirm = { _, new -> vm.setOrChangePenPassword("", new); dialog = "" },
+            onDismiss = { dialog = "" },
+        )
+        "change" -> PinFormDialog(
+            title = stringResource(R.string.pen_pw_change),
+            askCurrent = true,
+            onConfirm = { cur, new -> vm.setOrChangePenPassword(cur, new); dialog = "" },
+            onDismiss = { dialog = "" },
+        )
+        "remove" -> PinFormDialog(
+            title = stringResource(R.string.pen_pw_remove),
+            askCurrent = true,
+            askNew = false,
+            destructive = true,
+            body = stringResource(R.string.pen_pw_remove_body),
+            confirmLabel = stringResource(R.string.action_delete),
+            onConfirm = { cur, _ -> vm.removePenPassword(cur); dialog = "" },
+            onDismiss = { dialog = "" },
+        )
+    }
+}
+
+/** Diálogo genérico de PIN: PIN actual (opcional) + PIN nuevo (opcional). */
+@Composable
+private fun PinFormDialog(
+    title: String,
+    askCurrent: Boolean,
+    askNew: Boolean = true,
+    destructive: Boolean = false,
+    body: String? = null,
+    confirmLabel: String = stringResource(R.string.action_save),
+    onConfirm: (current: String, new: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var current by remember { mutableStateOf("") }
+    var new by remember { mutableStateOf("") }
+    val pinField: @Composable (String, String, (String) -> Unit) -> Unit = { value, label, set ->
+        OutlinedTextField(
+            value = value,
+            onValueChange = { set(it.filter(Char::isDigit).take(8)) },
+            label = { Text(label) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                body?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                if (askCurrent) pinField(current, stringResource(R.string.pen_pw_current_label)) { current = it }
+                if (askNew) pinField(new, stringResource(R.string.pen_pw_new_label)) { new = it }
+                Text(stringResource(R.string.pen_pw_reset_warning_short),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val okCur = !askCurrent || current.isNotBlank()
+                val okNew = !askNew || new.isNotBlank()
+                if (okCur && okNew) onConfirm(current, new)
+            }) {
+                Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else Color.Unspecified)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
 }
 
 /**
@@ -1630,6 +1785,7 @@ private fun penStatusLabel(status: PenStatus): String = when (status) {
     PenStatus.IDLE -> stringResource(R.string.pen_status_disconnected)
     PenStatus.SCANNING -> stringResource(R.string.pen_status_scanning)
     PenStatus.CONNECTING -> stringResource(R.string.pen_status_connecting)
+    PenStatus.LOCKED -> stringResource(R.string.pen_status_locked)
     PenStatus.AUTHORIZED -> stringResource(R.string.pen_status_connected)
     PenStatus.DISCONNECTED -> stringResource(R.string.pen_status_disconnected)
 }

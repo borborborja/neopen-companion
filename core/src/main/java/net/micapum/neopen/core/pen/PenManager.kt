@@ -226,6 +226,8 @@ class PenManager(
         stopScan()
         txQueue.clear()
         txBusy = false
+        pwOp = PwOp.NONE
+        pendingNewPassword = ""
         gatt?.disconnect()
         gatt?.close()
         gatt = null
@@ -411,25 +413,64 @@ class PenManager(
                 }
                 write(Protocol.reqSettingInfo()) // ReqPenStatus: la respuesta autoriza
             }
-            Protocol.PASSWORD_REQUEST -> {
-                log("PASSWORD_REQUEST → enviando contraseña vacía (M1+ por defecto)")
-                write(Protocol.resPassword(""))
-            }
             Protocol.SETTING_INFO_RESPONSE -> {
                 val settings = Protocol.parseSettingInfo(frame.data)
+                val (locked, maxRetry, retry) = Protocol.parseLockInfo(frame.data)
                 val firstTime = _state.value.status != PenStatus.AUTHORIZED
-                update { it.copy(status = PenStatus.AUTHORIZED, error = null, settings = settings) }
-                if (firstTime) {
-                    log("✓ AUTORIZADO (batería ${settings.battery}%) → pido datos en tiempo real")
-                    // Registra el boli (si es nuevo) para el historial de bolis emparejados.
-                    _state.value.mac?.let { onPenSeen(it, _state.value.name) }
-                    write(Protocol.reqOnlineDataAll())
-                    if (autoImportOnConnect) {
-                        // Vuelca la memoria offline al conectar: lista y luego importa.
-                        log("Auto-volcado al conectar: leyendo memoria offline…")
-                        main.postDelayed({ listOffline() }, 1_500)
-                        main.postDelayed({ importAllOffline() }, 4_000)
+                update {
+                    it.copy(
+                        settings = settings, error = null,
+                        hasPassword = locked, passwordMaxRetry = maxRetry, passwordRetry = retry,
+                    )
+                }
+                if (firstTime && locked) {
+                    // Boli con contraseña: queda bloqueado a la espera del PIN.
+                    log("🔒 Boli con contraseña (intentos $retry/$maxRetry) → se requiere PIN")
+                    update { it.copy(status = PenStatus.LOCKED) }
+                } else if (firstTime) {
+                    onAuthorized(settings.battery)
+                }
+            }
+            Protocol.PASSWORD_RESPONSE -> {
+                val (status, retry, reset) = Protocol.parsePasswordResponse(frame.data)
+                log("← PASSWORD_RESPONSE status=$status retry=$retry reset=$reset op=$pwOp")
+                if (pwOp == PwOp.SETUP) {
+                    // Resultado de reautenticar tras poner/cambiar contraseña.
+                    pwOp = PwOp.NONE
+                    if (status == 1) {
+                        update { it.copy(hasPassword = pendingNewPassword.isNotEmpty(), error = null) }
+                        pendingNewPassword = ""
+                        onAuthorized(_state.value.settings.battery)
+                    } else {
+                        update { it.copy(error = "password-setup-failed") }
                     }
+                } else {
+                    // Resultado de desbloquear con el PIN.
+                    when (status) {
+                        1 -> { pwOp = PwOp.NONE; log("✓ PIN correcto"); onAuthorized(_state.value.settings.battery) }
+                        2 -> update { it.copy(error = "password-reset", passwordRetry = retry) } // boli restablecido
+                        else -> update { it.copy(status = PenStatus.LOCKED, error = "password-wrong", passwordRetry = retry, passwordMaxRetry = if (reset > 0) reset else it.passwordMaxRetry) }
+                    }
+                }
+            }
+            Protocol.PASSWORD_CHANGE_RESPONSE -> {
+                val (status, retry, reset) = Protocol.parsePasswordChange(frame.data)
+                log("← PASSWORD_CHANGE_RESPONSE status=$status retry=$retry reset=$reset")
+                if (status == 0) {
+                    if (pendingNewPassword.isEmpty()) {
+                        // Eliminación de contraseña completada.
+                        log("✓ Contraseña eliminada")
+                        update { it.copy(hasPassword = false, error = null) }
+                        onAuthorized(_state.value.settings.battery)
+                    } else {
+                        // Poner/cambiar OK → reautenticar con el nuevo PIN.
+                        pwOp = PwOp.SETUP
+                        write(Protocol.reqInputPassword(pendingNewPassword))
+                    }
+                } else {
+                    pendingNewPassword = ""
+                    pwOp = PwOp.NONE
+                    update { it.copy(error = if (status == 2) "password-reset" else "password-change-failed", passwordRetry = retry) }
                 }
             }
 
@@ -517,6 +558,46 @@ class PenManager(
         pageStrokes.clear()
         pageSobp = null
         update { it.copy(capturedPages = 0) }
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Contraseña / PIN del boli
+    // ----------------------------------------------------------------------------------
+
+    private enum class PwOp { NONE, UNLOCK, SETUP }
+    private var pwOp = PwOp.NONE
+    private var pendingNewPassword = ""
+
+    /** Tras autenticar: marca AUTORIZADO, pide datos en tiempo real y auto-vuelca offline. */
+    private fun onAuthorized(battery: Int?) {
+        update { it.copy(status = PenStatus.AUTHORIZED, error = null) }
+        log("✓ AUTORIZADO (batería ${battery}%) → pido datos en tiempo real")
+        _state.value.mac?.let { onPenSeen(it, _state.value.name) }
+        write(Protocol.reqOnlineDataAll())
+        if (autoImportOnConnect) {
+            log("Auto-volcado al conectar: leyendo memoria offline…")
+            main.postDelayed({ listOffline() }, 1_500)
+            main.postDelayed({ importAllOffline() }, 4_000)
+        }
+    }
+
+    /** Envía el PIN para desbloquear un boli con contraseña. */
+    fun unlockPen(pin: String) {
+        pwOp = PwOp.UNLOCK
+        log("Enviando PIN para desbloquear…")
+        write(Protocol.reqInputPassword(pin))
+    }
+
+    /** Pone (current="") o cambia (current=actual) la contraseña por una nueva. */
+    fun setOrChangePenPassword(current: String, newPassword: String) {
+        pendingNewPassword = newPassword
+        write(Protocol.reqChangePassword(current, newPassword))
+    }
+
+    /** Elimina la contraseña del boli (queda sin PIN). */
+    fun removePenPassword(current: String) {
+        pendingNewPassword = ""
+        write(Protocol.reqChangePassword(current, ""))
     }
 
     // ----------------------------------------------------------------------------------

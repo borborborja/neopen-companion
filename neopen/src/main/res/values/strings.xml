@@ -148,6 +148,23 @@
     <string name="pen_status_scanning">Buscando…</string>
     <string name="pen_status_connecting">Conectando…</string>
     <string name="pen_status_connected">Conectado</string>
+    <string name="pen_status_locked">Bloqueado (PIN)</string>
+    <!-- Contraseña / PIN del boli -->
+    <string name="pen_locked_enter_pin">Boli bloqueado — introducir PIN</string>
+    <string name="pen_pw_unlock_title">Boli bloqueado</string>
+    <string name="pen_pw_pin_label">PIN</string>
+    <string name="pen_pw_unlock_action">Desbloquear</string>
+    <string name="pen_pw_wrong">PIN incorrecto. Intento %1$d de %2$d.</string>
+    <string name="pen_pw_reset_done">Se superó el límite de intentos: el boli se ha restablecido de fábrica.</string>
+    <string name="pen_pw_reset_warning">⚠ Tras %1$d intentos incorrectos el boli se restablece de fábrica y se pierden los trazos guardados.</string>
+    <string name="pen_pw_reset_warning_short">⚠ Con el PIN incorrecto repetidamente el boli se restablece de fábrica (pierde los trazos).</string>
+    <string name="pen_pw_section">Contraseña del boli</string>
+    <string name="pen_pw_set">Poner contraseña</string>
+    <string name="pen_pw_change">Cambiar contraseña</string>
+    <string name="pen_pw_remove">Eliminar contraseña</string>
+    <string name="pen_pw_remove_body">El boli quedará sin contraseña y cualquiera podrá leer su memoria.</string>
+    <string name="pen_pw_current_label">PIN actual</string>
+    <string name="pen_pw_new_label">PIN nuevo</string>
     <string name="backup_exported">Copia exportada.</string>
     <string name="backup_export_failed">No se pudo exportar.</string>
     <string name="backup_restored">Copia restaurada.</string>
