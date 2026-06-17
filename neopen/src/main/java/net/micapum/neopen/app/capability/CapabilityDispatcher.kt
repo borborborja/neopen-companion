@@ -66,7 +66,12 @@ class CapabilityDispatcher(private val graph: Graph) {
 
     /** Sube el PNG al servidor para que transcriba y aplica la captura devuelta. */
     private suspend fun runServer(s: AppSettings, cap: Capture): Boolean {
-        val png = rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = s.pressureWidthEnabled)
+        val png = rasterizePng(
+            cap.strokes,
+            cap.paper,
+            pressureWidthEnabled = s.pressureWidthEnabled,
+            pressureWidthContrast = s.pressureWidthContrast,
+        )
         val part = MultipartBody.Part.createFormData(
             "image", "page.png", png.toRequestBody("image/png".toMediaType()),
         )
@@ -77,7 +82,12 @@ class CapabilityDispatcher(private val graph: Graph) {
 
     /** Pipeline local: OCR → (LanguageTool) → (marcadores) → aplicar a Room. */
     private suspend fun runLocal(s: AppSettings, cap: Capture, syncBack: Boolean) {
-        val png = rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = s.pressureWidthEnabled)
+        val png = rasterizePng(
+            cap.strokes,
+            cap.paper,
+            pressureWidthEnabled = s.pressureWidthEnabled,
+            pressureWidthContrast = s.pressureWidthContrast,
+        )
         var result = LocalOcrProvider(s.ocrLocal).transcribe(png, s.ocrLocal.effectiveInstructions)
 
         // LanguageTool: corrige el texto si la capacidad no está apagada y hay credenciales.

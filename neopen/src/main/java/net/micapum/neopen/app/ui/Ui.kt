@@ -73,6 +73,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -101,7 +102,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -1091,6 +1091,7 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun OfflineImportWarningCard(vm: MainViewModel, warning: OfflineImportWarning) {
+    val settings by vm.settings.collectAsStateWithLifecycle()
     Card(
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
@@ -1107,7 +1108,13 @@ private fun OfflineImportWarningCard(vm: MainViewModel, warning: OfflineImportWa
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
             ) {
-                InkCanvas(warning.strokes, warning.paper, Modifier.fillMaxSize())
+                InkCanvas(
+                    warning.strokes,
+                    warning.paper,
+                    Modifier.fillMaxSize(),
+                    pressureWidthEnabled = settings.pressureWidthEnabled,
+                    pressureWidthContrast = settings.pressureWidthContrast,
+                )
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1986,15 +1993,24 @@ private fun SettingsScreen(vm: MainViewModel) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        SecondaryScrollableTabRow(selectedTabIndex = settingsTab, edgePadding = 16.dp) {
+        SecondaryTabRow(selectedTabIndex = settingsTab) {
             listOf(
-                stringResource(R.string.settings_tab_general),
-                stringResource(R.string.settings_tab_connection),
-                stringResource(R.string.settings_tab_capabilities),
-                stringResource(R.string.settings_tab_other),
-                stringResource(R.string.settings_tab_server),
-            ).forEachIndexed { i, label ->
-                Tab(settingsTab == i, { settingsTab = i }, text = { Text(label, maxLines = 1) })
+                stringResource(R.string.settings_tab_general) to Icons.Filled.Tune,
+                stringResource(R.string.settings_tab_connection) to Icons.Filled.Smartphone,
+                stringResource(R.string.settings_tab_capabilities) to Icons.Filled.Apps,
+                stringResource(R.string.settings_tab_other) to Icons.Filled.MoreVert,
+                stringResource(R.string.settings_tab_server) to Icons.Filled.Cloud,
+            ).forEachIndexed { i, (label, icon) ->
+                Tab(
+                    selected = settingsTab == i,
+                    onClick = { settingsTab = i },
+                    icon = { Icon(icon, label) },
+                    text = if (settingsTab == i) {
+                        { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    } else {
+                        null
+                    },
+                )
             }
         }
         Column(
@@ -2078,6 +2094,21 @@ private fun SettingsScreen(vm: MainViewModel) {
                         stringResource(R.string.settings_pressure_width_toggle_desc),
                         settings.pressureWidthEnabled,
                     ) { vm.setPressureWidthEnabled(it) }
+                    if (settings.pressureWidthEnabled) {
+                        val contrast = settings.pressureWidthContrast.coerceIn(0.5f, 3f)
+                        Text(
+                            stringResource(R.string.settings_pressure_width_contrast_label, ((contrast * 10f).roundToInt() / 10f).toString()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = contrast,
+                            onValueChange = vm::setPressureWidthContrast,
+                            valueRange = 0.5f..3f,
+                            steps = 4,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     Text(
                         stringResource(R.string.settings_pressure_width_note),
                         style = MaterialTheme.typography.bodySmall,

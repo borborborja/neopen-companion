@@ -437,10 +437,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun exportPage(captureId: String, format: ExportFormat): ExportFile? {
         val cap = graph.repo.capture(captureId) ?: return null
         val bytes = withContext(Dispatchers.IO) {
+            val s = settings.value
             when (format) {
-                ExportFormat.PDF -> renderPagePdf(cap.strokes, cap.paper, settings.value.pressureWidthEnabled)
-                ExportFormat.PNG -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = settings.value.pressureWidthEnabled)
-                ExportFormat.SVG -> renderSvg(cap.strokes, cap.paper, settings.value.pressureWidthEnabled).toByteArray()
+                ExportFormat.PDF -> renderPagePdf(cap.strokes, cap.paper, s.pressureWidthEnabled, s.pressureWidthContrast)
+                ExportFormat.PNG -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = s.pressureWidthEnabled, pressureWidthContrast = s.pressureWidthContrast)
+                ExportFormat.SVG -> renderSvg(cap.strokes, cap.paper, s.pressureWidthEnabled, s.pressureWidthContrast).toByteArray()
             }
         }
         return ExportFile("${fileBaseName(cap.name)}.${format.ext}", format.mime, bytes)
@@ -449,7 +450,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun exportNotebookPdf(notebookId: String): ExportFile? {
         val nb = graph.repo.notebook(notebookId) ?: return null
         val pages = graph.repo.capturesIn(notebookId).first()
-        val bytes = withContext(Dispatchers.IO) { renderNotebookPdf(pages, settings.value.pressureWidthEnabled) }
+        val bytes = withContext(Dispatchers.IO) {
+            val s = settings.value
+            renderNotebookPdf(pages, s.pressureWidthEnabled, s.pressureWidthContrast)
+        }
         return ExportFile("${fileBaseName(nb.name)}.pdf", ExportFormat.PDF.mime, bytes)
     }
 
@@ -605,6 +609,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPressureWidthEnabled(enabled: Boolean) {
         viewModelScope.launch { graph.settings.update(settings.value.copy(pressureWidthEnabled = enabled)) }
+    }
+
+    fun setPressureWidthContrast(contrast: Float) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(pressureWidthContrast = contrast.coerceIn(0.5f, 3f))) }
     }
 
     fun setOfflineReimportPolicy(policy: OfflineReimportPolicy) {

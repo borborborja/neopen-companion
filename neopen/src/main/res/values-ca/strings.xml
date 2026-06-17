@@ -331,6 +331,7 @@
     <string name="settings_pressure_width_title">Pressió del traç</string>
     <string name="settings_pressure_width_toggle_title">La pressió modifica el gruix</string>
     <string name="settings_pressure_width_toggle_desc">Dibuixa traços més fins o més gruixuts segons la pressió detectada.</string>
+    <string name="settings_pressure_width_contrast_label">Diferència fi/gruixut: %1$sx</string>
     <string name="settings_pressure_width_note">Només es nota en bolis compatibles o captures amb pressió fiable.</string>
     <string name="settings_reimport_policy_title">Reimportacions des de la memòria del boli</string>
     <string name="settings_reimport_policy_desc">Quan un bolcat offline torna a portar traços d\'una pàgina que havies eliminat o mogut, l\'app et pot preguntar o aplicar una decisió per defecte.</string>

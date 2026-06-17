@@ -64,6 +64,8 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.21.4** — Ajuste de contraste para presión→grosor en `:neopen`/`:live` y
+  pestañas de Ajustes con iconos para evitar cortes visuales en pantallas estrechas.
 - **v0.21.3** — Boli: sensibilidad de presión en `:neopen`/`:live`, ajuste de
   presión→grosor para render/export/OCR/conectores locales, bolis conocidos con
   "olvidar" y bloqueo a un boli concreto. Android: avisos de reimportación offline

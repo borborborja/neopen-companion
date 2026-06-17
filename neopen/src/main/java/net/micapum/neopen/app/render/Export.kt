@@ -17,8 +17,13 @@ enum class ExportFormat(val ext: String, val mime: String) {
 
 // --- SVG (espejo exacto de modelToSvg de packages/shared) -------------------
 
-fun renderSvg(strokes: List<StrokeDto>, paper: PaperDto?, pressureWidthEnabled: Boolean = false): String {
-    val m = buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled)
+fun renderSvg(
+    strokes: List<StrokeDto>,
+    paper: PaperDto?,
+    pressureWidthEnabled: Boolean = false,
+    pressureWidthContrast: Float = 2f,
+): String {
+    val m = buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled, pressureWidthContrast = pressureWidthContrast)
     // Estilo por <path> (color + grueso del trazo) en vez de global en el <g>.
     val paths = m.polylines
         .filter { it.points.isNotEmpty() }
@@ -67,19 +72,28 @@ private fun roundCoord(n: Float): String {
 
 // --- PDF (android.graphics.pdf.PdfDocument) ---------------------------------
 
-fun renderPagePdf(strokes: List<StrokeDto>, paper: PaperDto?, pressureWidthEnabled: Boolean = false): ByteArray {
+fun renderPagePdf(
+    strokes: List<StrokeDto>,
+    paper: PaperDto?,
+    pressureWidthEnabled: Boolean = false,
+    pressureWidthContrast: Float = 2f,
+): ByteArray {
     val doc = PdfDocument()
-    addPdfPage(doc, buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled), 1)
+    addPdfPage(doc, buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled, pressureWidthContrast = pressureWidthContrast), 1)
     return finishPdf(doc)
 }
 
 /** PDF multipágina: una página por captura (mismo bucle que notebookExport de la web). */
-fun renderNotebookPdf(pages: List<Capture>, pressureWidthEnabled: Boolean = false): ByteArray {
+fun renderNotebookPdf(
+    pages: List<Capture>,
+    pressureWidthEnabled: Boolean = false,
+    pressureWidthContrast: Float = 2f,
+): ByteArray {
     val doc = PdfDocument()
     val models = if (pages.isEmpty()) {
-        listOf(buildModel(emptyList(), null, pressureWidthEnabled = pressureWidthEnabled))
+        listOf(buildModel(emptyList(), null, pressureWidthEnabled = pressureWidthEnabled, pressureWidthContrast = pressureWidthContrast))
     } else {
-        pages.map { buildModel(it.strokes, it.paper, pressureWidthEnabled = pressureWidthEnabled) }
+        pages.map { buildModel(it.strokes, it.paper, pressureWidthEnabled = pressureWidthEnabled, pressureWidthContrast = pressureWidthContrast) }
     }
     models.forEachIndexed { i, m -> addPdfPage(doc, m, i + 1) }
     return finishPdf(doc)

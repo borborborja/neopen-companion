@@ -8,6 +8,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -130,6 +131,8 @@ data class AppSettings(
     val controlNotification: Boolean = false,
     /** Renderiza el grosor del trazo usando la presión de cada punto cuando está disponible. */
     val pressureWidthEnabled: Boolean = false,
+    /** Intensidad del contraste entre presión suave y fuerte: 1 = sutil, 2 = visible, 3 = marcado. */
+    val pressureWidthContrast: Float = 2f,
     /** Bolis emparejados (MAC + alias + estilo de trazo). Tope práctico: 2. */
     val knownPens: List<KnownPen> = emptyList(),
     /** Bolis olvidados: se ignoran en conexiones automáticas hasta que el usuario los conecte a mano. */
@@ -186,6 +189,7 @@ class SettingsStore(private val context: Context) {
         val liveNewlines = booleanPreferencesKey("live_newlines")
         val controlNotification = booleanPreferencesKey("control_notification")
         val pressureWidthEnabled = booleanPreferencesKey("pressure_width_enabled")
+        val pressureWidthContrast = floatPreferencesKey("pressure_width_contrast")
         val knownPens = stringPreferencesKey("known_pens")          // JSON
         val forgottenPens = stringPreferencesKey("forgotten_pens")  // JSON array de MACs
         val lockedPenMac = stringPreferencesKey("locked_pen_mac")
@@ -233,6 +237,7 @@ class SettingsStore(private val context: Context) {
             liveNewlines = p[Keys.liveNewlines] ?: false,
             controlNotification = p[Keys.controlNotification] ?: false,
             pressureWidthEnabled = p[Keys.pressureWidthEnabled] ?: false,
+            pressureWidthContrast = (p[Keys.pressureWidthContrast] ?: 2f).coerceIn(0.5f, 3f),
             knownPens = decodeKnownPens(p[Keys.knownPens]),
             forgottenPens = decodeStringList(p[Keys.forgottenPens]),
             lockedPenMac = p[Keys.lockedPenMac] ?: "",
@@ -274,6 +279,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.liveNewlines] = s.liveNewlines
             p[Keys.controlNotification] = s.controlNotification
             p[Keys.pressureWidthEnabled] = s.pressureWidthEnabled
+            p[Keys.pressureWidthContrast] = s.pressureWidthContrast.coerceIn(0.5f, 3f)
             p[Keys.knownPens] = encodeKnownPens(s.knownPens)
             p[Keys.forgottenPens] = encodeStringList(s.forgottenPens)
             p[Keys.lockedPenMac] = s.lockedPenMac

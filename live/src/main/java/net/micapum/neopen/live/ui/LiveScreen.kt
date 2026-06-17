@@ -21,6 +21,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -36,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import net.micapum.neopen.core.pen.PenState
 import net.micapum.neopen.core.pen.PenStatus
 import net.micapum.neopen.live.R
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -145,6 +147,21 @@ fun LiveScreen(vm: LiveViewModel) {
                     )
                 }
                 Switch(settings.pressureWidthEnabled, { vm.setPressureWidthEnabled(it) })
+            }
+            if (settings.pressureWidthEnabled) {
+                val contrast = settings.pressureWidthContrast.coerceIn(0.5f, 3f)
+                Text(
+                    stringResource(R.string.pressure_width_contrast, ((contrast * 10f).roundToInt() / 10f).toString()),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = contrast,
+                    onValueChange = vm::setPressureWidthContrast,
+                    valueRange = 0.5f..3f,
+                    steps = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             HorizontalDivider()
