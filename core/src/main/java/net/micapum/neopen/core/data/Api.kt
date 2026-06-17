@@ -260,6 +260,47 @@ data class StudioItemDto(
     val createdAt: String? = null,
 )
 
+// --- Ajustes del servidor (GET /api/settings) para "Importar del servidor" ---
+// Espejo de ServerSettings (packages/shared): los campos normales traen { value, locked }
+// y los secretos solo { configured, locked } — el servidor NUNCA devuelve el secreto.
+
+/** Campo de texto/numérico/booleano editable del servidor. */
+data class ConfigFieldStr(val value: String? = null, val locked: Boolean = false)
+data class ConfigFieldBool(val value: Boolean? = null, val locked: Boolean = false)
+
+/** Campo secreto: solo sabemos si está configurado, nunca su valor. */
+data class SecretField(val configured: Boolean = false, val locked: Boolean = false)
+
+data class OcrSettingsDto(
+    val baseUrl: ConfigFieldStr? = null,
+    val apiKey: SecretField? = null,
+    val model: ConfigFieldStr? = null,
+)
+data class LanguageToolSettingsDto(
+    val enabled: ConfigFieldBool? = null,
+    val baseUrl: ConfigFieldStr? = null,
+    val username: ConfigFieldStr? = null,
+    val apiKey: SecretField? = null,
+)
+data class WebdavSettingsDto(
+    val url: ConfigFieldStr? = null,
+    val username: ConfigFieldStr? = null,
+    val password: SecretField? = null,
+    val basePath: ConfigFieldStr? = null,
+)
+data class FtpSettingsDto(
+    val url: ConfigFieldStr? = null,
+    val username: ConfigFieldStr? = null,
+    val password: SecretField? = null,
+    val basePath: ConfigFieldStr? = null,
+)
+data class ServerSettingsDto(
+    val ocr: OcrSettingsDto? = null,
+    val languageTool: LanguageToolSettingsDto? = null,
+    val webdav: WebdavSettingsDto? = null,
+    val ftp: FtpSettingsDto? = null,
+)
+
 /** Cliente del servidor neopen. La contraseña va en la cabecera por petición. */
 interface NeopenApi {
     /** Healthcheck público (sin auth): comprueba que el servidor responde. */
@@ -269,6 +310,10 @@ interface NeopenApi {
     /** Endpoint con auth: sirve para validar la contraseña (200 ok / 401 incorrecta). */
     @GET("api/capabilities")
     suspend fun capabilities(@Header("X-Auth-Password") password: String): Response<Unit>
+
+    /** Configuración del servidor (sin secretos) para importarla a la config local. */
+    @GET("api/settings")
+    suspend fun serverSettings(@Header("X-Auth-Password") password: String): ServerSettingsDto
 
     /** Capacidades tipadas (p. ej. si Studio está activo → recientes/presets). */
     @GET("api/capabilities")

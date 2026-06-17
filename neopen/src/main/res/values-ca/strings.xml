@@ -284,4 +284,17 @@
     <string name="cap_field_password">Contrasenya</string>
     <string name="cap_field_basepath">Carpeta base</string>
     <string name="cap_save_creds">Desa les credencials</string>
+    <string name="settings_cap_local_intro">Aquí configures la versió LOCAL (al telèfon). El servidor té la seva pròpia configuració a part. Per funcionalitat tries qui l\'executa: desactivada, al telèfon (amb les teves credencials) o al servidor.</string>
+    <string name="cap_status_off">Desactivat</string>
+    <string name="cap_status_phone">Telèfon</string>
+    <string name="cap_status_server">Servidor</string>
+    <string name="cap_status_no_creds">Sense credencials</string>
+    <string name="cap_ocr_prompt_label">Prompt de transcripció (local)</string>
+    <string name="cap_ocr_prompt_field">Instruccions per al model</string>
+    <string name="cap_ocr_prompt_reset">Restablir</string>
+    <string name="cap_ocr_local_creds">Credencials locals (mode Telèfon)</string>
+    <string name="cap_import_server">Importa la configuració del servidor</string>
+    <string name="cap_import_note">Les claus i contrasenyes no s\'importen per seguretat: introdueix-les a mà. Comprova que les URL siguin accessibles des del telèfon.</string>
+    <string name="cap_import_ok">Configuració importada del servidor.</string>
+    <string name="cap_import_failed">No s\'ha pogut importar del servidor.</string>
 </resources>
