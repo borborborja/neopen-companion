@@ -69,15 +69,17 @@ class PenService : Service() {
             graph.settings.flow.collect { s ->
                 graph.pen.autoReconnect = s.backgroundEnabled
                 NotificationManagerCompat.from(this@PenService).notify(ControlNotification.NOTIF_ID, notif(s))
+                net.micapum.neopen.app.widget.SyncWidget.refresh(applicationContext)
             }
         }
         scope.launch {
             // Solo los campos del boli que se muestran (no capturedPages, que cambia en cada trazo).
             graph.pen.state
-                .map { Triple(it.mac, it.connected, it.name) }
+                .map { listOf(it.mac, it.status.name, it.name, it.settings.battery?.toString(), it.settings.charging.toString()) }
                 .distinctUntilChanged()
                 .collect {
                     NotificationManagerCompat.from(this@PenService).notify(ControlNotification.NOTIF_ID, notif(graph.currentSettings))
+                    net.micapum.neopen.app.widget.SyncWidget.refresh(applicationContext)
                 }
         }
     }

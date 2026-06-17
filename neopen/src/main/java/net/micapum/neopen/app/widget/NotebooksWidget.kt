@@ -53,6 +53,8 @@ private val Accent = ColorProvider(R.color.widget_accent)
 
 private val openTabKey = ActionParameters.Key<String>(EXTRA_OPEN_TAB)
 private val openNotebookKey = ActionParameters.Key<String>(EXTRA_OPEN_NOTEBOOK)
+private val shareKindKey = ActionParameters.Key<String>(EXTRA_SHARE_KIND)
+private val shareIdKey = ActionParameters.Key<String>(EXTRA_SHARE_ID)
 
 class NotebooksWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -112,21 +114,39 @@ private fun WidgetUi(context: Context, notebooks: List<Notebook>) {
 @Composable
 private fun NotebookRow(nb: Notebook) {
     Row(
-        modifier = GlanceModifier.fillMaxWidth().padding(vertical = 6.dp)
-            .clickable(
-                actionStartActivity<MainActivity>(
-                    actionParametersOf(openTabKey to TAB_NOTEBOOKS, openNotebookKey to nb.id),
-                ),
-            ),
+        modifier = GlanceModifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             GlanceModifier.size(10.dp).cornerRadius(5.dp).background(ColorProvider(parseColor(nb.color))),
         ) {}
         Spacer(GlanceModifier.width(8.dp))
-        Text(nb.name, style = TextStyle(color = OnBg, fontSize = 14.sp, fontWeight = FontWeight.Medium))
-        Spacer(GlanceModifier.defaultWeight())
+        Text(
+            nb.name,
+            modifier = GlanceModifier.defaultWeight()
+                .clickable(
+                    actionStartActivity<MainActivity>(
+                        actionParametersOf(openTabKey to TAB_NOTEBOOKS, openNotebookKey to nb.id),
+                    ),
+                ),
+            style = TextStyle(color = OnBg, fontSize = 14.sp, fontWeight = FontWeight.Medium),
+        )
+        Spacer(GlanceModifier.width(8.dp))
         Text("${nb.pageCount}", style = TextStyle(color = Muted, fontSize = 13.sp))
+        Spacer(GlanceModifier.width(10.dp))
+        Text(
+            "⇪",
+            modifier = GlanceModifier
+                .cornerRadius(12.dp)
+                .background(Accent)
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .clickable(
+                    actionStartActivity<ShareExportActivity>(
+                        actionParametersOf(shareKindKey to SHARE_KIND_NOTEBOOK, shareIdKey to nb.id),
+                    ),
+                ),
+            style = TextStyle(color = Bg, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+        )
     }
 }
 

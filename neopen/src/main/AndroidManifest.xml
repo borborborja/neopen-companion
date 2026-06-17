@@ -42,6 +42,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".widget.ShareExportActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Neopen" />
+
         <!-- Mantiene la conexión BLE viva en segundo plano (modo puente y completo). -->
         <service
             android:name=".sync.PenService"
@@ -75,6 +80,18 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/notebooks_widget_info" />
+        </receiver>
+
+        <!-- Widget de ediciones recientes. -->
+        <receiver
+            android:name=".widget.RecentEditsWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/recent_edits_widget_info" />
         </receiver>
 
         <!-- Comparte ficheros exportados (PDF/PNG/SVG) desde la caché. -->

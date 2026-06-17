@@ -1,7 +1,8 @@
 <resources>
     <string name="app_name">neopen</string>
-    <string name="sync_widget_desc">Fuerza la lectura del boli y la sincronización con el servidor, y muestra la última sincronización.</string>
+    <string name="sync_widget_desc">Muestra el estado del boli, su batería y permite sincronizar o mantener la conexión.</string>
     <string name="notebooks_widget_desc">Muestra tus cuadernos y abre la app en la pestaña Cuadernos.</string>
+    <string name="recent_edits_widget_desc">Muestra tus ediciones recientes y permite compartirlas.</string>
 
     <!-- == UI principal (Ui.kt) == -->
     <string name="tab_inbox">Ediciones</string>
@@ -266,6 +267,21 @@
     <string name="wgt_sync_never">nunca</string>
     <string name="wgt_notebooks_title">Cuadernos</string>
     <string name="wgt_notebooks_empty">Sin cuadernos todavía.</string>
+    <string name="wgt_recent_title">Ediciones recientes</string>
+    <string name="wgt_recent_empty">Sin ediciones recientes.</string>
+    <string name="wgt_pen_title">Boli</string>
+    <string name="wgt_pen_state">Estado</string>
+    <string name="wgt_pen_battery">Batería</string>
+    <string name="wgt_pen_connected">Conectado</string>
+    <string name="wgt_pen_connecting">Conectando…</string>
+    <string name="wgt_pen_disconnected">Desconectado</string>
+    <string name="wgt_pen_locked">Bloqueado</string>
+    <string name="wgt_pen_battery_unknown">sin datos</string>
+    <string name="wgt_pen_sync_now">Volcar</string>
+    <string name="wgt_pen_permanent_on">Permanente ON</string>
+    <string name="wgt_pen_permanent_off">Permanente OFF</string>
+    <string name="wgt_pen_tap_compact">Toca para volcar memoria</string>
+    <string name="wgt_share_failed">No se pudo compartir.</string>
     <string name="pensvc_notif_text">Conexión del boli en segundo plano</string>
     <string name="appsvc_channel_pen">Boli</string>
 

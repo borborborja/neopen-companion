@@ -243,6 +243,8 @@ class Graph(app: Application) {
                 syncNow()
             }
             scheduleConnectorSync()
+            net.micapum.neopen.app.widget.NotebooksWidget.refresh(app)
+            net.micapum.neopen.app.widget.RecentEditsWidget.refresh(app)
         }
     }
 

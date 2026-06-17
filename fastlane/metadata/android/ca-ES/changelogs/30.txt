@@ -1,0 +1,1 @@
+Millora els widgets: quaderns i edicions recents es poden compartir, i el widget del boli mostra estat, bateria, bolcat i connexió permanent.

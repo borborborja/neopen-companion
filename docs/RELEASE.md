@@ -64,6 +64,8 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.21.6** — Widgets mejorados: cuadernos y ediciones recientes con botón de
+  compartir, y widget del boli con estado, batería, volcado y conexión permanente.
 - **v0.21.5** — Reconexión automática del boli mientras la app está abierta,
   preparación para F-Droid (`-Pfdroid`, metadata, licencia y screenshots) y textos
   públicos genéricos para Neo smartpen.

@@ -11,7 +11,7 @@ main F-Droid build. Build F-Droid releases with:
 
 ## Release policy
 
-Normal GitHub releases keep using tags such as `v0.21.5`.
+Normal GitHub releases keep using tags such as `v0.21.6`.
 
 F-Droid should only follow explicit tags:
 
@@ -53,9 +53,9 @@ RepoType: git
 Repo: https://github.com/borborborja/neopen-companion.git
 
 Builds:
-  - versionName: 0.21.5
-    versionCode: 29
-    commit: fdroid-v0.21.5
+  - versionName: 0.21.6
+    versionCode: 30
+    commit: fdroid-v0.21.6
     gradle:
       - yes
     gradleprops:
@@ -69,6 +69,6 @@ Builds:
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^fdroid-v[0-9]+\.[0-9]+\.[0-9]+$
 UpdateCheckData: neopen/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
-CurrentVersion: 0.21.5
-CurrentVersionCode: 29
+CurrentVersion: 0.21.6
+CurrentVersionCode: 30
 ```
