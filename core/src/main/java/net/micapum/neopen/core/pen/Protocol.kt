@@ -203,6 +203,10 @@ object Protocol {
     fun reqSettingOnOff(type: Int, on: Boolean): ByteArray =
         buildFrame(SETTING_CHANGE_REQUEST, byteArrayOf(type.toByte(), if (on) 1 else 0))
 
+    /** Cambio de ajuste con valor de un byte: data = [type, value]. */
+    fun reqSettingByte(type: Int, value: Int): ByteArray =
+        buildFrame(SETTING_CHANGE_REQUEST, byteArrayOf(type.toByte(), value.coerceIn(0, 255).toByte()))
+
     /** Cambio de ajuste con valor short LE: data = [type, lo, hi]. */
     fun reqSettingShort(type: Int, value: Int): ByteArray =
         buildFrame(SETTING_CHANGE_REQUEST, byteArrayOf(type.toByte(), (value and 0xff).toByte(), ((value shr 8) and 0xff).toByte()))
@@ -308,15 +312,17 @@ object Protocol {
     fun parseSettingInfo(data: ByteArray): PenSettings {
         // lock(1) pwdMax(1) pwdRetry(1) time(8) autoOff(2) maxForce(2) usedMem(1)
         // capOff(1) autoPowerOn(1) beep(1) hover(1) battery(1) useOffline(1) fsr(1)
-        val battery = u8(data, 20)
+        val battery = if (data.size > 20) u8(data, 20) else 0
         return PenSettings(
             battery = if (battery == 128) 100 else battery,
             charging = battery == 128,
-            usedMem = u8(data, 15),
-            autoShutdownTime = u16(data, 11),
-            autoPowerOn = u8(data, 17) == 1,
-            beep = u8(data, 18) == 1,
-            offlineData = u8(data, 21) == 1,
+            usedMem = data.u8OrNull(15),
+            autoShutdownTime = data.u16OrNull(11),
+            autoPowerOn = data.u8OrNull(17)?.let { it == 1 },
+            beep = data.u8OrNull(18)?.let { it == 1 },
+            offlineData = data.u8OrNull(21)?.let { it == 1 },
+            sensitivity = data.u8OrNull(22)?.coerceIn(0, 4),
+            maxForce = data.u16OrNull(13)?.takeIf { it > 0 },
         )
     }
 
@@ -446,6 +452,8 @@ object Protocol {
 
     private fun u8(d: ByteArray, i: Int) = if (i < d.size) d[i].toInt() and 0xff else 0
     private fun u16(d: ByteArray, i: Int) = u8(d, i) or (u8(d, i + 1) shl 8)
+    private fun ByteArray.u8OrNull(i: Int): Int? = if (i < size) u8(this, i) else null
+    private fun ByteArray.u16OrNull(i: Int): Int? = if (i + 1 < size) u16(this, i) else null
     private fun i32(d: ByteArray, i: Int) =
         u8(d, i) or (u8(d, i + 1) shl 8) or (u8(d, i + 2) shl 16) or (u8(d, i + 3) shl 24)
     private fun u64(d: ByteArray, i: Int): Long {

@@ -317,4 +317,32 @@
     <string name="cap_import_note">Les claus i contrasenyes no s\'importen per seguretat: introdueix-les a mà. Comprova que les URL siguin accessibles des del telèfon.</string>
     <string name="cap_import_ok">Configuració importada del servidor.</string>
     <string name="cap_import_failed">No s\'ha pogut importar del servidor.</string>
+
+    <string name="pen_style_title">Estil del traç (color i gruix)</string>
+    <string name="pen_style_default_title">Estil per defecte</string>
+    <string name="pen_paired_title">Bolis emparellats</string>
+    <string name="pen_paired_empty">Encara no hi ha bolis emparellats. Connecta\'n un i apareixerà aquí; podràs canviar-ne el color encara que estigui apagat.</string>
+    <string name="pen_forget">Oblidar</string>
+    <string name="pen_sensitivity_title">Sensibilitat de pressió</string>
+    <string name="pen_sensitivity_desc">Només es mostra en bolis compatibles.</string>
+    <string name="pen_sensitivity_level">Nivell %1$d</string>
+    <string name="pen_lock_to_this_title">Connectar només aquest boli</string>
+    <string name="pen_lock_to_this_desc">Impedeix que l\'app es connecti automàticament a altres bolis.</string>
+    <string name="settings_pressure_width_title">Pressió del traç</string>
+    <string name="settings_pressure_width_toggle_title">La pressió modifica el gruix</string>
+    <string name="settings_pressure_width_toggle_desc">Dibuixa traços més fins o més gruixuts segons la pressió detectada.</string>
+    <string name="settings_pressure_width_note">Només es nota en bolis compatibles o captures amb pressió fiable.</string>
+    <string name="settings_reimport_policy_title">Reimportacions des de la memòria del boli</string>
+    <string name="settings_reimport_policy_desc">Quan un bolcat offline torna a portar traços d\'una pàgina que havies eliminat o mogut, l\'app et pot preguntar o aplicar una decisió per defecte.</string>
+    <string name="reimport_policy_ask">Preguntar sempre</string>
+    <string name="reimport_policy_discard">Descartar automàticament</string>
+    <string name="reimport_policy_new_capture">Crear una nova edició</string>
+    <string name="reimport_policy_merge">Fusionar si és possible</string>
+    <string name="offline_reimport_warning_title">Traços reimportats</string>
+    <string name="offline_reimport_warning_deleted_desc">El boli ha tornat a portar traços de la pàgina %1$s, que havies eliminat (%2$s). Vols descartar-los o conservar-los?</string>
+    <string name="offline_reimport_warning_moved_desc">El boli ha tornat a portar traços de la pàgina %1$s, que havies mogut a %2$s. Vols fusionar-los, crear una edició a part o descartar-los?</string>
+    <string name="offline_reimport_action_discard">Descartar</string>
+    <string name="offline_reimport_action_new_capture">Nova edició</string>
+    <string name="offline_reimport_action_merge">Fusionar</string>
+    <string name="vm_offline_reimport_merge_failed">No s\'ha pogut fusionar aquesta reimportació.</string>
 </resources>

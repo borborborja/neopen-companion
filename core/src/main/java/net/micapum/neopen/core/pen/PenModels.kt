@@ -89,7 +89,7 @@ data class OfflineNote(val section: Int, val owner: Int, val note: Int, val page
 enum class PenStatus { IDLE, SCANNING, CONNECTING, LOCKED, AUTHORIZED, DISCONNECTED }
 enum class OfflinePhase { IDLE, LISTING, TRANSFERRING }
 
-/** Ajustes reportados por el boli (SETTING_INFO). Sin color ni sensibilidad (no los usamos). */
+/** Ajustes reportados por el boli (SETTING_INFO). */
 data class PenSettings(
     val battery: Int? = null,
     val charging: Boolean = false,
@@ -98,7 +98,13 @@ data class PenSettings(
     val beep: Boolean? = null,
     val offlineData: Boolean? = null,
     val autoShutdownTime: Int? = null,
-)
+    /** Sensibilidad de presión 0..4 (0 = más sensible). Null si el boli no la reporta. */
+    val sensitivity: Int? = null,
+    /** Fuerza máxima reportada por el sensor FSR. Null si no viene en SETTING_INFO. */
+    val maxForce: Int? = null,
+) {
+    val pressureSupported: Boolean get() = sensitivity != null || (maxForce ?: 0) > 0
+}
 
 /** Estado completo expuesto a la UI. */
 data class PenState(

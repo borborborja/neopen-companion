@@ -91,6 +91,9 @@ class PenManager(
     /** Persiste (o borra con pin=null) el PIN recordado de un boli. */
     var onPinRemembered: (String, String?) -> Unit = { _, _ -> }
 
+    /** Decide si una conexión está permitida para este scan (manual=true desde la UI). */
+    var connectionAllowed: (String, Boolean) -> Boolean = { _, _ -> true }
+
     /** Estilo a sellar en los trazos capturados por el boli conectado. */
     private fun currentStyle(): StrokeStyle = styleProvider(_state.value.mac)
     /** Valor de `offlineData` antes de entrar en modo-vivo, para restaurarlo al salir. */
@@ -144,13 +147,18 @@ class PenManager(
     // Scan + connect
     // ----------------------------------------------------------------------------------
 
-    fun scanAndConnect() {
+    fun scanAndConnect() = scanAndConnect(manual = true)
+
+    /** Escaneo usado por servicios/reconexiones automáticas: respeta olvidados y bloqueo. */
+    fun scanAndConnectAuto() = scanAndConnect(manual = false)
+
+    private fun scanAndConnect(manual: Boolean) {
         val scanner = adapter?.bluetoothLeScanner ?: run {
             log("Bluetooth apagado: no hay scanner")
             update { it.copy(status = PenStatus.IDLE, error = "bluetooth-off") }; return
         }
         this.scanner = scanner
-        log("Escaneando boli (servicio 19F1)…")
+        log("Escaneando boli (servicio 19F1, ${if (manual) "manual" else "auto"})…")
         update { it.copy(status = PenStatus.SCANNING, error = null) }
         val filters = listOf(
             ScanFilter.Builder().setServiceUuid(ParcelUuid(Protocol.SERVICE_V2)).build(),
@@ -163,6 +171,10 @@ class PenManager(
                 // El scan puede entregar varios resultados (incluso tras stopScan, por la
                 // cola pendiente). Solo actuamos en el primero.
                 if (connecting) return
+                if (!connectionAllowed(result.device.address, manual)) {
+                    log("Boli ignorado por política de conexión: ${result.device.address}")
+                    return
+                }
                 connecting = true
                 scanner.stopScan(this)
                 log("Boli encontrado: ${result.device.address}")
@@ -317,7 +329,7 @@ class PenManager(
                 val device = target
                 // Desconexión inesperada (target != null = no la pidió el usuario):
                 // reintenta sola si la reconexión automática está activa.
-                if (autoReconnect && device != null) {
+                if (autoReconnect && device != null && connectionAllowed(device.address, false)) {
                     log("Reconexión automática en 1,5 s…")
                     connectAttempts = 0
                     update { it.copy(status = PenStatus.CONNECTING, error = null) }
@@ -670,6 +682,11 @@ class PenManager(
     fun setAutoShutdown(minutes: Int) {
         write(Protocol.reqSettingShort(Protocol.SET_AUTO_POWER_OFF_TIME, minutes))
         update { it.copy(settings = it.settings.copy(autoShutdownTime = minutes)) }
+    }
+    fun setSensitivity(level: Int) {
+        val v = level.coerceIn(0, 4)
+        write(Protocol.reqSettingByte(Protocol.SET_SENSITIVITY, v))
+        update { it.copy(settings = it.settings.copy(sensitivity = v)) }
     }
 
     // ----------------------------------------------------------------------------------

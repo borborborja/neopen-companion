@@ -43,6 +43,28 @@ data class Capture(
     val sobpLabel get() = "$section.$owner.$book.$page"
 }
 
+/** Aviso de trazos reimportados desde la memoria del boli que requieren decisión. */
+data class OfflineImportWarning(
+    val id: String,
+    val section: Int,
+    val owner: Int,
+    val book: Int,
+    val page: Int,
+    val capturedAt: String,
+    val importedAt: String,
+    val name: String,
+    val strokes: List<StrokeDto>,
+    val paper: PaperDto?,
+    val reasonAction: String,
+    val actionCaptureName: String?,
+    val actionDestination: String?,
+    val actionNotebookName: String?,
+    val targetCaptureId: String?,
+) {
+    val sobpLabel get() = "$section.$owner.$book.$page"
+    val canMerge get() = targetCaptureId != null
+}
+
 /** Cuaderno en el modelo de dominio (con el contador de hojas resuelto). */
 data class Notebook(
     val id: String,

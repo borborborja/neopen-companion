@@ -2,6 +2,7 @@ package net.micapum.neopen.app.data
 
 import net.micapum.neopen.app.db.CaptureEntity
 import net.micapum.neopen.app.db.NotebookEntity
+import net.micapum.neopen.app.db.OfflineImportWarningEntity
 import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.core.data.AnchorDto
 import net.micapum.neopen.core.data.CaptureDto
@@ -77,6 +78,24 @@ fun CaptureEntity.toDomain(): Capture = Capture(
     sealed = sealed,
     overlap = Json.overlapOf(overlapJson),
     clonedFrom = clonedFrom,
+)
+
+fun OfflineImportWarningEntity.toDomain(): OfflineImportWarning = OfflineImportWarning(
+    id = id,
+    section = section,
+    owner = owner,
+    book = book,
+    page = page,
+    capturedAt = capturedAt,
+    importedAt = importedAt,
+    name = name,
+    strokes = Json.strokes(strokesJson),
+    paper = Json.paperOf(paperJson),
+    reasonAction = reasonAction,
+    actionCaptureName = actionCaptureName,
+    actionDestination = actionDestination,
+    actionNotebookName = actionNotebookName,
+    targetCaptureId = targetCaptureId,
 )
 
 fun PageBackgroundEntity.toDomain(): PageBackground = PageBackground(

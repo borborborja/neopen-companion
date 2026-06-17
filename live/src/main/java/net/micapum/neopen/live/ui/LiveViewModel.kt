@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.pen.KnownPen
 import net.micapum.neopen.core.pen.PenState
 import net.micapum.neopen.live.NeopenLiveApp
 import net.micapum.neopen.live.ink.InkLanguage
@@ -50,6 +51,42 @@ class LiveViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setNewlines(on: Boolean) {
         viewModelScope.launch { liveApp.settings.update(settings.value.copy(liveNewlines = on)) }
+    }
+
+    fun setPressureWidthEnabled(on: Boolean) {
+        viewModelScope.launch { liveApp.settings.update(settings.value.copy(pressureWidthEnabled = on)) }
+    }
+
+    fun setSensitivity(level: Int) = liveApp.pen.setSensitivity(level)
+
+    fun setLockedPen(mac: String?) {
+        viewModelScope.launch { liveApp.settings.update(settings.value.copy(lockedPenMac = mac.orEmpty())) }
+    }
+
+    fun forgetPen(mac: String) {
+        viewModelScope.launch {
+            val cur = settings.value
+            val locked = if (cur.lockedPenMac == mac) "" else cur.lockedPenMac
+            liveApp.settings.update(
+                cur.copy(
+                    knownPens = cur.knownPens.filterNot { it.mac == mac },
+                    forgottenPens = (cur.forgottenPens + mac).distinct(),
+                    lockedPenMac = locked,
+                ),
+            )
+            if (penState.value.mac == mac) liveApp.pen.disconnect()
+        }
+    }
+
+    fun registerCurrentPen() {
+        val mac = penState.value.mac ?: return
+        val alias = penState.value.name?.takeIf { it.isNotBlank() } ?: mac
+        viewModelScope.launch {
+            val cur = settings.value
+            if (cur.knownPens.none { it.mac == mac }) {
+                liveApp.settings.update(cur.copy(knownPens = cur.knownPens + KnownPen(mac, alias, cur.defaultStyle)))
+            }
+        }
     }
 
     fun refreshModel() {

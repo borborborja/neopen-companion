@@ -49,7 +49,7 @@ class NotificationControlReceiver : BroadcastReceiver() {
                     ControlNotification.ACTION_TOGGLE_BG -> {
                         val on = !cur.backgroundEnabled
                         graph.pen.autoReconnect = on
-                        if (on && !graph.pen.state.value.connected) graph.pen.scanAndConnect()
+                        if (on && !graph.pen.state.value.connected) graph.pen.scanAndConnectAuto()
                         cur.copy(backgroundEnabled = on)
                     }
                     else -> cur

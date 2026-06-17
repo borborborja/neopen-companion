@@ -17,20 +17,32 @@ enum class ExportFormat(val ext: String, val mime: String) {
 
 // --- SVG (espejo exacto de modelToSvg de packages/shared) -------------------
 
-fun renderSvg(strokes: List<StrokeDto>, paper: PaperDto?): String {
-    val m = buildModel(strokes, paper)
+fun renderSvg(strokes: List<StrokeDto>, paper: PaperDto?, pressureWidthEnabled: Boolean = false): String {
+    val m = buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled)
     // Estilo por <path> (color + grueso del trazo) en vez de global en el <g>.
     val paths = m.polylines
         .filter { it.points.isNotEmpty() }
-        .joinToString("") { poly ->
-            "<path d=\"${toPathData(poly.points)}\" stroke=\"${svgColor(poly.color)}\" " +
-                "stroke-width=\"${poly.width}\" />"
-        }
+        .joinToString("") { poly -> svgPaths(poly) }
     val w = roundCoord(m.width)
     val h = roundCoord(m.height)
     return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$w\" height=\"$h\" " +
         "viewBox=\"0 0 $w $h\">" +
         "<g fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\">$paths</g></svg>"
+}
+
+private fun svgPaths(poly: StyledPolyline): String {
+    val pts = poly.points
+    val widths = poly.pointWidths
+    if (widths == null || widths.size != pts.size || pts.size <= 1) {
+        return "<path d=\"${toPathData(pts)}\" stroke=\"${svgColor(poly.color)}\" " +
+            "stroke-width=\"${poly.width}\" />"
+    }
+    return (0 until pts.lastIndex).joinToString("") { i ->
+        val w = ((widths[i] + widths[i + 1]) / 2f).coerceAtLeast(0.5f)
+        "<path d=\"M${roundCoord(pts[i].x)} ${roundCoord(pts[i].y)} " +
+            "L${roundCoord(pts[i + 1].x)} ${roundCoord(pts[i + 1].y)}\" " +
+            "stroke=\"${svgColor(poly.color)}\" stroke-width=\"${roundCoord(w)}\" />"
+    }
 }
 
 /** ARGB Int → "#RRGGBB" para SVG (se ignora el alfa). */
@@ -55,19 +67,19 @@ private fun roundCoord(n: Float): String {
 
 // --- PDF (android.graphics.pdf.PdfDocument) ---------------------------------
 
-fun renderPagePdf(strokes: List<StrokeDto>, paper: PaperDto?): ByteArray {
+fun renderPagePdf(strokes: List<StrokeDto>, paper: PaperDto?, pressureWidthEnabled: Boolean = false): ByteArray {
     val doc = PdfDocument()
-    addPdfPage(doc, buildModel(strokes, paper), 1)
+    addPdfPage(doc, buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled), 1)
     return finishPdf(doc)
 }
 
 /** PDF multipágina: una página por captura (mismo bucle que notebookExport de la web). */
-fun renderNotebookPdf(pages: List<Capture>): ByteArray {
+fun renderNotebookPdf(pages: List<Capture>, pressureWidthEnabled: Boolean = false): ByteArray {
     val doc = PdfDocument()
     val models = if (pages.isEmpty()) {
-        listOf(buildModel(emptyList(), null))
+        listOf(buildModel(emptyList(), null, pressureWidthEnabled = pressureWidthEnabled))
     } else {
-        pages.map { buildModel(it.strokes, it.paper) }
+        pages.map { buildModel(it.strokes, it.paper, pressureWidthEnabled = pressureWidthEnabled) }
     }
     models.forEachIndexed { i, m -> addPdfPage(doc, m, i + 1) }
     return finishPdf(doc)

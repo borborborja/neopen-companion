@@ -117,6 +117,56 @@ data class ConnectorSyncStateEntity(
     val syncedAt: Long,
 )
 
+/** Última acción explícita del usuario sobre una página física (SOBP). */
+@Entity(
+    tableName = "pen_page_user_actions",
+    indices = [Index("section", "owner", "book", "page")],
+)
+data class PenPageUserActionEntity(
+    @PrimaryKey val sobpKey: String,
+    val section: Int,
+    val owner: Int,
+    val book: Int,
+    val page: Int,
+    val action: String,
+    val captureId: String?,
+    val captureName: String?,
+    val destination: String?,
+    val notebookId: String?,
+    val notebookName: String?,
+    val paperJson: String?,
+    val createdAt: String,
+)
+
+/** Aviso local de trazos reimportados desde la memoria del boli que requieren decisión. */
+@Entity(
+    tableName = "offline_import_warnings",
+    indices = [Index("status", "importedAt"), Index("section", "owner", "book", "page")],
+)
+data class OfflineImportWarningEntity(
+    @PrimaryKey val id: String,
+    val section: Int,
+    val owner: Int,
+    val book: Int,
+    val page: Int,
+    val source: String,
+    val capturedAt: String,
+    val importedAt: String,
+    val name: String,
+    val strokesJson: String,
+    val paperJson: String?,
+    val reasonAction: String,
+    val actionCaptureId: String?,
+    val actionCaptureName: String?,
+    val actionDestination: String?,
+    val actionNotebookId: String?,
+    val actionNotebookName: String?,
+    val actionAt: String,
+    val targetCaptureId: String?,
+    val status: String = "pending",
+    val resolvedAt: String? = null,
+)
+
 // --- DAOs --------------------------------------------------------------------
 
 @Dao
@@ -272,12 +322,49 @@ interface ConnectorSyncStateDao {
     suspend fun clear()
 }
 
+@Dao
+interface PenPageUserActionDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: PenPageUserActionEntity)
+
+    @Query("SELECT * FROM pen_page_user_actions WHERE sobpKey = :sobpKey")
+    suspend fun getBySobpKey(sobpKey: String): PenPageUserActionEntity?
+
+    @Query("DELETE FROM pen_page_user_actions")
+    suspend fun clear()
+}
+
+@Dao
+interface OfflineImportWarningDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: OfflineImportWarningEntity)
+
+    @Query("SELECT * FROM offline_import_warnings WHERE id = :id")
+    suspend fun getById(id: String): OfflineImportWarningEntity?
+
+    @Query("SELECT * FROM offline_import_warnings WHERE status = 'pending' ORDER BY importedAt DESC")
+    fun observePending(): Flow<List<OfflineImportWarningEntity>>
+
+    @Query("SELECT COUNT(*) FROM offline_import_warnings WHERE status = 'pending'")
+    fun observePendingCount(): Flow<Int>
+
+    @Query("SELECT * FROM offline_import_warnings WHERE id = :id AND status != 'pending'")
+    suspend fun getResolved(id: String): OfflineImportWarningEntity?
+
+    @Query("UPDATE offline_import_warnings SET status = :status, resolvedAt = :resolvedAt WHERE id = :id")
+    suspend fun setStatus(id: String, status: String, resolvedAt: String)
+
+    @Query("DELETE FROM offline_import_warnings")
+    suspend fun clear()
+}
+
 @Database(
     entities = [
         CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
         SyncMetaEntity::class, PageBackgroundEntity::class, ConnectorSyncStateEntity::class,
+        PenPageUserActionEntity::class, OfflineImportWarningEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {
@@ -287,4 +374,6 @@ abstract class NeopenDb : RoomDatabase() {
     abstract fun syncMeta(): SyncMetaDao
     abstract fun backgrounds(): PageBackgroundDao
     abstract fun connectorSyncState(): ConnectorSyncStateDao
+    abstract fun penPageUserActions(): PenPageUserActionDao
+    abstract fun offlineImportWarnings(): OfflineImportWarningDao
 }

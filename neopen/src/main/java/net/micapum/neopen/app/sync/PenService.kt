@@ -36,7 +36,7 @@ class PenService : Service() {
         val settings = graph.currentSettings
         startForeground(ControlNotification.NOTIF_ID, notif(settings))
         graph.pen.autoReconnect = settings.backgroundEnabled
-        if (settings.backgroundEnabled && !graph.pen.state.value.connected) graph.pen.scanAndConnect()
+        if (settings.backgroundEnabled && !graph.pen.state.value.connected) graph.pen.scanAndConnectAuto()
         startObserving()
         return START_STICKY
     }

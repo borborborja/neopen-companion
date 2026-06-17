@@ -343,6 +343,28 @@
     <string name="pen_paired_title">Bolis emparejados</string>
     <string name="pen_paired_empty">Aún no hay bolis emparejados. Conecta uno y aparecerá aquí; podrás cambiar su color aunque esté apagado.</string>
     <string name="pen_forget">Olvidar</string>
+    <string name="pen_sensitivity_title">Sensibilidad de presión</string>
+    <string name="pen_sensitivity_desc">Solo aparece en bolis compatibles.</string>
+    <string name="pen_sensitivity_level">Nivel %1$d</string>
+    <string name="pen_lock_to_this_title">Conectar solo este boli</string>
+    <string name="pen_lock_to_this_desc">Impide que la app se conecte automáticamente a otros bolis.</string>
+    <string name="settings_pressure_width_title">Presión del trazo</string>
+    <string name="settings_pressure_width_toggle_title">La presión modifica el grosor</string>
+    <string name="settings_pressure_width_toggle_desc">Dibuja más fino o más grueso según la presión detectada.</string>
+    <string name="settings_pressure_width_note">Solo se aprecia en bolis compatibles o capturas con presión fiable.</string>
+    <string name="settings_reimport_policy_title">Reimportaciones desde memoria del boli</string>
+    <string name="settings_reimport_policy_desc">Cuando el volcado offline trae trazos de una página que ya eliminaste o moviste, la app puede preguntarte o aplicar una decisión por defecto.</string>
+    <string name="reimport_policy_ask">Preguntar siempre</string>
+    <string name="reimport_policy_discard">Descartar automáticamente</string>
+    <string name="reimport_policy_new_capture">Crear nueva edición</string>
+    <string name="reimport_policy_merge">Fusionar si es posible</string>
+    <string name="offline_reimport_warning_title">Trazos reimportados</string>
+    <string name="offline_reimport_warning_deleted_desc">El boli ha vuelto a traer trazos de la página %1$s, que habías eliminado (%2$s). ¿Quieres descartarlos o conservarlos?</string>
+    <string name="offline_reimport_warning_moved_desc">El boli ha vuelto a traer trazos de la página %1$s, que habías movido a %2$s. ¿Quieres fusionarlos, crear una edición aparte o descartarlos?</string>
+    <string name="offline_reimport_action_discard">Descartar</string>
+    <string name="offline_reimport_action_new_capture">Nueva edición</string>
+    <string name="offline_reimport_action_merge">Fusionar</string>
+    <string name="vm_offline_reimport_merge_failed">No se pudo fusionar esta reimportación.</string>
 
     <!-- Notificación de control -->
     <string name="settings_control_notif_title">Notificación de control</string>

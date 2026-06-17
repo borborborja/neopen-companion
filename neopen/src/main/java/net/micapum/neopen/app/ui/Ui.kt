@@ -146,6 +146,7 @@ import kotlinx.coroutines.launch
 import net.micapum.neopen.app.R
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
+import net.micapum.neopen.app.data.OfflineImportWarning
 import net.micapum.neopen.app.data.PAPER_PRESETS
 import net.micapum.neopen.app.data.PaperPreset
 import net.micapum.neopen.app.data.paperFromPreset
@@ -162,6 +163,7 @@ import net.micapum.neopen.core.data.DEFAULT_OCR_INSTRUCTIONS
 import net.micapum.neopen.core.data.FtpLocalConfig
 import net.micapum.neopen.core.data.LanguageToolLocalConfig
 import net.micapum.neopen.core.data.OcrLocalConfig
+import net.micapum.neopen.core.data.OfflineReimportPolicy
 import net.micapum.neopen.core.data.WebdavLocalConfig
 import net.micapum.neopen.core.data.phoneCapable
 import net.micapum.neopen.core.data.availabilityOf
@@ -248,6 +250,7 @@ fun AppRoot(
 
     val syncing by vm.syncing.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
+    val offlineWarningCount by vm.pendingOfflineImportWarnings.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val penState by vm.penState.collectAsStateWithLifecycle()
 
@@ -269,6 +272,13 @@ fun AppRoot(
                                 Box {
                                     Icon(t.icon, null)
                                     StatusDot(penDotColor(penState.status), Modifier.align(Alignment.TopEnd))
+                                }
+                            } else if (t == HomeTab.INBOX && offlineWarningCount > 0) {
+                                Box {
+                                    Icon(t.icon, null)
+                                    Badge(Modifier.align(Alignment.TopEnd)) {
+                                        Text(offlineWarningCount.coerceAtMost(99).toString())
+                                    }
                                 }
                             } else {
                                 Icon(t.icon, null)
@@ -1016,6 +1026,7 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
 @Composable
 private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage: (String) -> Unit) {
     val items by vm.recent.collectAsStateWithLifecycle()
+    val warnings by vm.offlineImportWarnings.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
@@ -1060,7 +1071,7 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         )
-        if (shown.isEmpty()) {
+        if (shown.isEmpty() && warnings.isEmpty()) {
             EmptyHint(if (items.isEmpty()) stringResource(R.string.inbox_empty) else stringResource(R.string.inbox_no_results))
         } else {
             LazyColumn(
@@ -1068,7 +1079,71 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
+                items(warnings, key = { "offline-warning-${it.id}" }) { warning ->
+                    OfflineImportWarningCard(vm, warning)
+                }
                 items(shown, key = { it.id }) { c -> PageListRow(vm, c, notebooks, onClick = { onOpenPage(c.id) }) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OfflineImportWarningCard(vm: MainViewModel, warning: OfflineImportWarning) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.16f)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(
+                modifier = Modifier.size(86.dp),
+                color = Color.White,
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.55f)),
+            ) {
+                InkCanvas(warning.strokes, warning.paper, Modifier.fillMaxSize())
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Filled.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.offline_reimport_warning_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error)
+                }
+                Text(
+                    if (warning.reasonAction == "moved") {
+                        stringResource(
+                            R.string.offline_reimport_warning_moved_desc,
+                            warning.sobpLabel,
+                            warning.actionNotebookName ?: warning.actionCaptureName ?: warning.name,
+                        )
+                    } else {
+                        stringResource(
+                            R.string.offline_reimport_warning_deleted_desc,
+                            warning.sobpLabel,
+                            warning.actionCaptureName ?: warning.name,
+                        )
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { vm.discardOfflineImportWarning(warning.id) }) {
+                        Text(stringResource(R.string.offline_reimport_action_discard))
+                    }
+                    OutlinedButton(onClick = { vm.importOfflineWarningAsNewCapture(warning.id) }) {
+                        Text(stringResource(R.string.offline_reimport_action_new_capture))
+                    }
+                    if (warning.canMerge) {
+                        Button(onClick = { vm.mergeOfflineImportWarning(warning.id) }) {
+                            Text(stringResource(R.string.offline_reimport_action_merge))
+                        }
+                    }
+                }
             }
         }
     }
@@ -1420,6 +1495,9 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
         PenToggleRow(stringResource(R.string.pen_auto_power_on_title), stringResource(R.string.pen_auto_power_on_desc), state.settings.autoPowerOn ?: false, vm::setAutoPowerOn)
         PenToggleRow(stringResource(R.string.pen_beep_title), stringResource(R.string.pen_beep_desc), state.settings.beep ?: false, vm::setBeep)
         PenToggleRow(stringResource(R.string.pen_offline_title), stringResource(R.string.pen_offline_desc), state.settings.offlineData ?: false, vm::setOfflineData)
+        if (state.settings.pressureSupported) {
+            PenSensitivitySection(state.settings.sensitivity ?: 2, vm::setSensitivity)
+        }
         Spacer(Modifier.size(8.dp))
         Text(stringResource(R.string.pen_auto_shutdown), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1443,6 +1521,24 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
             Text(stringResource(R.string.pen_read_sobp), style = MaterialTheme.typography.bodySmall)
         }
         if (readingSobp) SobpReaderDialog(vm) { readingSobp = false }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PenSensitivitySection(current: Int, onChange: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.pen_sensitivity_title), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.pen_sensitivity_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            (0..4).forEach { level ->
+                FilterChip(
+                    selected = current == level,
+                    onClick = { onChange(level) },
+                    label = { Text(stringResource(R.string.pen_sensitivity_level, level + 1)) },
+                )
+            }
+        }
     }
 }
 
@@ -1577,6 +1673,20 @@ private fun PairedPensSection(vm: MainViewModel) {
                         TextButton(onClick = { vm.forgetPen(kp.mac) }) {
                             Text(stringResource(R.string.pen_forget), color = MaterialTheme.colorScheme.error)
                         }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.pen_lock_to_this_title), style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.pen_lock_to_this_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = settings.lockedPenMac == kp.mac,
+                            onCheckedChange = { checked -> vm.setLockedPen(if (checked) kp.mac else null) },
+                        )
                     }
                     PenStyleSection(stringResource(R.string.pen_style_title), kp.mac, vm)
                 }
@@ -1810,7 +1920,7 @@ private fun penStatusLabel(status: PenStatus): String = when (status) {
 
 // --- Ajustes -----------------------------------------------------------------
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsScreen(vm: MainViewModel) {
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -1959,6 +2069,20 @@ private fun SettingsScreen(vm: MainViewModel) {
                             )
                         }
                     }
+
+                    HorizontalDivider()
+                    // --- Presión como grosor ---
+                    Text(stringResource(R.string.settings_pressure_width_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    PenToggleRow(
+                        stringResource(R.string.settings_pressure_width_toggle_title),
+                        stringResource(R.string.settings_pressure_width_toggle_desc),
+                        settings.pressureWidthEnabled,
+                    ) { vm.setPressureWidthEnabled(it) }
+                    Text(
+                        stringResource(R.string.settings_pressure_width_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
                 // ========================== CONEXIÓN ===========================
@@ -1971,6 +2095,23 @@ private fun SettingsScreen(vm: MainViewModel) {
                     HorizontalDivider()
                     Text(stringResource(R.string.settings_offline_dump), style = MaterialTheme.typography.bodyMedium)
                     Text(stringResource(R.string.settings_offline_dump_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.settings_reimport_policy_title), style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.settings_reimport_policy_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val options = listOf(
+                            OfflineReimportPolicy.ASK to stringResource(R.string.reimport_policy_ask),
+                            OfflineReimportPolicy.DISCARD to stringResource(R.string.reimport_policy_discard),
+                            OfflineReimportPolicy.NEW_CAPTURE to stringResource(R.string.reimport_policy_new_capture),
+                            OfflineReimportPolicy.MERGE to stringResource(R.string.reimport_policy_merge),
+                        )
+                        options.forEach { (policy, label) ->
+                            FilterChip(
+                                selected = settings.offlineReimportPolicy == policy,
+                                onClick = { vm.setOfflineReimportPolicy(policy) },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(syncMode == SyncMode.MANUAL, { syncMode = SyncMode.MANUAL }, label = { Text(stringResource(R.string.sync_manual)) })
                         FilterChip(syncMode == SyncMode.INTERVAL, { syncMode = SyncMode.INTERVAL }, label = { Text(stringResource(R.string.sync_interval)) })
