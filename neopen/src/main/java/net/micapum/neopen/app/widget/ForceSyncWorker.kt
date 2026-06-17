@@ -40,6 +40,7 @@ class ForceSyncWorker(context: Context, params: WorkerParameters) :
 
         SyncWidget.refresh(applicationContext)
         NotebooksWidget.refresh(applicationContext)
+        RecentEditsWidget.refresh(applicationContext)
         return Result.success()
     }
 

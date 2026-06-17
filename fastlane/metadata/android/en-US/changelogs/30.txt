@@ -1,0 +1,1 @@
+Improves widgets: notebooks and recent edits can be shared, and the pen widget shows status, battery, memory dump, and permanent connection controls.

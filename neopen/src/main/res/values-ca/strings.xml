@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">neopen</string>
-    <string name="sync_widget_desc">Força la lectura del boli i la sincronització amb el servidor, i mostra l\'última sincronització.</string>
+    <string name="sync_widget_desc">Mostra l\'estat del boli, la bateria i controls de bolcat i connexió permanent.</string>
     <string name="notebooks_widget_desc">Mostra els teus quaderns i obre l\'app a la pestanya Quaderns.</string>
+    <string name="recent_edits_widget_desc">Mostra les teves edicions recents i permet compartir-les.</string>
 
     <!-- == UI principal (Ui.kt) == -->
     <string name="tab_inbox">Edicions</string>
@@ -265,6 +266,21 @@
     <string name="wgt_sync_never">mai</string>
     <string name="wgt_notebooks_title">Quaderns</string>
     <string name="wgt_notebooks_empty">Encara no hi ha quaderns.</string>
+    <string name="wgt_recent_title">Edicions recents</string>
+    <string name="wgt_recent_empty">Sense edicions recents.</string>
+    <string name="wgt_pen_title">Boli</string>
+    <string name="wgt_pen_state">Estat</string>
+    <string name="wgt_pen_battery">Bateria</string>
+    <string name="wgt_pen_connected">Connectat</string>
+    <string name="wgt_pen_connecting">Connectant…</string>
+    <string name="wgt_pen_disconnected">Desconnectat</string>
+    <string name="wgt_pen_locked">Bloquejat</string>
+    <string name="wgt_pen_battery_unknown">sense dades</string>
+    <string name="wgt_pen_sync_now">Bolcar</string>
+    <string name="wgt_pen_permanent_on">Permanent ON</string>
+    <string name="wgt_pen_permanent_off">Permanent OFF</string>
+    <string name="wgt_pen_tap_compact">Toca per bolcar memòria</string>
+    <string name="wgt_share_failed">No s\'ha pogut compartir.</string>
     <string name="pensvc_notif_text">Connexió del boli en segon pla</string>
     <string name="appsvc_channel_pen">Boli</string>
 

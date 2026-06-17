@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">neopen</string>
-    <string name="sync_widget_desc">Forces a pen read and sync with the server, and shows the last sync.</string>
+    <string name="sync_widget_desc">Shows pen status, battery, sync and permanent connection controls.</string>
     <string name="notebooks_widget_desc">Shows your notebooks and opens the app on the Notebooks tab.</string>
+    <string name="recent_edits_widget_desc">Shows your recent edits and lets you share them.</string>
 
     <!-- == UI principal (Ui.kt) == -->
     <string name="tab_inbox">Edits</string>
@@ -265,6 +266,21 @@
     <string name="wgt_sync_never">never</string>
     <string name="wgt_notebooks_title">Notebooks</string>
     <string name="wgt_notebooks_empty">No notebooks yet.</string>
+    <string name="wgt_recent_title">Recent edits</string>
+    <string name="wgt_recent_empty">No recent edits.</string>
+    <string name="wgt_pen_title">Pen</string>
+    <string name="wgt_pen_state">Status</string>
+    <string name="wgt_pen_battery">Battery</string>
+    <string name="wgt_pen_connected">Connected</string>
+    <string name="wgt_pen_connecting">Connecting…</string>
+    <string name="wgt_pen_disconnected">Disconnected</string>
+    <string name="wgt_pen_locked">Locked</string>
+    <string name="wgt_pen_battery_unknown">no data</string>
+    <string name="wgt_pen_sync_now">Dump</string>
+    <string name="wgt_pen_permanent_on">Permanent ON</string>
+    <string name="wgt_pen_permanent_off">Permanent OFF</string>
+    <string name="wgt_pen_tap_compact">Tap to dump memory</string>
+    <string name="wgt_share_failed">Could not share.</string>
     <string name="pensvc_notif_text">Pen connection in the background</string>
     <string name="appsvc_channel_pen">Pen</string>
 

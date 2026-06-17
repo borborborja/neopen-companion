@@ -1,0 +1,1 @@
+Mejora los widgets: cuadernos y ediciones recientes permiten compartir, y el widget del boli muestra estado, batería, volcado y conexión permanente.
