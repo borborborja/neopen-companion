@@ -165,6 +165,8 @@
     <string name="pen_pw_remove_body">The pen will have no password and anyone can read its memory.</string>
     <string name="pen_pw_current_label">Current PIN</string>
     <string name="pen_pw_new_label">New PIN</string>
+    <string name="pen_pw_confirm_label">Repeat new PIN</string>
+    <string name="pen_pw_mismatch">PINs do not match.</string>
     <string name="pen_pw_remember">Remember PIN (auto-unlock)</string>
     <string name="pen_pw_forget_saved">Forget saved PIN</string>
     <string name="backup_exported">Backup exported.</string>

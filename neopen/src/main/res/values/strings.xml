@@ -165,6 +165,8 @@
     <string name="pen_pw_remove_body">El boli quedará sin contraseña y cualquiera podrá leer su memoria.</string>
     <string name="pen_pw_current_label">PIN actual</string>
     <string name="pen_pw_new_label">PIN nuevo</string>
+    <string name="pen_pw_confirm_label">Repetir PIN nuevo</string>
+    <string name="pen_pw_mismatch">Los PIN no coinciden.</string>
     <string name="pen_pw_remember">Recordar PIN (desbloqueo automático)</string>
     <string name="pen_pw_forget_saved">Olvidar PIN guardado</string>
     <string name="backup_exported">Copia exportada.</string>

@@ -1511,6 +1511,8 @@ private fun PinFormDialog(
 ) {
     var current by remember { mutableStateOf("") }
     var new by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val mismatch = askNew && confirm.isNotEmpty() && new != confirm
     val pinField: @Composable (String, String, (String) -> Unit) -> Unit = { value, label, set ->
         OutlinedTextField(
             value = value,
@@ -1529,17 +1531,22 @@ private fun PinFormDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 body?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 if (askCurrent) pinField(current, stringResource(R.string.pen_pw_current_label)) { current = it }
-                if (askNew) pinField(new, stringResource(R.string.pen_pw_new_label)) { new = it }
+                if (askNew) {
+                    pinField(new, stringResource(R.string.pen_pw_new_label)) { new = it }
+                    pinField(confirm, stringResource(R.string.pen_pw_confirm_label)) { confirm = it }
+                    if (mismatch) {
+                        Text(stringResource(R.string.pen_pw_mismatch),
+                            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 Text(stringResource(R.string.pen_pw_reset_warning_short),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                val okCur = !askCurrent || current.isNotBlank()
-                val okNew = !askNew || new.isNotBlank()
-                if (okCur && okNew) onConfirm(current, new)
-            }) {
+            val okCur = !askCurrent || current.isNotBlank()
+            val okNew = !askNew || (new.isNotBlank() && new == confirm)
+            TextButton(onClick = { if (okCur && okNew) onConfirm(current, new) }, enabled = okCur && okNew) {
                 Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else Color.Unspecified)
             }
         },
