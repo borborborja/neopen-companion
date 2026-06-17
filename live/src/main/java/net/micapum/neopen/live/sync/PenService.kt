@@ -20,7 +20,7 @@ class PenService : Service() {
         startForeground(NOTIF_ID, buildNotification())
         val app = NeopenLiveApp.from(this)
         app.pen.autoReconnect = true
-        if (!app.pen.state.value.connected) app.pen.scanAndConnect()
+        if (!app.pen.state.value.connected) app.pen.scanAndConnectAuto()
         return START_STICKY
     }
 

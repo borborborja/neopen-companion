@@ -81,6 +81,9 @@ internal object PwCrypto {
 /** Modo de sincronización de la escritura offline guardada en el boli. */
 enum class SyncMode { MANUAL, INTERVAL }
 
+/** Política al reimportar desde la memoria del boli trazos de una página ya intervenida. */
+enum class OfflineReimportPolicy { ASK, DISCARD, NEW_CAPTURE, MERGE }
+
 /**
  * Modo de la app: solo puente (boli→servidor), versión completa (cuadernos con
  * servidor), o local (cuadernos sin servidor; se puede vincular uno más tarde).
@@ -101,6 +104,8 @@ data class AppSettings(
     val setupComplete: Boolean = false,
     /** Volcar la memoria offline del boli automáticamente al conectar. */
     val importOnConnect: Boolean = true,
+    /** Qué hacer si el volcado offline trae trazos de una página borrada o movida. */
+    val offlineReimportPolicy: OfflineReimportPolicy = OfflineReimportPolicy.ASK,
     /** Cuántas mostrar en "Últimas ediciones" (5/10/20). */
     val recentShowCount: Int = 10,
     /** ISO de "limpiar últimas ediciones": oculta lo anterior hasta una nueva edición. */
@@ -123,8 +128,14 @@ data class AppSettings(
     val liveNewlines: Boolean = false,
     /** Notificación de control persistente (cambiar color/grueso/boli/segundo plano sin abrir la app). */
     val controlNotification: Boolean = false,
+    /** Renderiza el grosor del trazo usando la presión de cada punto cuando está disponible. */
+    val pressureWidthEnabled: Boolean = false,
     /** Bolis emparejados (MAC + alias + estilo de trazo). Tope práctico: 2. */
     val knownPens: List<KnownPen> = emptyList(),
+    /** Bolis olvidados: se ignoran en conexiones automáticas hasta que el usuario los conecte a mano. */
+    val forgottenPens: List<String> = emptyList(),
+    /** Si no está vacío, la conexión automática/manual solo acepta este boli. */
+    val lockedPenMac: String = "",
     /** Estilo de trazo por defecto para bolis sin estilo propio (color ARGB + grueso). */
     val defaultStyle: StrokeStyle = StrokeStyle(),
     // --- Capacidades despachables (teléfono / servidor / apagado) ---
@@ -162,6 +173,7 @@ class SettingsStore(private val context: Context) {
         val appMode = stringPreferencesKey("app_mode")
         val setup = booleanPreferencesKey("setup_complete")
         val importOnConnect = booleanPreferencesKey("import_on_connect")
+        val offlineReimportPolicy = stringPreferencesKey("offline_reimport_policy")
         val recentCount = intPreferencesKey("recent_count")
         val recentCleared = stringPreferencesKey("recent_cleared")
         val finishMode = stringPreferencesKey("finish_mode")
@@ -173,7 +185,10 @@ class SettingsStore(private val context: Context) {
         val liveLanguage = stringPreferencesKey("live_language")
         val liveNewlines = booleanPreferencesKey("live_newlines")
         val controlNotification = booleanPreferencesKey("control_notification")
+        val pressureWidthEnabled = booleanPreferencesKey("pressure_width_enabled")
         val knownPens = stringPreferencesKey("known_pens")          // JSON
+        val forgottenPens = stringPreferencesKey("forgotten_pens")  // JSON array de MACs
+        val lockedPenMac = stringPreferencesKey("locked_pen_mac")
         val defaultColor = intPreferencesKey("default_stroke_color")
         val defaultWidth = stringPreferencesKey("default_stroke_width") // Float como texto
         // Capacidades: conmutadores (enum.name) + credenciales (JSON, secreto cifrado)
@@ -203,6 +218,9 @@ class SettingsStore(private val context: Context) {
             // Migración: quien ya tenía servidor+contraseña no debe pasar por el wizard.
             setupComplete = p[Keys.setup] ?: (url.isNotBlank() && pw.isNotBlank()),
             importOnConnect = p[Keys.importOnConnect] ?: true,
+            offlineReimportPolicy = runCatching {
+                OfflineReimportPolicy.valueOf(p[Keys.offlineReimportPolicy] ?: OfflineReimportPolicy.ASK.name)
+            }.getOrDefault(OfflineReimportPolicy.ASK),
             recentShowCount = p[Keys.recentCount] ?: 10,
             recentClearedAt = p[Keys.recentCleared] ?: "",
             finishMode = p[Keys.finishMode] ?: "newSheet",
@@ -214,7 +232,10 @@ class SettingsStore(private val context: Context) {
             liveLanguage = p[Keys.liveLanguage] ?: "es",
             liveNewlines = p[Keys.liveNewlines] ?: false,
             controlNotification = p[Keys.controlNotification] ?: false,
+            pressureWidthEnabled = p[Keys.pressureWidthEnabled] ?: false,
             knownPens = decodeKnownPens(p[Keys.knownPens]),
+            forgottenPens = decodeStringList(p[Keys.forgottenPens]),
+            lockedPenMac = p[Keys.lockedPenMac] ?: "",
             defaultStyle = StrokeStyle(
                 color = p[Keys.defaultColor] ?: 0xFF111111.toInt(),
                 width = p[Keys.defaultWidth]?.toFloatOrNull() ?: 1.6f,
@@ -240,6 +261,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.appMode] = s.appMode.name
             p[Keys.setup] = s.setupComplete
             p[Keys.importOnConnect] = s.importOnConnect
+            p[Keys.offlineReimportPolicy] = s.offlineReimportPolicy.name
             p[Keys.recentCount] = s.recentShowCount
             p[Keys.recentCleared] = s.recentClearedAt
             p[Keys.finishMode] = s.finishMode
@@ -251,7 +273,10 @@ class SettingsStore(private val context: Context) {
             p[Keys.liveLanguage] = s.liveLanguage
             p[Keys.liveNewlines] = s.liveNewlines
             p[Keys.controlNotification] = s.controlNotification
+            p[Keys.pressureWidthEnabled] = s.pressureWidthEnabled
             p[Keys.knownPens] = encodeKnownPens(s.knownPens)
+            p[Keys.forgottenPens] = encodeStringList(s.forgottenPens)
+            p[Keys.lockedPenMac] = s.lockedPenMac
             p[Keys.defaultColor] = s.defaultStyle.color
             p[Keys.defaultWidth] = s.defaultStyle.width.toString()
             p[Keys.ocrSource] = s.ocrSource.name
@@ -376,6 +401,20 @@ class SettingsStore(private val context: Context) {
                     pin = PwCrypto.decrypt(o.optString("pin")),
                 )
             }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeStringList(values: List<String>): String {
+        val arr = JSONArray()
+        values.distinct().forEach { arr.put(it) }
+        return arr.toString()
+    }
+
+    private fun decodeStringList(json: String?): List<String> {
+        if (json.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(json)
+            (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
         }.getOrDefault(emptyList())
     }
 }

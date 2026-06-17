@@ -8,7 +8,9 @@ import net.micapum.neopen.app.db.CaptureEntity
 import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.db.NotebookEntity
 import net.micapum.neopen.app.db.OutboxEntity
+import net.micapum.neopen.app.db.OfflineImportWarningEntity
 import net.micapum.neopen.app.db.PageBackgroundEntity
+import net.micapum.neopen.app.db.PenPageUserActionEntity
 import net.micapum.neopen.app.db.SyncMetaEntity
 import net.micapum.neopen.core.data.AnchorDto
 import net.micapum.neopen.core.data.CapturePatchDto
@@ -18,6 +20,8 @@ import net.micapum.neopen.core.data.CreateCaptureInput
 import net.micapum.neopen.core.data.NeopenApi
 import net.micapum.neopen.core.data.NotebookCreateDto
 import net.micapum.neopen.core.data.DotDto
+import net.micapum.neopen.core.data.OfflineReimportDecision
+import net.micapum.neopen.core.data.OfflineReimportPolicy
 import net.micapum.neopen.core.data.NotebookDto
 import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.OcrResultDto
@@ -26,11 +30,14 @@ import net.micapum.neopen.core.data.NotebookPatchDto
 import net.micapum.neopen.core.data.OverlapConfig
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.detectOverlap
+import net.micapum.neopen.core.data.freshReimportStrokes
 import net.micapum.neopen.core.data.ReorderDto
+import net.micapum.neopen.core.data.resolveOfflineReimport
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.StrokeDto
 import net.micapum.neopen.core.pen.PaperLookup
 import net.micapum.neopen.core.pen.StrokePage
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
@@ -45,6 +52,18 @@ object OutboxKind {
     const val REORDER_NOTEBOOK = "reorderNotebook"
     /** Sube al servidor una transcripción generada en el teléfono (failover del OCR). */
     const val PUSH_TRANSCRIPTION = "pushTranscription"
+}
+
+object OfflineImportStatus {
+    const val PENDING = "pending"
+    const val DISCARDED = "discarded"
+    const val NEW_CAPTURE = "newCapture"
+    const val MERGED = "merged"
+}
+
+object PenPageAction {
+    const val DELETED = "deleted"
+    const val MOVED = "moved"
 }
 
 /**
@@ -73,6 +92,12 @@ class NeopenRepository(private val db: NeopenDb) {
     fun recent(): Flow<List<Capture>> =
         db.captures().observeAll().map { rows -> rows.map { it.toDomain() } }
 
+    fun offlineImportWarnings(): Flow<List<OfflineImportWarning>> =
+        db.offlineImportWarnings().observePending().map { rows -> rows.map { it.toDomain() } }
+
+    fun pendingOfflineImportWarningCount(): Flow<Int> =
+        db.offlineImportWarnings().observePendingCount()
+
     fun capturesIn(notebookId: String): Flow<List<Capture>> =
         db.captures().observeByNotebook(notebookId).map { rows -> rows.map { it.toDomain() } }
 
@@ -97,7 +122,10 @@ class NeopenRepository(private val db: NeopenDb) {
         if (resp.captures.isNotEmpty()) db.captures().upsert(resp.captures.map { it.toEntity() })
         if (resp.notebooks.isNotEmpty()) db.notebooks().upsert(resp.notebooks.map { it.toEntity() })
         for (d in resp.deletions) when (d.kind) {
-            "capture" -> db.captures().deleteById(d.id)
+            "capture" -> {
+                db.captures().getById(d.id)?.let { recordPageAction(it, PenPageAction.DELETED) }
+                db.captures().deleteById(d.id)
+            }
             "notebook" -> db.notebooks().deleteById(d.id)
         }
         val meta = db.syncMeta().get() ?: SyncMetaEntity()
@@ -110,6 +138,8 @@ class NeopenRepository(private val db: NeopenDb) {
         db.notebooks().clear()
         db.outbox().clear()
         db.backgrounds().clear()
+        db.penPageUserActions().clear()
+        db.offlineImportWarnings().clear()
         db.syncMeta().upsert(SyncMetaEntity())
     }
 
@@ -169,6 +199,8 @@ class NeopenRepository(private val db: NeopenDb) {
 
     suspend fun moveCapture(id: String, notebookId: String, position: Int) {
         val e = db.captures().getById(id) ?: return
+        val nb = db.notebooks().getById(notebookId)
+        recordPageAction(e, PenPageAction.MOVED, notebookId, nb?.name)
         db.captures().upsertOne(
             e.copy(destination = "notebook", notebookId = notebookId, position = position, updatedAt = nowIso()),
         )
@@ -204,8 +236,12 @@ class NeopenRepository(private val db: NeopenDb) {
     }
 
     suspend fun deleteCapture(id: String) {
-        db.captures().deleteById(id)
-        enqueue(OutboxKind.DELETE_CAPTURE, id, "{}")
+        val e = db.captures().getById(id)
+        db.withTransaction {
+            e?.let { recordPageAction(it, PenPageAction.DELETED) }
+            db.captures().deleteById(id)
+            enqueue(OutboxKind.DELETE_CAPTURE, id, "{}")
+        }
     }
 
     // --- Finalizar hoja / cuaderno (sellado) -----------------------------------
@@ -427,7 +463,10 @@ class NeopenRepository(private val db: NeopenDb) {
      * bandeja (Room optimista) y la encola para subir (el servidor la archiva
      * por SOBP). Mismo flujo de subida que el companion, pero offline-first.
      */
-    suspend fun ingestPenPage(page: StrokePage) {
+    suspend fun ingestPenPage(
+        page: StrokePage,
+        reimportPolicy: OfflineReimportPolicy = OfflineReimportPolicy.ASK,
+    ) {
         val s = page.sobp
         val strokes = page.strokes.map { st ->
             StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
@@ -445,6 +484,9 @@ class NeopenRepository(private val db: NeopenDb) {
             paper = paper,
         )
         val now = nowIso()
+        if (page.source == "offline" && handleOfflineReimportIfNeeded(page, strokes, paper, name, input, reimportPolicy, now, syncRemote = true)) {
+            return
+        }
         val entity = CaptureEntity(
             id = "local-" + UUID.randomUUID(),
             rev = 0,
@@ -465,6 +507,94 @@ class NeopenRepository(private val db: NeopenDb) {
         enqueueCreateCapture(input, entity)
     }
 
+    private suspend fun handleOfflineReimportIfNeeded(
+        page: StrokePage,
+        strokes: List<StrokeDto>,
+        paper: PaperDto?,
+        name: String,
+        input: CreateCaptureInput,
+        policy: OfflineReimportPolicy,
+        now: String,
+        syncRemote: Boolean,
+    ): Boolean {
+        val s = page.sobp
+        val action = db.penPageUserActions().getBySobpKey(sobpKey(s.section, s.owner, s.book, s.page)) ?: return false
+        if (action.action != PenPageAction.DELETED && action.action != PenPageAction.MOVED) return false
+        val warningId = offlineWarningId(s.section, s.owner, s.book, s.page, strokes)
+        if (db.offlineImportWarnings().getResolved(warningId) != null) return true
+        val target = action.captureId
+            ?.let { db.captures().getById(it) }
+            ?.takeIf { it.clonedFrom == null && !it.sealed }
+        val warning = warningEntity(
+            id = warningId,
+            page = page,
+            strokes = strokes,
+            paper = paper,
+            name = name,
+            action = action,
+            target = target,
+            now = now,
+        )
+        when (resolveOfflineReimport(policy, target != null)) {
+            OfflineReimportDecision.ASK -> db.offlineImportWarnings().upsert(warning)
+            OfflineReimportDecision.DISCARD -> db.offlineImportWarnings().upsert(warning.copy(status = OfflineImportStatus.DISCARDED, resolvedAt = now))
+            OfflineReimportDecision.NEW_CAPTURE -> {
+                createCaptureFromReimport(input, strokes, paper, page, name, now, syncRemote)
+                db.offlineImportWarnings().upsert(warning.copy(status = OfflineImportStatus.NEW_CAPTURE, resolvedAt = now))
+            }
+            OfflineReimportDecision.MERGE -> {
+                mergeReimportIntoCapture(target ?: return false, input, strokes, now, syncRemote)
+                db.offlineImportWarnings().upsert(warning.copy(status = OfflineImportStatus.MERGED, resolvedAt = now))
+            }
+        }
+        return true
+    }
+
+    suspend fun discardOfflineImportWarning(id: String) {
+        db.offlineImportWarnings().setStatus(id, OfflineImportStatus.DISCARDED, nowIso())
+    }
+
+    suspend fun importOfflineWarningAsNewCapture(id: String) {
+        val warning = db.offlineImportWarnings().getById(id) ?: return
+        if (warning.status != OfflineImportStatus.PENDING) return
+        val page = warning.toStrokePage()
+        val strokes = Json.strokes(warning.strokesJson)
+        val paper = Json.paperOf(warning.paperJson)
+        val input = CreateCaptureInput(
+            sobp = SobpDto(warning.section, warning.owner, warning.book, warning.page),
+            source = page.source,
+            capturedAt = warning.capturedAt,
+            name = warning.name,
+            strokes = strokes,
+            paper = paper,
+        )
+        val now = nowIso()
+        createCaptureFromReimport(input, strokes, paper, page, warning.name, now, syncRemote = true)
+        db.offlineImportWarnings().setStatus(id, OfflineImportStatus.NEW_CAPTURE, now)
+    }
+
+    suspend fun mergeOfflineImportWarning(id: String): Boolean {
+        val warning = db.offlineImportWarnings().getById(id) ?: return false
+        if (warning.status != OfflineImportStatus.PENDING) return false
+        val targetId = warning.targetCaptureId ?: return false
+        val target = db.captures().getById(targetId)?.takeIf { it.clonedFrom == null && !it.sealed } ?: return false
+        val strokes = Json.strokes(warning.strokesJson)
+        val input = CreateCaptureInput(
+            sobp = SobpDto(warning.section, warning.owner, warning.book, warning.page),
+            source = warning.source,
+            capturedAt = warning.capturedAt,
+            name = warning.name,
+            strokes = strokes,
+            paper = Json.paperOf(warning.paperJson),
+            notebookId = target.notebookId,
+            destination = target.destination,
+        )
+        val now = nowIso()
+        mergeReimportIntoCapture(target, input, strokes, now, syncRemote = true)
+        db.offlineImportWarnings().setStatus(id, OfflineImportStatus.MERGED, now)
+        return true
+    }
+
     // --- Modo LOCAL: archivado en el propio dispositivo (sin servidor) ---------
 
     /**
@@ -472,19 +602,34 @@ class NeopenRepository(private val db: NeopenDb) {
      * deduplica por SOBP (append-only por startTime + nº de dots) y archiva la
      * hoja en su cuaderno. NO usa outbox ni servidor.
      */
-    suspend fun ingestPenPageLocal(page: StrokePage) {
+    suspend fun ingestPenPageLocal(
+        page: StrokePage,
+        reimportPolicy: OfflineReimportPolicy = OfflineReimportPolicy.ASK,
+    ) {
         val s = page.sobp
         val bookKey = "${s.section}.${s.owner}.${s.book}"
         val detected = PaperLookup.lookup(s.section, s.owner, s.book, s.page)
-        val nb = db.notebooks().findByBookKey(bookKey) ?: createLocalNotebook(bookKey, detected)
         val incoming = page.strokes.map { st ->
             StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
         }
         val now = nowIso()
+        val name = "Nota ${s.section}.${s.owner}.${s.book}.${s.page}"
+        val input = CreateCaptureInput(
+            sobp = SobpDto(s.section, s.owner, s.book, s.page),
+            source = page.source,
+            capturedAt = page.capturedAt,
+            name = name,
+            strokes = incoming,
+            paper = detected,
+        )
+        if (page.source == "offline" && handleOfflineReimportIfNeeded(page, incoming, detected, name, input, reimportPolicy, now, syncRemote = false)) {
+            return
+        }
+        val nb = db.notebooks().findByBookKey(bookKey) ?: createLocalNotebook(bookKey, detected)
         val existing = db.captures().findBySobp(s.section, s.owner, s.book, s.page)
         if (existing != null) {
             val cur = Json.strokes(existing.strokesJson)
-            val fresh = incoming.filter { n -> cur.none { it.startTime == n.startTime && it.dots.size == n.dots.size } }
+            val fresh = freshReimportStrokes(cur, incoming)
             if (fresh.isEmpty()) return
             // Detección de superposición: ¿los trazos nuevos pisan a los anteriores? Si
             // dispara, marca la hoja; si no, conserva el aviso previo (sin resolver).
@@ -504,7 +649,7 @@ class NeopenRepository(private val db: NeopenDb) {
                     capturedAt = page.capturedAt,
                     importedAt = now,
                     updatedAt = now,
-                    name = "Nota ${s.section}.${s.owner}.${s.book}.${s.page}",
+                    name = name,
                     strokesJson = Json.strokesJson(incoming),
                     destination = "notebook",
                     notebookId = nb.id,
@@ -579,6 +724,148 @@ class NeopenRepository(private val db: NeopenDb) {
         db.outbox().insert(
             OutboxEntity(kind = kind, targetId = targetId, payloadJson = payloadJson, createdAt = System.currentTimeMillis()),
         )
+    }
+
+    private suspend fun recordPageAction(
+        capture: CaptureEntity,
+        action: String,
+        overrideNotebookId: String? = null,
+        overrideNotebookName: String? = null,
+    ) {
+        if (capture.clonedFrom != null) return
+        val notebookName = overrideNotebookName
+            ?: overrideNotebookId?.let { db.notebooks().getById(it)?.name }
+            ?: capture.notebookId?.let { db.notebooks().getById(it)?.name }
+            ?: capture.notebook
+        db.penPageUserActions().upsert(
+            PenPageUserActionEntity(
+                sobpKey = sobpKey(capture.section, capture.owner, capture.book, capture.page),
+                section = capture.section,
+                owner = capture.owner,
+                book = capture.book,
+                page = capture.page,
+                action = action,
+                captureId = capture.id,
+                captureName = capture.name,
+                destination = if (overrideNotebookId != null) "notebook" else capture.destination,
+                notebookId = overrideNotebookId ?: capture.notebookId,
+                notebookName = notebookName,
+                paperJson = capture.paperJson,
+                createdAt = nowIso(),
+            ),
+        )
+    }
+
+    private suspend fun createCaptureFromReimport(
+        input: CreateCaptureInput,
+        strokes: List<StrokeDto>,
+        paper: PaperDto?,
+        page: StrokePage,
+        name: String,
+        now: String,
+        syncRemote: Boolean,
+    ) {
+        val entity = CaptureEntity(
+            id = "local-" + UUID.randomUUID(),
+            rev = 0,
+            section = page.sobp.section,
+            owner = page.sobp.owner,
+            book = page.sobp.book,
+            page = page.sobp.page,
+            notebook = null,
+            source = page.source,
+            capturedAt = page.capturedAt,
+            importedAt = now,
+            updatedAt = now,
+            name = name,
+            strokesJson = Json.strokesJson(strokes),
+            paperJson = Json.paperJson(paper),
+            destination = "inbox",
+        )
+        if (syncRemote) enqueueCreateCapture(input, entity) else db.captures().upsertOne(entity)
+    }
+
+    private suspend fun mergeReimportIntoCapture(
+        target: CaptureEntity,
+        input: CreateCaptureInput,
+        incoming: List<StrokeDto>,
+        now: String,
+        syncRemote: Boolean,
+    ) {
+        val cur = Json.strokes(target.strokesJson)
+        val fresh = freshReimportStrokes(cur, incoming)
+        if (fresh.isNotEmpty()) {
+            val overlapHit = detectOverlap(cur, fresh, overlapConfig)
+            val overlapJson = if (overlapHit != null) Json.overlapJson(overlapHit) else target.overlapJson
+            db.captures().upsertOne(
+                target.copy(
+                    strokesJson = Json.strokesJson(cur + fresh),
+                    overlapJson = overlapJson,
+                    transcriptionJson = null,
+                    updatedAt = now,
+                    importedAt = now,
+                ),
+            )
+        }
+        if (syncRemote) enqueue(OutboxKind.CREATE_CAPTURE, target.id, Json.createCapture.toJson(input))
+    }
+
+    private fun warningEntity(
+        id: String,
+        page: StrokePage,
+        strokes: List<StrokeDto>,
+        paper: PaperDto?,
+        name: String,
+        action: PenPageUserActionEntity,
+        target: CaptureEntity?,
+        now: String,
+    ): OfflineImportWarningEntity =
+        OfflineImportWarningEntity(
+            id = id,
+            section = page.sobp.section,
+            owner = page.sobp.owner,
+            book = page.sobp.book,
+            page = page.sobp.page,
+            source = page.source,
+            capturedAt = page.capturedAt,
+            importedAt = now,
+            name = name,
+            strokesJson = Json.strokesJson(strokes),
+            paperJson = Json.paperJson(paper ?: Json.paperOf(action.paperJson)),
+            reasonAction = action.action,
+            actionCaptureId = action.captureId,
+            actionCaptureName = action.captureName,
+            actionDestination = action.destination,
+            actionNotebookId = action.notebookId,
+            actionNotebookName = action.notebookName,
+            actionAt = action.createdAt,
+            targetCaptureId = target?.id,
+        )
+
+    private fun OfflineImportWarningEntity.toStrokePage(): StrokePage =
+        StrokePage(
+            sobp = net.micapum.neopen.core.pen.Sobp(section, owner, book, page),
+            source = source,
+            capturedAt = capturedAt,
+            strokes = emptyList(),
+        )
+
+    private fun sobpKey(section: Int, owner: Int, book: Int, page: Int): String =
+        "$section.$owner.$book.$page"
+
+    private fun offlineWarningId(section: Int, owner: Int, book: Int, page: Int, strokes: List<StrokeDto>): String {
+        val raw = buildString {
+            append(sobpKey(section, owner, book, page))
+            strokes.sortedBy { it.startTime }.forEach { st ->
+                append('|').append(st.startTime).append(':').append(st.endTime).append(':').append(st.dots.size)
+            }
+        }
+        return "offline-" + sha1(raw)
+    }
+
+    private fun sha1(s: String): String {
+        val bytes = MessageDigest.getInstance("SHA-1").digest(s.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     // --- Drenaje del outbox (lo usa SyncEngine.push) ---------------------------

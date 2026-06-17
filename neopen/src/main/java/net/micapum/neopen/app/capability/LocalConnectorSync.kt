@@ -59,7 +59,7 @@ class LocalConnectorSync(private val graph: Graph) {
         val nbById = notebooks.associateBy { it.id }
         val noSync = notebooks.filter { it.tags.contains(NO_SYNC_TAG) }.map { it.id }.toSet()
 
-        val desired = computeDesired(captures, notebooks, nbById, noSync, connectors.map { it.id })
+        val desired = computeDesired(captures, notebooks, nbById, noSync, connectors.map { it.id }, s.pressureWidthEnabled)
         val stateRows = db.connectorSyncState().all()
         val stateByKey = stateRows.associateBy { fileKey(it.itemId, it.connectorId, it.format) }
 
@@ -113,6 +113,7 @@ class LocalConnectorSync(private val graph: Graph) {
         nbById: Map<String, Notebook>,
         noSync: Set<String>,
         connectorIds: List<String>,
+        pressureWidthEnabled: Boolean,
     ): Map<String, Desired> {
         val desired = LinkedHashMap<String, Desired>()
 
@@ -133,7 +134,7 @@ class LocalConnectorSync(private val graph: Graph) {
                     desired[fileKey(cap.id, cid, format)] = Desired(
                         itemId = cap.id, connectorId = cid, format = format,
                         relativePath = relativePath, hash = hash,
-                        render = { renderFormat(cap, format, "$base.png", nbById) },
+                        render = { renderFormat(cap, format, "$base.png", nbById, pressureWidthEnabled) },
                     )
                 }
             }
@@ -153,7 +154,7 @@ class LocalConnectorSync(private val graph: Graph) {
                 desired[fileKey("nb:${nb.id}", cid, "pdf")] = Desired(
                     itemId = "nb:${nb.id}", connectorId = cid, format = "pdf",
                     relativePath = relativePath, hash = hash,
-                    render = { renderNotebookPdf(pages) to "application/pdf" },
+                        render = { renderNotebookPdf(pages, pressureWidthEnabled) to "application/pdf" },
                 )
             }
         }
@@ -181,10 +182,11 @@ class LocalConnectorSync(private val graph: Graph) {
         format: String,
         attachmentName: String,
         nbById: Map<String, Notebook>,
+        pressureWidthEnabled: Boolean,
     ): Pair<ByteArray, String> = when (format) {
-        "svg" -> renderSvg(cap.strokes, cap.paper).toByteArray() to "image/svg+xml"
-        "png" -> rasterizePng(cap.strokes, cap.paper) to "image/png"
-        "pdf" -> renderPagePdf(cap.strokes, cap.paper) to "application/pdf"
+        "svg" -> renderSvg(cap.strokes, cap.paper, pressureWidthEnabled).toByteArray() to "image/svg+xml"
+        "png" -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = pressureWidthEnabled) to "image/png"
+        "pdf" -> renderPagePdf(cap.strokes, cap.paper, pressureWidthEnabled) to "application/pdf"
         "md" -> buildMarkdown(cap, nbById[cap.notebookId]?.name, attachmentName).toByteArray() to "text/markdown"
         else -> throw IllegalArgumentException(format)
     }

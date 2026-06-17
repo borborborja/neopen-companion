@@ -317,4 +317,32 @@
     <string name="cap_import_note">API keys and passwords are not imported for security: enter them manually. Check that the URLs are reachable from the phone.</string>
     <string name="cap_import_ok">Configuration imported from the server.</string>
     <string name="cap_import_failed">Could not import from the server.</string>
+
+    <string name="pen_style_title">Stroke style (color and width)</string>
+    <string name="pen_style_default_title">Default style</string>
+    <string name="pen_paired_title">Paired pens</string>
+    <string name="pen_paired_empty">No paired pens yet. Connect one and it will appear here; you can change its color even when it is off.</string>
+    <string name="pen_forget">Forget</string>
+    <string name="pen_sensitivity_title">Pressure sensitivity</string>
+    <string name="pen_sensitivity_desc">Only shown on compatible pens.</string>
+    <string name="pen_sensitivity_level">Level %1$d</string>
+    <string name="pen_lock_to_this_title">Only connect this pen</string>
+    <string name="pen_lock_to_this_desc">Prevents the app from automatically connecting to other pens.</string>
+    <string name="settings_pressure_width_title">Stroke pressure</string>
+    <string name="settings_pressure_width_toggle_title">Pressure changes width</string>
+    <string name="settings_pressure_width_toggle_desc">Draws thinner or thicker strokes based on detected pressure.</string>
+    <string name="settings_pressure_width_note">Only visible in practice on compatible pens or captures with reliable pressure.</string>
+    <string name="settings_reimport_policy_title">Reimports from pen memory</string>
+    <string name="settings_reimport_policy_desc">When an offline dump brings back strokes from a page you deleted or moved, the app can ask you or apply a default decision.</string>
+    <string name="reimport_policy_ask">Always ask</string>
+    <string name="reimport_policy_discard">Discard automatically</string>
+    <string name="reimport_policy_new_capture">Create new edit</string>
+    <string name="reimport_policy_merge">Merge when possible</string>
+    <string name="offline_reimport_warning_title">Reimported strokes</string>
+    <string name="offline_reimport_warning_deleted_desc">The pen brought back strokes from page %1$s, which you had deleted (%2$s). Do you want to discard or keep them?</string>
+    <string name="offline_reimport_warning_moved_desc">The pen brought back strokes from page %1$s, which you had moved to %2$s. Do you want to merge them, create a separate edit, or discard them?</string>
+    <string name="offline_reimport_action_discard">Discard</string>
+    <string name="offline_reimport_action_new_capture">New edit</string>
+    <string name="offline_reimport_action_merge">Merge</string>
+    <string name="vm_offline_reimport_merge_failed">This reimport could not be merged.</string>
 </resources>

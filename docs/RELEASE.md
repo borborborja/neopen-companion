@@ -64,6 +64,10 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.21.3** — Boli: sensibilidad de presión en `:neopen`/`:live`, ajuste de
+  presión→grosor para render/export/OCR/conectores locales, bolis conocidos con
+  "olvidar" y bloqueo a un boli concreto. Android: avisos de reimportación offline
+  para páginas eliminadas/movidas y política por defecto configurable.
 - **v0.19.0** — capacidades local/servidor (OCR/LanguageTool/marcadores/conectores
   en el teléfono o servidor + failover). Requiere `neopen` ≥ v0.21.0 para el
   sync-back del failover (`PUT /api/captures/:id/transcription`).

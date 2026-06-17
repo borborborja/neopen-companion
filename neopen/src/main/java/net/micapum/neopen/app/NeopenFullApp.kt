@@ -131,10 +131,71 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+/** v7→v8: avisos locales de reimportación offline y acciones previas por SOBP. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS pen_page_user_actions (
+                sobpKey TEXT NOT NULL PRIMARY KEY,
+                section INTEGER NOT NULL,
+                owner INTEGER NOT NULL,
+                book INTEGER NOT NULL,
+                page INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                captureId TEXT,
+                captureName TEXT,
+                destination TEXT,
+                notebookId TEXT,
+                notebookName TEXT,
+                paperJson TEXT,
+                createdAt TEXT NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_pen_page_user_actions_section_owner_book_page " +
+                "ON pen_page_user_actions(section, owner, book, page)",
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS offline_import_warnings (
+                id TEXT NOT NULL PRIMARY KEY,
+                section INTEGER NOT NULL,
+                owner INTEGER NOT NULL,
+                book INTEGER NOT NULL,
+                page INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                capturedAt TEXT NOT NULL,
+                importedAt TEXT NOT NULL,
+                name TEXT NOT NULL,
+                strokesJson TEXT NOT NULL,
+                paperJson TEXT,
+                reasonAction TEXT NOT NULL,
+                actionCaptureId TEXT,
+                actionCaptureName TEXT,
+                actionDestination TEXT,
+                actionNotebookId TEXT,
+                actionNotebookName TEXT,
+                actionAt TEXT NOT NULL,
+                targetCaptureId TEXT,
+                status TEXT NOT NULL,
+                resolvedAt TEXT
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_offline_import_warnings_status_importedAt ON offline_import_warnings(status, importedAt)")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_offline_import_warnings_section_owner_book_page " +
+                "ON offline_import_warnings(section, owner, book, page)",
+        )
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
-        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
         // Solo permite recrear la BD desde la v1 efímera (dev, nunca publicada; el
         // esquema arrancó en v2). De v2 en adelante SIEMPRE hay migración explícita,
         // así que jamás se borran datos del usuario en una actualización.
@@ -174,10 +235,10 @@ class Graph(app: Application) {
     val pen = PenManager(app) { page ->
         scope.launch {
             if (localMode) {
-                repo.ingestPenPageLocal(page)
+                repo.ingestPenPageLocal(page, lastSettings.offlineReimportPolicy)
                 syncStatus.markPenSync(System.currentTimeMillis())
             } else {
-                repo.ingestPenPage(page)
+                repo.ingestPenPage(page, lastSettings.offlineReimportPolicy)
                 syncStatus.markPenSync(System.currentTimeMillis())
                 syncNow()
             }
@@ -199,14 +260,27 @@ class Graph(app: Application) {
     init {
         // El estilo de trazo a sellar depende del boli (MAC) y de los ajustes actuales.
         pen.styleProvider = { mac -> lastSettings.styleFor(mac) }
+        pen.connectionAllowed = { mac, manual ->
+            val cur = lastSettings
+            val locked = cur.lockedPenMac
+            when {
+                locked.isNotBlank() -> mac == locked
+                !manual && cur.forgottenPens.contains(mac) -> false
+                else -> true
+            }
+        }
         // Registra un boli recién visto en el historial de bolis emparejados (si es nuevo).
         pen.onPenSeen = { mac, name ->
             val cur = lastSettings
-            if (cur.knownPens.none { it.mac == mac } && cur.knownPens.size < 2) {
-                val alias = name?.takeIf { it.isNotBlank() } ?: mac
-                scope.launch {
-                    settings.update(cur.copy(knownPens = cur.knownPens + KnownPen(mac, alias, cur.defaultStyle)))
-                }
+            val alias = name?.takeIf { it.isNotBlank() } ?: mac
+            val knownPens = if (cur.knownPens.none { it.mac == mac }) {
+                cur.knownPens + KnownPen(mac, alias, cur.defaultStyle)
+            } else {
+                cur.knownPens
+            }
+            val forgotten = cur.forgottenPens.filterNot { it == mac }
+            if (knownPens != cur.knownPens || forgotten != cur.forgottenPens) {
+                scope.launch { settings.update(cur.copy(knownPens = knownPens, forgottenPens = forgotten)) }
             }
         }
         // PIN recordado para desbloqueo automático (cifrado en reposo).

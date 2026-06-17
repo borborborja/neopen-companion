@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import net.micapum.neopen.app.R
 import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
+import net.micapum.neopen.app.data.OfflineImportWarning
 import net.micapum.neopen.app.data.PageBackground
 import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.graph
@@ -34,6 +35,7 @@ import net.micapum.neopen.core.data.BackgroundUploadInput
 import net.micapum.neopen.core.data.FinishModeBody
 import net.micapum.neopen.core.data.CreateSobpScanInput
 import net.micapum.neopen.core.data.NotebookPaperBody
+import net.micapum.neopen.core.data.OfflineReimportPolicy
 import net.micapum.neopen.core.data.OverlapConfigDto
 import net.micapum.neopen.core.data.PaperDto
 import net.micapum.neopen.core.data.SplitBody
@@ -84,6 +86,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val pending: StateFlow<Int> =
         graph.repo.pendingCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val offlineImportWarnings: StateFlow<List<OfflineImportWarning>> =
+        graph.repo.offlineImportWarnings().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingOfflineImportWarnings: StateFlow<Int> =
+        graph.repo.pendingOfflineImportWarningCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     /** Marcas de última sincronización (boli/servidor) para mostrar en Ajustes → Servidor. */
     val syncStatus: StateFlow<SyncStatus> =
@@ -333,6 +341,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setBeep(on: Boolean) = graph.pen.setBeep(on)
     fun setOfflineData(on: Boolean) = graph.pen.setOfflineData(on)
     fun setAutoShutdown(min: Int) = graph.pen.setAutoShutdown(min)
+    fun setSensitivity(level: Int) = graph.pen.setSensitivity(level)
 
     // Contraseña / PIN del boli
     fun unlockPen(pin: String, remember: Boolean) = graph.pen.unlockPen(pin, remember)
@@ -429,9 +438,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val cap = graph.repo.capture(captureId) ?: return null
         val bytes = withContext(Dispatchers.IO) {
             when (format) {
-                ExportFormat.PDF -> renderPagePdf(cap.strokes, cap.paper)
-                ExportFormat.PNG -> rasterizePng(cap.strokes, cap.paper)
-                ExportFormat.SVG -> renderSvg(cap.strokes, cap.paper).toByteArray()
+                ExportFormat.PDF -> renderPagePdf(cap.strokes, cap.paper, settings.value.pressureWidthEnabled)
+                ExportFormat.PNG -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = settings.value.pressureWidthEnabled)
+                ExportFormat.SVG -> renderSvg(cap.strokes, cap.paper, settings.value.pressureWidthEnabled).toByteArray()
             }
         }
         return ExportFile("${fileBaseName(cap.name)}.${format.ext}", format.mime, bytes)
@@ -440,7 +449,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun exportNotebookPdf(notebookId: String): ExportFile? {
         val nb = graph.repo.notebook(notebookId) ?: return null
         val pages = graph.repo.capturesIn(notebookId).first()
-        val bytes = withContext(Dispatchers.IO) { renderNotebookPdf(pages) }
+        val bytes = withContext(Dispatchers.IO) { renderNotebookPdf(pages, settings.value.pressureWidthEnabled) }
         return ExportFile("${fileBaseName(nb.name)}.pdf", ExportFormat.PDF.mime, bytes)
     }
 
@@ -594,6 +603,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.settings.update(settings.value.copy(defaultStyle = style)) }
     }
 
+    fun setPressureWidthEnabled(enabled: Boolean) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(pressureWidthEnabled = enabled)) }
+    }
+
+    fun setOfflineReimportPolicy(policy: OfflineReimportPolicy) {
+        viewModelScope.launch { graph.settings.update(settings.value.copy(offlineReimportPolicy = policy)) }
+    }
+
+    fun setLockedPen(mac: String?) {
+        viewModelScope.launch {
+            val cur = settings.value
+            graph.settings.update(cur.copy(lockedPenMac = mac.orEmpty()))
+        }
+    }
+
     fun renamePen(mac: String, alias: String) {
         viewModelScope.launch {
             val cur = settings.value
@@ -604,13 +628,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun forgetPen(mac: String) {
         viewModelScope.launch {
             val cur = settings.value
-            graph.settings.update(cur.copy(knownPens = cur.knownPens.filterNot { it.mac == mac }))
+            val locked = if (cur.lockedPenMac == mac) "" else cur.lockedPenMac
+            graph.settings.update(
+                cur.copy(
+                    knownPens = cur.knownPens.filterNot { it.mac == mac },
+                    forgottenPens = (cur.forgottenPens + mac).distinct(),
+                    lockedPenMac = locked,
+                ),
+            )
+            if (penState.value.mac == mac) graph.pen.disconnect()
         }
     }
 
     /** Oculta lo actual de "Últimas ediciones"; una edición posterior lo trae de vuelta. */
     fun clearRecent() {
         viewModelScope.launch { graph.settings.update(settings.value.copy(recentClearedAt = nowIso())) }
+    }
+
+    fun discardOfflineImportWarning(id: String) {
+        viewModelScope.launch { graph.repo.discardOfflineImportWarning(id) }
+    }
+
+    fun importOfflineWarningAsNewCapture(id: String) {
+        viewModelScope.launch {
+            graph.repo.importOfflineWarningAsNewCapture(id)
+            if (hasServer()) graph.syncNow()
+        }
+    }
+
+    fun mergeOfflineImportWarning(id: String) {
+        viewModelScope.launch {
+            val merged = graph.repo.mergeOfflineImportWarning(id)
+            if (merged && hasServer()) graph.syncNow()
+            if (!merged) _status.value = getApplication<Application>().getString(R.string.vm_offline_reimport_merge_failed)
+        }
     }
 
     /** Cambia el modo al finalizar; en modo completo lo sincroniza con el servidor (= web). */

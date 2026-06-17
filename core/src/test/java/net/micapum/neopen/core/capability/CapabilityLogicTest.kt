@@ -1,5 +1,11 @@
 package net.micapum.neopen.core.capability
 
+import net.micapum.neopen.core.data.DotDto
+import net.micapum.neopen.core.data.OfflineReimportDecision
+import net.micapum.neopen.core.data.OfflineReimportPolicy
+import net.micapum.neopen.core.data.StrokeDto
+import net.micapum.neopen.core.data.freshReimportStrokes
+import net.micapum.neopen.core.data.resolveOfflineReimport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -81,4 +87,37 @@ class CapabilityLogicTest {
         assertEquals("auto", normalizeLanguage(""))
         assertEquals("auto", normalizeLanguage("klingon"))
     }
+
+    // --- Reimportación offline -------------------------------------------------
+
+    @Test
+    fun resolvesOfflineReimportPolicies() {
+        assertEquals(OfflineReimportDecision.ASK, resolveOfflineReimport(OfflineReimportPolicy.ASK, mergeTargetAvailable = true))
+        assertEquals(OfflineReimportDecision.DISCARD, resolveOfflineReimport(OfflineReimportPolicy.DISCARD, mergeTargetAvailable = true))
+        assertEquals(OfflineReimportDecision.NEW_CAPTURE, resolveOfflineReimport(OfflineReimportPolicy.NEW_CAPTURE, mergeTargetAvailable = true))
+        assertEquals(OfflineReimportDecision.MERGE, resolveOfflineReimport(OfflineReimportPolicy.MERGE, mergeTargetAvailable = true))
+    }
+
+    @Test
+    fun mergePolicyFallsBackToAskWithoutValidTarget() {
+        assertEquals(OfflineReimportDecision.ASK, resolveOfflineReimport(OfflineReimportPolicy.MERGE, mergeTargetAvailable = false))
+    }
+
+    @Test
+    fun reimportDedupeUsesStartTimeAndDotCount() {
+        val existing = listOf(stroke(start = 10, dotCount = 2), stroke(start = 20, dotCount = 3))
+        val incoming = listOf(
+            stroke(start = 10, dotCount = 2),
+            stroke(start = 10, dotCount = 4),
+            stroke(start = 30, dotCount = 1),
+        )
+        assertEquals(listOf(incoming[1], incoming[2]), freshReimportStrokes(existing, incoming))
+    }
+
+    private fun stroke(start: Long, dotCount: Int): StrokeDto =
+        StrokeDto(
+            startTime = start,
+            endTime = start + 1,
+            dots = List(dotCount) { DotDto(x = it.toFloat(), y = it.toFloat(), f = 1f, t = it.toLong()) },
+        )
 }

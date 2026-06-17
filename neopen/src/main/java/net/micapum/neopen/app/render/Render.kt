@@ -24,6 +24,7 @@ data class StyledPolyline(
     val points: List<Offset>,
     val color: Int,
     val width: Float,
+    val pointWidths: List<Float>? = null,
 )
 
 /** Modelo de render: polilíneas ya en px dentro de un bounding box. */
@@ -46,6 +47,7 @@ fun buildModel(
     scale: Float = 28f,
     padding: Float = 24f,
     strokeWidth: Float = 1.6f,
+    pressureWidthEnabled: Boolean = false,
 ): RenderModel {
     val b = if (paper != null) {
         Bounds(paper.x0, paper.y0, paper.x0 + paper.width, paper.y0 + paper.height)
@@ -57,10 +59,12 @@ fun buildModel(
     val wScale = strokeWidth / 1.6f
     val polylines = strokes.map { st ->
         val pts = st.dots.map { d -> Offset((d.x - b.minX) * scale + padding, (d.y - b.minY) * scale + padding) }
+        val baseWidth = (st.width ?: 1.6f) * wScale
         StyledPolyline(
             points = pts,
             color = st.color ?: INK,
-            width = (st.width ?: 1.6f) * wScale,
+            width = baseWidth,
+            pointWidths = if (pressureWidthEnabled) st.dots.map { d -> pressureWidth(baseWidth, d.f) } else null,
         )
     }
     return RenderModel(
@@ -69,6 +73,15 @@ fun buildModel(
         strokeWidth = strokeWidth,
         polylines = polylines,
     )
+}
+
+private fun pressureWidth(base: Float, force: Float): Float {
+    val normalized = when {
+        force.isNaN() || force <= 0f -> 0.5f
+        force <= 1f -> force
+        else -> force / 1023f
+    }.coerceIn(0f, 1f)
+    return base * (0.55f + normalized * 0.9f)
 }
 
 private fun computeBounds(strokes: List<StrokeDto>): Bounds {
@@ -101,11 +114,20 @@ internal fun drawModelTo(canvas: android.graphics.Canvas, m: RenderModel) {
         val pts = poly.points
         if (pts.isEmpty()) continue
         paint.color = poly.color
-        paint.strokeWidth = poly.width
         if (pts.size == 1) {
+            paint.strokeWidth = poly.pointWidths?.firstOrNull() ?: poly.width
             canvas.drawPoint(pts[0].x, pts[0].y, paint)
             continue
         }
+        val widths = poly.pointWidths
+        if (widths != null && widths.size == pts.size) {
+            for (i in 0 until pts.lastIndex) {
+                paint.strokeWidth = ((widths[i] + widths[i + 1]) / 2f).coerceAtLeast(0.5f)
+                canvas.drawLine(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, paint)
+            }
+            continue
+        }
+        paint.strokeWidth = poly.width
         val path = android.graphics.Path()
         pts.forEachIndexed { i, p -> if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y) }
         canvas.drawPath(path, paint)
@@ -116,13 +138,19 @@ internal fun drawModelTo(canvas: android.graphics.Canvas, m: RenderModel) {
  * Rasteriza una página a PNG (fondo blanco, tinta #111). `dpiScale=2` para
  * export/OCR nítidos (igual que la web, que exporta a 2×).
  */
-fun rasterizePng(strokes: List<StrokeDto>, paper: PaperDto?, dpiScale: Float = 2f): ByteArray {
+fun rasterizePng(
+    strokes: List<StrokeDto>,
+    paper: PaperDto?,
+    dpiScale: Float = 2f,
+    pressureWidthEnabled: Boolean = false,
+): ByteArray {
     val m = buildModel(
         strokes,
         paper,
         scale = 28f * dpiScale,
         padding = 24f * dpiScale,
         strokeWidth = 1.6f * dpiScale,
+        pressureWidthEnabled = pressureWidthEnabled,
     )
     val w = m.width.toInt().coerceIn(1, 6000)
     val h = m.height.toInt().coerceIn(1, 6000)
@@ -209,16 +237,21 @@ fun OverlapPreview(
             if (pts.isEmpty()) return@forEachIndexed
             // El color lo decide el corte (mantener/mover); el grueso, el del trazo.
             val color = if (i >= cut) movedColor else keptColor
+            if (pts.size == 1) {
+                val p = pts[0]
+                drawCircle(color, radius = scaledPointWidth(poly, 0, s) / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
+                return@forEachIndexed
+            }
+            val widths = poly.pointWidths
+            if (widths != null && widths.size == pts.size) {
+                drawVariablePolyline(pts, widths, color, s, dx, dy)
+                return@forEachIndexed
+            }
             val style = Stroke(
                 width = (poly.width * s).coerceAtLeast(1f),
                 cap = StrokeCap.Round,
                 join = StrokeJoin.Round,
             )
-            if (pts.size == 1) {
-                val p = pts[0]
-                drawCircle(color, radius = style.width / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
-                return@forEachIndexed
-            }
             val path = Path()
             pts.forEachIndexed { j, p ->
                 val x = p.x * s + dx
@@ -242,8 +275,9 @@ fun InkCanvas(
     inkColor: Color = Color(0xFF111111),
     bgImage: ImageBitmap? = null,
     bgPreset: String? = null,
+    pressureWidthEnabled: Boolean = false,
 ) {
-    val model = remember(strokes, paper) { buildModel(strokes, paper) }
+    val model = remember(strokes, paper, pressureWidthEnabled) { buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled) }
     Canvas(modifier) {
         if (model.width <= 0f || model.height <= 0f || size.minDimension <= 0f) return@Canvas
         val s = minOf(size.width / model.width, size.height / model.height)
@@ -268,16 +302,21 @@ fun InkCanvas(
             val pts = poly.points
             if (pts.isEmpty()) continue
             val color = Color(poly.color)
+            if (pts.size == 1) {
+                val p = pts[0]
+                drawCircle(color, radius = scaledPointWidth(poly, 0, s) / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
+                continue
+            }
+            val widths = poly.pointWidths
+            if (widths != null && widths.size == pts.size) {
+                drawVariablePolyline(pts, widths, color, s, dx, dy)
+                continue
+            }
             val style = Stroke(
                 width = (poly.width * s).coerceAtLeast(1f),
                 cap = StrokeCap.Round,
                 join = StrokeJoin.Round,
             )
-            if (pts.size == 1) {
-                val p = pts[0]
-                drawCircle(color, radius = style.width / 2f, center = Offset(p.x * s + dx, p.y * s + dy))
-                continue
-            }
             val path = Path()
             pts.forEachIndexed { i, p ->
                 val x = p.x * s + dx
@@ -286,5 +325,28 @@ fun InkCanvas(
             }
             drawPath(path, color, style = style)
         }
+    }
+}
+
+private fun scaledPointWidth(poly: StyledPolyline, index: Int, scale: Float): Float =
+    ((poly.pointWidths?.getOrNull(index) ?: poly.width) * scale).coerceAtLeast(1f)
+
+private fun DrawScope.drawVariablePolyline(
+    pts: List<Offset>,
+    widths: List<Float>,
+    color: Color,
+    scale: Float,
+    dx: Float,
+    dy: Float,
+) {
+    for (i in 0 until pts.lastIndex) {
+        val w = (((widths[i] + widths[i + 1]) / 2f) * scale).coerceAtLeast(1f)
+        drawLine(
+            color = color,
+            start = Offset(pts[i].x * scale + dx, pts[i].y * scale + dy),
+            end = Offset(pts[i + 1].x * scale + dx, pts[i + 1].y * scale + dy),
+            strokeWidth = w,
+            cap = StrokeCap.Round,
+        )
     }
 }
