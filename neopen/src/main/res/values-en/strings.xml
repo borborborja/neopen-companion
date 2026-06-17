@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Sheet tags</string>
     <string name="sheet_delete_title">Delete “%1$s”?</string>
     <string name="sheet_delete_body">It will be removed on all your devices.</string>
-    <string name="pen_default_name">Neo M1+ pen</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">Status: %1$s</string>
     <string name="pen_battery">Battery: %1$d%%</string>
     <string name="pen_battery_charging">Battery: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Connect pen</string>
     <string name="pen_tab_config">Settings</string>
     <string name="pen_tab_memory">Memory</string>
-    <string name="pen_disconnected_hint">Needs a Neo smartpen M1+ powered on and Bluetooth permissions. Write on Ncode paper: pages appear in the Inbox and are uploaded to the server.</string>
+    <string name="pen_disconnected_hint">Needs a Neo smartpen powered on and Bluetooth permissions. Write on Ncode paper: pages appear in the Inbox and are uploaded to the server.</string>
     <string name="pen_view_log">View connection log (%1$d)</string>
     <string name="pen_auto_power_on_title">Auto power-on</string>
     <string name="pen_auto_power_on_desc">Powers on when you start writing</string>
@@ -148,6 +148,7 @@
     <string name="pen_status_disconnected">Disconnected</string>
     <string name="pen_status_scanning">Scanning…</string>
     <string name="pen_status_connecting">Connecting…</string>
+    <string name="pen_status_auto_reconnecting">Reconnecting automatically…</string>
     <string name="pen_status_connected">Connected</string>
     <string name="pen_status_locked">Locked (PIN)</string>
     <string name="pen_locked_enter_pin">Pen locked — enter PIN</string>
@@ -196,8 +197,8 @@
     <string name="settings_overlap_min_strokes">Min. strokes</string>
     <string name="settings_overlap_min_area">Min. area %</string>
     <string name="settings_bluetooth_sync_title">Bluetooth and sync</string>
-    <string name="settings_background_title">Background connection</string>
-    <string name="settings_background_desc">Keeps the pen connected with the app closed</string>
+    <string name="settings_background_title">Keep connected with the app closed</string>
+    <string name="settings_background_desc">Uses a persistent notification to reconnect the pen outside the app</string>
     <string name="settings_import_on_connect_title">Dump memory on connect</string>
     <string name="settings_import_on_connect_desc">Imports the pen\'s offline writing as soon as it connects</string>
     <string name="settings_offline_dump">Offline memory dump</string>

@@ -1,0 +1,1 @@
+Afegeix reconnexió automàtica del boli, contrast del gruix per pressió, bloqueig/oblit de bolis i avisos de reimportació offline.

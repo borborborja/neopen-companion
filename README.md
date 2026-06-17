@@ -5,14 +5,14 @@
 <h1 align="center">neopen · Android</h1>
 
 <p align="center">
-  Android app for the <b>Neo smartpen M1+</b>: capture your handwriting over Bluetooth and keep it on your phone or sync it to a <a href="https://github.com/borborborja/neopen">neopen</a> server.
+  Android app for the <b>Neo smartpen</b>: capture your handwriting over Bluetooth and keep it on your phone or sync it to a <a href="https://github.com/borborborja/neopen">neopen</a> server.
 </p>
 
 <p align="center">
   <b>English</b> · <a href="README.es.md">Español</a> · <a href="README.ca.md">Català</a>
 </p>
 
-> ⚠️ **Tested only with the Neo smartpen M1+ (NWP-F51).** Other pen models are untested and may not work.
+> ⚠️ **Designed for Neo smartpens that expose the supported Ncode Bluetooth protocol.**
 
 ## What it is
 
@@ -31,7 +31,7 @@ Notebooks, inbox, transcription (when online), overlapping-stroke detection, and
 
 ## Features
 
-- 🖊️ **BLE capture** of the M1+ — live, plus dumping the pen's offline memory.
+- 🖊️ **BLE capture** of Neo smartpen — live, plus dumping the pen's offline memory.
 - 📴 **Local mode** (no server) or **server mode** (sync to neopen).
 - 🗂️ On-device **notebooks & inbox**, organize and tag.
 - ⚠️ **Overlapping-stroke detection** with timeline cut, and **finish page** (sealed permanently once you rewrite the same Ncode page).
@@ -61,7 +61,7 @@ CI builds an installable **debug APK** on every push to `main` and on PRs:
 
 This app is an independent, community project. It is **not affiliated with, authorized, endorsed by, or sponsored by NeoLAB Convergence Inc.** "Neo smartpen", "Ncode", "N-code" and related names and logos are trademarks of NeoLAB Convergence Inc. and their respective owners, used here only to describe compatibility.
 
-It has been **tested only with the Neo smartpen M1+ (NWP-F51)**; other models are untested and may not work. The BLE protocol constants were reconstructed from NeoLAB's GPL-3.0 SDK (no code copied — only protocol values). The software is provided **"as is", without warranty of any kind**, to the extent permitted by law.
+The BLE protocol constants were reconstructed from NeoLAB's GPL-3.0 SDK (no code copied — only protocol values). The software is provided **"as is", without warranty of any kind**, to the extent permitted by law.
 
 ## License
 

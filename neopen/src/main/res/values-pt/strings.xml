@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Etiquetas da folha</string>
     <string name="sheet_delete_title">Apagar «%1$s»?</string>
     <string name="sheet_delete_body">Será eliminada em todos os teus dispositivos.</string>
-    <string name="pen_default_name">Caneta Neo M1+</string>
+    <string name="pen_default_name">Caneta Neo smartpen</string>
     <string name="pen_status">Estado: %1$s</string>
     <string name="pen_battery">Bateria: %1$d%%</string>
     <string name="pen_battery_charging">Bateria: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Ligar caneta</string>
     <string name="pen_tab_config">Configuração</string>
     <string name="pen_tab_memory">Memória</string>
-    <string name="pen_disconnected_hint">Requer uma Neo smartpen M1+ ligada e permissões de Bluetooth. Escreve em papel Ncode: as páginas aparecem na Caixa de entrada e são enviadas para o servidor.</string>
+    <string name="pen_disconnected_hint">Requer uma Neo smartpen ligada e permissões de Bluetooth. Escreve em papel Ncode: as páginas aparecem na Caixa de entrada e são enviadas para o servidor.</string>
     <string name="pen_view_log">Ver registo de ligação (%1$d)</string>
     <string name="pen_auto_power_on_title">Ligar automaticamente</string>
     <string name="pen_auto_power_on_desc">Liga-se ao começar a escrever</string>

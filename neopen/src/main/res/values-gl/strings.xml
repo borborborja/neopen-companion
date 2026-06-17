@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Etiquetas da folla</string>
     <string name="sheet_delete_title">Borrar «%1$s»?</string>
     <string name="sheet_delete_body">Eliminarase en todos os teus dispositivos.</string>
-    <string name="pen_default_name">Boli Neo M1+</string>
+    <string name="pen_default_name">Boli Neo smartpen</string>
     <string name="pen_status">Estado: %1$s</string>
     <string name="pen_battery">Batería: %1$d%%</string>
     <string name="pen_battery_charging">Batería: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Conectar boli</string>
     <string name="pen_tab_config">Configuración</string>
     <string name="pen_tab_memory">Memoria</string>
-    <string name="pen_disconnected_hint">Precisa un Neo smartpen M1+ acendido e permisos de Bluetooth. Escribe en papel Ncode: as páxinas aparecen na Caixa de entrada e sóbense ao servidor.</string>
+    <string name="pen_disconnected_hint">Precisa un Neo smartpen acendido e permisos de Bluetooth. Escribe en papel Ncode: as páxinas aparecen na Caixa de entrada e sóbense ao servidor.</string>
     <string name="pen_view_log">Ver rexistro de conexión (%1$d)</string>
     <string name="pen_auto_power_on_title">Acendido automático</string>
     <string name="pen_auto_power_on_desc">Acéndese ao comezar a escribir</string>

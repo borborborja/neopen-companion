@@ -1,6 +1,9 @@
 package net.micapum.neopen.app.ui
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -333,8 +336,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun penReady(): Boolean = graph.pen.isReady
     fun connectPen() = graph.pen.scanAndConnect()
     fun disconnectPen() = graph.pen.disconnect()
-    fun stopConnecting() = graph.pen.disconnect()
+    fun stopConnecting() {
+        graph.pen.setForegroundReconnect(false)
+        graph.pen.disconnect()
+    }
     fun clearLogs() = graph.pen.clearLogs()
+
+    fun startForegroundPenReconnect() {
+        val cur = graph.currentSettings
+        val hasTarget = cur.lockedPenMac.isNotBlank() || cur.knownPens.any { it.mac !in cur.forgottenPens }
+        if (hasTarget && hasBlePermission()) graph.pen.setForegroundReconnect(true)
+    }
+
+    fun stopForegroundPenReconnect() {
+        graph.pen.setForegroundReconnect(false)
+    }
+
+    private fun hasBlePermission(): Boolean {
+        val app = getApplication<Application>()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            app.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                app.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            app.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+    }
 
     // Ajustes del boli
     fun setAutoPowerOn(on: Boolean) = graph.pen.setAutoPowerOn(on)

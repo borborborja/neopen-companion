@@ -27,7 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Capa BLE del Neo smartpen M1+. Escanea por el servicio v2 (0x19F1), conecta,
+ * Capa BLE del Neo smartpen. Escanea por el servicio v2 (0x19F1), conecta,
  * hace el handshake, y traduce los frames del protocolo a páginas (`StrokePage`)
  * que entrega por `onPage`. No conoce nada del servidor neopen.
  *
@@ -63,6 +63,7 @@ class PenManager(
     private var connecting = false
     private var target: BluetoothDevice? = null
     private var connectAttempts = 0
+    private var foregroundReconnect = false
 
     /**
      * Reconexión automática ante desconexiones inesperadas (no solicitadas por el
@@ -141,6 +142,13 @@ class PenManager(
 
     private companion object {
         const val TAG = "PenManager"
+        const val AUTO_RECONNECT_DELAY_MS = 8_000L
+    }
+
+    private val autoReconnectScan = Runnable {
+        if (shouldAutoReconnect() && !_state.value.connected) {
+            scanAndConnectAuto()
+        }
     }
 
     // ----------------------------------------------------------------------------------
@@ -152,14 +160,35 @@ class PenManager(
     /** Escaneo usado por servicios/reconexiones automáticas: respeta olvidados y bloqueo. */
     fun scanAndConnectAuto() = scanAndConnect(manual = false)
 
+    /** Reconexión automática mientras la app está visible, sin servicio en primer plano. */
+    fun setForegroundReconnect(enabled: Boolean) {
+        foregroundReconnect = enabled
+        if (enabled) {
+            log("Reconexión automática en primer plano activada")
+            scheduleAutoReconnect(0L)
+        } else {
+            log("Reconexión automática en primer plano detenida")
+            main.removeCallbacks(autoReconnectScan)
+            if (!autoReconnect) update { it.copy(autoReconnecting = false) }
+        }
+    }
+
     private fun scanAndConnect(manual: Boolean) {
+        main.removeCallbacks(autoReconnectScan)
+        if (connecting || _state.value.status == PenStatus.SCANNING || _state.value.status == PenStatus.CONNECTING) {
+            log("Scan ignorado: ya hay una conexión en curso")
+            return
+        }
+        if (!manual && _state.value.connected) return
         val scanner = adapter?.bluetoothLeScanner ?: run {
             log("Bluetooth apagado: no hay scanner")
-            update { it.copy(status = PenStatus.IDLE, error = "bluetooth-off") }; return
+            update { it.copy(status = PenStatus.IDLE, error = "bluetooth-off", autoReconnecting = !manual) }
+            if (!manual) scheduleAutoReconnect()
+            return
         }
         this.scanner = scanner
         log("Escaneando boli (servicio 19F1, ${if (manual) "manual" else "auto"})…")
-        update { it.copy(status = PenStatus.SCANNING, error = null) }
+        update { it.copy(status = PenStatus.SCANNING, error = null, autoReconnecting = !manual) }
         val filters = listOf(
             ScanFilter.Builder().setServiceUuid(ParcelUuid(Protocol.SERVICE_V2)).build(),
             ScanFilter.Builder().setServiceUuid(ParcelUuid(Protocol.SERVICE_V5)).build(),
@@ -184,7 +213,8 @@ class PenManager(
             }
             override fun onScanFailed(errorCode: Int) {
                 log("Scan falló (código $errorCode)")
-                update { it.copy(status = PenStatus.IDLE, error = "scan-failed") }
+                update { it.copy(status = PenStatus.IDLE, error = "scan-failed", autoReconnecting = !manual) }
+                if (!manual) scheduleAutoReconnect()
             }
         }
         scanCb = cb
@@ -194,7 +224,8 @@ class PenManager(
             if (!connecting) {
                 log("Scan agotado (15 s) sin encontrar el boli")
                 stopScan()
-                update { it.copy(status = PenStatus.IDLE) }
+                update { it.copy(status = PenStatus.IDLE, autoReconnecting = !manual) }
+                if (!manual) scheduleAutoReconnect()
             }
         }, 15_000)
     }
@@ -232,7 +263,8 @@ class PenManager(
         } else {
             log("✗ Conexión fallida tras $connectAttempts intentos")
             connecting = false
-            update { it.copy(status = PenStatus.DISCONNECTED, error = "connect-failed") }
+            update { it.copy(status = PenStatus.DISCONNECTED, error = "connect-failed", autoReconnecting = shouldAutoReconnect()) }
+            if (shouldAutoReconnect()) scheduleAutoReconnect()
         }
     }
 
@@ -252,7 +284,17 @@ class PenManager(
         gatt?.disconnect()
         gatt?.close()
         gatt = null
-        update { it.copy(status = PenStatus.IDLE, offlinePhase = OfflinePhase.IDLE) }
+        update { it.copy(status = PenStatus.IDLE, offlinePhase = OfflinePhase.IDLE, autoReconnecting = false) }
+    }
+
+    private fun shouldAutoReconnect(): Boolean = autoReconnect || foregroundReconnect
+
+    private fun scheduleAutoReconnect(delayMs: Long = AUTO_RECONNECT_DELAY_MS) {
+        if (!shouldAutoReconnect()) return
+        main.removeCallbacks(autoReconnectScan)
+        val delay = delayMs.coerceAtLeast(0L)
+        log(if (delay == 0L) "Reconexión automática: buscando…" else "Reconexión automática en ${delay / 1000} s…")
+        main.postDelayed(autoReconnectScan, delay)
     }
 
     /** Encola un frame para escribir. Se serializa en el hilo principal. */
@@ -329,13 +371,13 @@ class PenManager(
                 val device = target
                 // Desconexión inesperada (target != null = no la pidió el usuario):
                 // reintenta sola si la reconexión automática está activa.
-                if (autoReconnect && device != null && connectionAllowed(device.address, false)) {
+                if (shouldAutoReconnect() && device != null && connectionAllowed(device.address, false)) {
                     log("Reconexión automática en 1,5 s…")
                     connectAttempts = 0
-                    update { it.copy(status = PenStatus.CONNECTING, error = null) }
-                    main.postDelayed({ if (autoReconnect && target === device) openGatt(device) }, 1500)
+                    update { it.copy(status = PenStatus.CONNECTING, error = null, autoReconnecting = true) }
+                    main.postDelayed({ if (shouldAutoReconnect() && target === device) openGatt(device) }, 1500)
                 } else {
-                    update { it.copy(status = PenStatus.DISCONNECTED) }
+                    update { it.copy(status = PenStatus.DISCONNECTED, autoReconnecting = false) }
                 }
             }
         }
@@ -345,7 +387,7 @@ class PenManager(
             if (service == null) {
                 log("✗ Servicio 19F1/v5 no encontrado. Servicios: " +
                     g.services.joinToString { it.uuid.toString() })
-                update { it.copy(status = PenStatus.DISCONNECTED, error = "service-not-found") }
+                update { it.copy(status = PenStatus.DISCONNECTED, error = "service-not-found", autoReconnecting = shouldAutoReconnect()) }
                 return
             }
             log("Servicio encontrado: ${service.uuid}")
@@ -366,7 +408,7 @@ class PenManager(
             if (writeChar == null || notify == null) {
                 log("✗ Faltan características. Disponibles: " +
                     chars.joinToString { "${it.uuid}(props=${it.properties})" })
-                update { it.copy(status = PenStatus.DISCONNECTED, error = "chars-not-found") }
+                update { it.copy(status = PenStatus.DISCONNECTED, error = "chars-not-found", autoReconnecting = shouldAutoReconnect()) }
                 return
             }
             notifyChar = notify
@@ -445,7 +487,7 @@ class PenManager(
                     )
                 }
                 if (firstTime && locked) {
-                    update { it.copy(status = PenStatus.LOCKED) }
+                    update { it.copy(status = PenStatus.LOCKED, autoReconnecting = false) }
                     // ¿Tenemos PIN guardado para este boli? Desbloqueo automático (1 intento).
                     val saved = _state.value.mac?.let { savedPinFor(it) }
                     if (!saved.isNullOrEmpty() && !autoUnlockTried) {
@@ -617,7 +659,7 @@ class PenManager(
 
     /** Tras autenticar: marca AUTORIZADO, pide datos en tiempo real y auto-vuelca offline. */
     private fun onAuthorized(battery: Int?) {
-        update { it.copy(status = PenStatus.AUTHORIZED, error = null) }
+        update { it.copy(status = PenStatus.AUTHORIZED, error = null, autoReconnecting = false) }
         log("✓ AUTORIZADO (batería ${battery}%) → pido datos en tiempo real")
         _state.value.mac?.let { onPenSeen(it, _state.value.name) }
         write(Protocol.reqOnlineDataAll())

@@ -4,8 +4,8 @@ El ecosistema son **dos repos** que evolucionan juntos:
 
 | Repo | Qué es | Aquí |
 |---|---|---|
-| **neopen-companion** (este) | App Android | `/Users/borja/Codi/neopen-companion` |
-| **neopen** | Servidor (Fastify+SQLite) + web (React) + tipos compartidos | `/Users/borja/Codi/neopen` |
+| **neopen-companion** (este) | App Android | este repositorio |
+| **neopen** | Servidor (Fastify+SQLite) + web (React) + tipos compartidos | repositorio [`neopen`](https://github.com/borborborja/neopen) |
 
 > **Regla de oro:** muchas funciones del companion **dependen del servidor**. Una
 > capacidad nueva del cliente solo funciona de punta a punta si el servidor está

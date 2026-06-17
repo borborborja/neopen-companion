@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">쪽 태그</string>
     <string name="sheet_delete_title">「%1$s」을(를) 삭제하시겠습니까?</string>
     <string name="sheet_delete_body">모든 기기에서 삭제됩니다.</string>
-    <string name="pen_default_name">Neo M1+ 펜</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">상태: %1$s</string>
     <string name="pen_battery">배터리: %1$d%%</string>
     <string name="pen_battery_charging">배터리: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">펜 연결</string>
     <string name="pen_tab_config">설정</string>
     <string name="pen_tab_memory">메모리</string>
-    <string name="pen_disconnected_hint">Neo smartpen M1+가 켜져 있고 블루투스 권한이 필요합니다. Ncode 용지에 쓰면 쪽이 받은편지함에 나타나고 서버에 업로드됩니다.</string>
+    <string name="pen_disconnected_hint">Neo smartpen가 켜져 있고 블루투스 권한이 필요합니다. Ncode 용지에 쓰면 쪽이 받은편지함에 나타나고 서버에 업로드됩니다.</string>
     <string name="pen_view_log">연결 기록 보기 (%1$d)</string>
     <string name="pen_auto_power_on_title">자동 전원 켜기</string>
     <string name="pen_auto_power_on_desc">쓰기 시작하면 켜집니다</string>

@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Метки листа</string>
     <string name="sheet_delete_title">Удалить «%1$s»?</string>
     <string name="sheet_delete_body">Будет удалён на всех ваших устройствах.</string>
-    <string name="pen_default_name">Ручка Neo M1+</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">Статус: %1$s</string>
     <string name="pen_battery">Батарея: %1$d%%</string>
     <string name="pen_battery_charging">Батарея: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Подключить ручку</string>
     <string name="pen_tab_config">Настройки</string>
     <string name="pen_tab_memory">Память</string>
-    <string name="pen_disconnected_hint">Требуется включённый Neo smartpen M1+ и разрешения Bluetooth. Пишите на бумаге Ncode: страницы появляются во «Входящих» и загружаются на сервер.</string>
+    <string name="pen_disconnected_hint">Требуется включённый Neo smartpen и разрешения Bluetooth. Пишите на бумаге Ncode: страницы появляются во «Входящих» и загружаются на сервер.</string>
     <string name="pen_view_log">Посмотреть журнал подключения (%1$d)</string>
     <string name="pen_auto_power_on_title">Автовключение</string>
     <string name="pen_auto_power_on_desc">Включается, когда вы начинаете писать</string>

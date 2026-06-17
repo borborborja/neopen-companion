@@ -38,7 +38,7 @@ quedó retirado del build** (su código sigue en disco pero no se compila; ignó
 ## Flujo de datos
 
 ```
-Boli M1+  ──BLE──▶  PenManager (core/pen)  ──dots──▶  StrokePage
+Neo smartpen  ──BLE──▶  PenManager (core/pen)  ──dots──▶  StrokePage
                                                           │ al finalizar página
                                                           ▼
                                    NeopenRepository.ingestPenPage[Local]

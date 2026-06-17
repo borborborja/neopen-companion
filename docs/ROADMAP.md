@@ -60,6 +60,6 @@ Tenlas en cuenta **al programar ahora**: no cierres puertas a estas direcciones.
 - HTR on-device estructurado (ML Kit da texto plano; el OCR estructurado necesita
   un LLM con visión). Hoy `:live` usa ML Kit solo para el IME.
 - Cifrado de extremo a extremo (hoy el modelo es self-hosted con contraseña compartida).
-- Soporte de más modelos de boli (probado solo con el M1+ / NWP-F51).
+- Mejoras de compatibilidad entre modelos Neo smartpen.
 
 > Cuando completes una de estas, actualiza este fichero y `RELEASE.md`.

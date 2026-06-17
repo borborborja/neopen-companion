@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">シートのタグ</string>
     <string name="sheet_delete_title">「%1$s」を削除しますか？</string>
     <string name="sheet_delete_body">すべてのデバイスから削除されます。</string>
-    <string name="pen_default_name">Neo M1+ ペン</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">状態: %1$s</string>
     <string name="pen_battery">バッテリー: %1$d%%</string>
     <string name="pen_battery_charging">バッテリー: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">ペンを接続</string>
     <string name="pen_tab_config">設定</string>
     <string name="pen_tab_memory">メモリー</string>
-    <string name="pen_disconnected_hint">電源の入った Neo smartpen M1+ と Bluetooth の権限が必要です。Ncode 用紙に書くと、ページが受信トレイに表示され、サーバーにアップロードされます。</string>
+    <string name="pen_disconnected_hint">電源の入った Neo smartpen と Bluetooth の権限が必要です。Ncode 用紙に書くと、ページが受信トレイに表示され、サーバーにアップロードされます。</string>
     <string name="pen_view_log">接続ログを表示（%1$d）</string>
     <string name="pen_auto_power_on_title">自動電源オン</string>
     <string name="pen_auto_power_on_desc">書き始めると電源が入ります</string>

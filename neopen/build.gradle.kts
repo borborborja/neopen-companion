@@ -13,8 +13,8 @@ android {
         applicationId = "net.micapum.neopen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 28
-        versionName = "0.21.4"
+        versionCode = 29
+        versionName = "0.21.5"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -42,6 +42,10 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 

@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Étiquettes de la feuille</string>
     <string name="sheet_delete_title">Supprimer « %1$s » ?</string>
     <string name="sheet_delete_body">Elle sera supprimée sur tous vos appareils.</string>
-    <string name="pen_default_name">Stylo Neo M1+</string>
+    <string name="pen_default_name">Stylo Neo smartpen</string>
     <string name="pen_status">État : %1$s</string>
     <string name="pen_battery">Batterie : %1$d%%</string>
     <string name="pen_battery_charging">Batterie : %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Connecter le stylo</string>
     <string name="pen_tab_config">Configuration</string>
     <string name="pen_tab_memory">Mémoire</string>
-    <string name="pen_disconnected_hint">Nécessite un Neo smartpen M1+ allumé et les autorisations Bluetooth. Écrivez sur du papier Ncode : les pages apparaissent dans la boîte de réception et sont envoyées au serveur.</string>
+    <string name="pen_disconnected_hint">Nécessite un Neo smartpen allumé et les autorisations Bluetooth. Écrivez sur du papier Ncode : les pages apparaissent dans la boîte de réception et sont envoyées au serveur.</string>
     <string name="pen_view_log">Voir le journal de connexion (%1$d)</string>
     <string name="pen_auto_power_on_title">Allumage automatique</string>
     <string name="pen_auto_power_on_desc">S\'allume dès qu\'on commence à écrire</string>

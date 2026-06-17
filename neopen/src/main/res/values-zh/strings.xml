@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">页面标签</string>
     <string name="sheet_delete_title">删除「%1$s」？</string>
     <string name="sheet_delete_body">它将在你所有的设备上被删除。</string>
-    <string name="pen_default_name">Neo M1+ 智能笔</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">状态：%1$s</string>
     <string name="pen_battery">电量：%1$d%%</string>
     <string name="pen_battery_charging">电量：%1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">连接智能笔</string>
     <string name="pen_tab_config">设置</string>
     <string name="pen_tab_memory">存储</string>
-    <string name="pen_disconnected_hint">需要一支已开机的 Neo smartpen M1+ 以及蓝牙权限。在 Ncode 纸上书写：页面会出现在收件箱中并上传到服务器。</string>
+    <string name="pen_disconnected_hint">需要一支已开机的 Neo smartpen 以及蓝牙权限。在 Ncode 纸上书写：页面会出现在收件箱中并上传到服务器。</string>
     <string name="pen_view_log">查看连接日志（%1$d）</string>
     <string name="pen_auto_power_on_title">自动开机</string>
     <string name="pen_auto_power_on_desc">开始书写时自动开机</string>

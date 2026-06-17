@@ -104,7 +104,7 @@
     <string name="sheet_tags_title">Etiquetas de la hoja</string>
     <string name="sheet_delete_title">¿Borrar «%1$s»?</string>
     <string name="sheet_delete_body">Se eliminará en todos tus dispositivos.</string>
-    <string name="pen_default_name">Boli Neo M1+</string>
+    <string name="pen_default_name">Boli Neo smartpen</string>
     <string name="pen_status">Estado: %1$s</string>
     <string name="pen_battery">Batería: %1$d%%</string>
     <string name="pen_battery_charging">Batería: %1$d%% ⚡</string>
@@ -116,7 +116,7 @@
     <string name="pen_connect">Conectar boli</string>
     <string name="pen_tab_config">Configuración</string>
     <string name="pen_tab_memory">Memoria</string>
-    <string name="pen_disconnected_hint">Necesita un Neo smartpen M1+ encendido y permisos de Bluetooth. Escribe en papel Ncode: las páginas aparecen en la Bandeja y se suben al servidor.</string>
+    <string name="pen_disconnected_hint">Necesita un Neo smartpen encendido y permisos de Bluetooth. Escribe en papel Ncode: las páginas aparecen en la Bandeja y se suben al servidor.</string>
     <string name="pen_view_log">Ver registro de conexión (%1$d)</string>
     <string name="pen_auto_power_on_title">Encendido automático</string>
     <string name="pen_auto_power_on_desc">Se enciende al empezar a escribir</string>
@@ -147,6 +147,7 @@
     <string name="pen_status_disconnected">Desconectado</string>
     <string name="pen_status_scanning">Buscando…</string>
     <string name="pen_status_connecting">Conectando…</string>
+    <string name="pen_status_auto_reconnecting">Reconectando automáticamente…</string>
     <string name="pen_status_connected">Conectado</string>
     <string name="pen_status_locked">Bloqueado (PIN)</string>
     <!-- Contraseña / PIN del boli -->
@@ -196,8 +197,8 @@
     <string name="settings_overlap_min_strokes">Trazos mín.</string>
     <string name="settings_overlap_min_area">% área mín.</string>
     <string name="settings_bluetooth_sync_title">Bluetooth y sincronización</string>
-    <string name="settings_background_title">Conexión en segundo plano</string>
-    <string name="settings_background_desc">Mantiene el boli conectado con la app cerrada</string>
+    <string name="settings_background_title">Mantener conectado con la app cerrada</string>
+    <string name="settings_background_desc">Usa una notificación persistente para reconectar el boli fuera de la app</string>
     <string name="settings_import_on_connect_title">Volcar memoria al conectar</string>
     <string name="settings_import_on_connect_desc">Importa la escritura offline del boli en cuanto se conecta</string>
     <string name="settings_offline_dump">Volcado de la memoria offline</string>

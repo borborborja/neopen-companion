@@ -1,6 +1,6 @@
 # Dos bolis + estilo de trazo por boli — spec para portar a la web
 
-Documento de referencia para replicar en la web (`/Users/borja/Codi/neopen`) los cambios de boli
+Documento de referencia para replicar en la web (`neopen`) los cambios de boli
 hechos en la app Android. Cubre el **contrato de datos**, el **render por trazo**, la **semántica
 de estilo** y el **registro de bolis**. Marca qué está implementado en Android y qué queda.
 

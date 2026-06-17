@@ -1,0 +1,1 @@
+Adds foreground pen auto-reconnect, pressure-width contrast controls, pen locking/forgetting, and offline reimport warnings.

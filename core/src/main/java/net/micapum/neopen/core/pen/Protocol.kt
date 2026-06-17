@@ -5,7 +5,7 @@ import java.nio.ByteOrder
 import java.util.UUID
 
 /**
- * Protocolo v2 del Neo smartpen M1+ (NWP-F51).
+ * Protocolo v2 del Neo smartpen.
  *
  * Reconstruido fielmente del SDK oficial `web_pen_sdk` (el que usa la web de
  * neopen, que conecta correctamente). Puntos clave que difieren de versiones
@@ -18,7 +18,7 @@ import java.util.UUID
  *  - reqVersion lleva 42 bytes (no vacío) o el boli cierra la conexión.
  */
 object Protocol {
-    // --- UUIDs (servicio v2 19F1 del M1+; v5 para pens nuevos, solo fallback de scan) ---
+    // --- UUIDs (servicio v2 19F1; v5 para pens nuevos, solo fallback de scan) ---
     val SERVICE_V2: UUID = uuid16(0x19F1)
     val CHAR_WRITE: UUID = uuid16(0x2BA0)
     val CHAR_NOTIFY: UUID = uuid16(0x2BA1)

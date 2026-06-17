@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">وسوم الورقة</string>
     <string name="sheet_delete_title">حذف «%1$s»؟</string>
     <string name="sheet_delete_body">سيُحذف من جميع أجهزتك.</string>
-    <string name="pen_default_name">قلم Neo M1+</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">الحالة: %1$s</string>
     <string name="pen_battery">البطارية: %1$d%%</string>
     <string name="pen_battery_charging">البطارية: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">وصّل القلم</string>
     <string name="pen_tab_config">الإعدادات</string>
     <string name="pen_tab_memory">الذاكرة</string>
-    <string name="pen_disconnected_hint">يتطلّب قلم Neo smartpen M1+ قيد التشغيل وأذونات بلوتوث. اكتب على ورق Ncode: تظهر الصفحات في صندوق الوارد وتُرفع إلى الخادم.</string>
+    <string name="pen_disconnected_hint">يتطلّب قلم Neo smartpen قيد التشغيل وأذونات بلوتوث. اكتب على ورق Ncode: تظهر الصفحات في صندوق الوارد وتُرفع إلى الخادم.</string>
     <string name="pen_view_log">عرض سجل الاتصال (%1$d)</string>
     <string name="pen_auto_power_on_title">التشغيل التلقائي</string>
     <string name="pen_auto_power_on_desc">يعمل عند بدء الكتابة</string>

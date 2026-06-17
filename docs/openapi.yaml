@@ -6,7 +6,7 @@ info:
     Contrato de la API del servidor neopen, pensado como **fuente de verdad para
     clientes nativos** (companion Android/iOS) además del frontend web.
 
-    El cometido de un companion es: conectar por BLE al Neo smartpen M1+, captar
+    El cometido de un companion es: conectar por BLE al Neo smartpen, captar
     los trazos (live u offline) y **subirlos en crudo** a `POST /api/captures`.
     El **servidor archiva** automáticamente cada hoja en su cuaderno (por SOBP):
     el cliente NO necesita conocer la lógica de cuadernos ni de formato.

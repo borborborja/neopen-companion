@@ -138,7 +138,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.flowOf
@@ -216,6 +219,25 @@ fun AppRoot(
         return
     }
     LaunchedEffect(Unit) { vm.syncNow() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        vm.startForegroundPenReconnect()
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> vm.startForegroundPenReconnect()
+                Lifecycle.Event.ON_STOP -> vm.stopForegroundPenReconnect()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.stopForegroundPenReconnect()
+        }
+    }
+    LaunchedEffect(settings.knownPens, settings.lockedPenMac, settings.forgottenPens) {
+        vm.startForegroundPenReconnect()
+    }
 
     val notebooks by vm.notebooks.collectAsStateWithLifecycle()
     var openNotebookId by rememberSaveable { mutableStateOf(initialNotebookId) }
@@ -1387,7 +1409,7 @@ private fun PenTabContent(vm: MainViewModel) {
                     Spacer(Modifier.size(8.dp))
                     Text(state.name ?: state.mac ?: stringResource(R.string.pen_default_name), style = MaterialTheme.typography.titleMedium)
                 }
-                Text(stringResource(R.string.pen_status, penStatusLabel(state.status)), style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.pen_status, penStatusLabel(state.status, state.autoReconnecting)), style = MaterialTheme.typography.bodyMedium)
                 state.settings.battery?.let {
                     Text(
                         if (state.settings.charging) stringResource(R.string.pen_battery_charging, it) else stringResource(R.string.pen_battery, it),
@@ -1916,13 +1938,17 @@ private fun PenDebugLogDialog(logs: List<String>, onClear: () -> Unit, onDismiss
 }
 
 @Composable
-private fun penStatusLabel(status: PenStatus): String = when (status) {
+private fun penStatusLabel(status: PenStatus, autoReconnecting: Boolean = false): String = when {
+    autoReconnecting && (status == PenStatus.SCANNING || status == PenStatus.CONNECTING || status == PenStatus.IDLE || status == PenStatus.DISCONNECTED) ->
+        stringResource(R.string.pen_status_auto_reconnecting)
+    else -> when (status) {
     PenStatus.IDLE -> stringResource(R.string.pen_status_disconnected)
     PenStatus.SCANNING -> stringResource(R.string.pen_status_scanning)
     PenStatus.CONNECTING -> stringResource(R.string.pen_status_connecting)
     PenStatus.LOCKED -> stringResource(R.string.pen_status_locked)
     PenStatus.AUTHORIZED -> stringResource(R.string.pen_status_connected)
     PenStatus.DISCONNECTED -> stringResource(R.string.pen_status_disconnected)
+    }
 }
 
 // --- Ajustes -----------------------------------------------------------------
@@ -2119,7 +2145,10 @@ private fun SettingsScreen(vm: MainViewModel) {
                 // ========================== CONEXIÓN ===========================
                 1 -> {
                     Text(stringResource(R.string.settings_bluetooth_sync_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                    PenToggleRow(stringResource(R.string.settings_background_title), stringResource(R.string.settings_background_desc), background) { background = it }
+                    PenToggleRow(stringResource(R.string.settings_background_title), stringResource(R.string.settings_background_desc), background) {
+                        background = it
+                        vm.saveSettings(settings.copy(backgroundEnabled = it))
+                    }
                     PenToggleRow(stringResource(R.string.settings_import_on_connect_title), stringResource(R.string.settings_import_on_connect_desc), importOnConnect) { importOnConnect = it }
                     PenToggleRow(stringResource(R.string.settings_control_notif_title), stringResource(R.string.settings_control_notif_desc), controlNotif) { controlNotif = it }
 

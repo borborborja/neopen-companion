@@ -103,7 +103,7 @@
     <string name="sheet_tags_title">शीट के टैग</string>
     <string name="sheet_delete_title">«%1$s» मिटाएँ?</string>
     <string name="sheet_delete_body">यह आपके सभी डिवाइस से हटा दी जाएगी।</string>
-    <string name="pen_default_name">Neo M1+ पेन</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">स्थिति: %1$s</string>
     <string name="pen_battery">बैटरी: %1$d%%</string>
     <string name="pen_battery_charging">बैटरी: %1$d%% ⚡</string>
@@ -115,7 +115,7 @@
     <string name="pen_connect">पेन कनेक्ट करें</string>
     <string name="pen_tab_config">सेटिंग्स</string>
     <string name="pen_tab_memory">मेमोरी</string>
-    <string name="pen_disconnected_hint">एक चालू Neo smartpen M1+ और Bluetooth अनुमतियों की ज़रूरत है। Ncode पेपर पर लिखें: पृष्ठ इनबॉक्स में आते हैं और सर्वर पर अपलोड हो जाते हैं।</string>
+    <string name="pen_disconnected_hint">एक चालू Neo smartpen और Bluetooth अनुमतियों की ज़रूरत है। Ncode पेपर पर लिखें: पृष्ठ इनबॉक्स में आते हैं और सर्वर पर अपलोड हो जाते हैं।</string>
     <string name="pen_view_log">कनेक्शन लॉग देखें (%1$d)</string>
     <string name="pen_auto_power_on_title">स्वतः चालू</string>
     <string name="pen_auto_power_on_desc">लिखना शुरू करते ही चालू हो जाता है</string>

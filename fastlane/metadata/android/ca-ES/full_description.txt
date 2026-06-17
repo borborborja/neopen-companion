@@ -1,0 +1,17 @@
+neopen és una app Android per a bolis Neo smartpen.
+
+Es connecta al boli per Bluetooth LE, captura l'escriptura en viu i també pot importar pàgines desades a la memòria offline del boli.
+
+La pots fer servir en mode local, desant els quaderns al mòbil, o connectar-la a un servidor neopen propi per sincronitzar.
+
+Funcions principals:
+
+* Captura Bluetooth de Neo smartpen
+* Quaderns i safata al dispositiu
+* Importació de la memòria offline del boli
+* Sincronització opcional amb servidor neopen propi
+* Avisos de traços superposats en reescriure la mateixa pàgina Ncode
+* Servei opcional per mantenir el boli connectat
+* Contrasenya del servidor xifrada amb Android Keystore
+
+És un projecte comunitari independent. No està afiliat, autoritzat, avalat ni patrocinat per NeoLAB Convergence Inc.
