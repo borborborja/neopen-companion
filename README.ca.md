@@ -5,14 +5,14 @@
 <h1 align="center">neopen · Android</h1>
 
 <p align="center">
-  App Android per al <b>Neo smartpen M1+</b>: captura la teva escriptura per Bluetooth i desa-la al mòbil o sincronitza-la amb un servidor <a href="https://github.com/borborborja/neopen">neopen</a>.
+  App Android per al <b>Neo smartpen</b>: captura la teva escriptura per Bluetooth i desa-la al mòbil o sincronitza-la amb un servidor <a href="https://github.com/borborborja/neopen">neopen</a>.
 </p>
 
 <p align="center">
   <a href="README.md">English</a> · <a href="README.es.md">Español</a> · <b>Català</b>
 </p>
 
-> ⚠️ **Provat només amb el Neo smartpen M1+ (NWP-F51).** Altres models de boli no s'han provat i és possible que no funcionin.
+> ⚠️ **Pensat per a Neo smartpen que exposin el protocol Bluetooth Ncode compatible.**
 
 ## Què és
 
@@ -31,7 +31,7 @@ Quaderns, safata, transcripció (amb connexió), detecció de traços superposat
 
 ## Funcions
 
-- 🖊️ **Captura BLE** del M1+ — en directe i bolcant la memòria offline del boli.
+- 🖊️ **Captura BLE** de Neo smartpen — en directe i bolcant la memòria offline del boli.
 - 📴 **Mode local** (sense servidor) o **mode servidor** (sync amb neopen).
 - 🗂️ **Quaderns i safata** al dispositiu, organitza i etiqueta.
 - ⚠️ **Detecció de traços superposats** amb tall per línia de temps, i **finalitzar full** (segellat de forma permanent en reescriure la mateixa pàgina Ncode).
@@ -61,7 +61,7 @@ La CI compila un **APK debug** instal·lable a cada push a `main` i a cada PR:
 
 Aquesta app és un projecte independent i comunitari. **No està afiliat, autoritzat, avalat ni patrocinat per NeoLAB Convergence Inc.** «Neo smartpen», «Ncode», «N-code» i els noms i logotips relacionats són marques de NeoLAB Convergence Inc. i dels seus titulars respectius, usats aquí només per descriure compatibilitat.
 
-S'ha **provat només amb el Neo smartpen M1+ (NWP-F51)**; altres models no s'han provat i és possible que no funcionin. Les constants del protocol BLE es van reconstruir a partir del SDK GPL-3.0 de NeoLAB (no hi ha codi copiat, només valors del protocol). El programari s'ofereix **«tal qual», sense cap garantia**, en la mesura que ho permeti la llei.
+Les constants del protocol BLE es van reconstruir a partir del SDK GPL-3.0 de NeoLAB (no hi ha codi copiat, només valors del protocol). El programari s'ofereix **«tal qual», sense cap garantia**, en la mesura que ho permeti la llei.
 
 ## Llicència
 

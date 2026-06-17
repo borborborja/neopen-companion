@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Etichette del foglio</string>
     <string name="sheet_delete_title">Eliminare «%1$s»?</string>
     <string name="sheet_delete_body">Verrà eliminato su tutti i tuoi dispositivi.</string>
-    <string name="pen_default_name">Penna Neo M1+</string>
+    <string name="pen_default_name">Penna Neo smartpen</string>
     <string name="pen_status">Stato: %1$s</string>
     <string name="pen_battery">Batteria: %1$d%%</string>
     <string name="pen_battery_charging">Batteria: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Connetti penna</string>
     <string name="pen_tab_config">Configurazione</string>
     <string name="pen_tab_memory">Memoria</string>
-    <string name="pen_disconnected_hint">Richiede un Neo smartpen M1+ acceso e i permessi Bluetooth. Scrivi su carta Ncode: le pagine compaiono nell\'Inbox e vengono caricate sul server.</string>
+    <string name="pen_disconnected_hint">Richiede un Neo smartpen acceso e i permessi Bluetooth. Scrivi su carta Ncode: le pagine compaiono nell\'Inbox e vengono caricate sul server.</string>
     <string name="pen_view_log">Vedi registro di connessione (%1$d)</string>
     <string name="pen_auto_power_on_title">Accensione automatica</string>
     <string name="pen_auto_power_on_desc">Si accende quando inizi a scrivere</string>

@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Labels van het blad</string>
     <string name="sheet_delete_title">«%1$s» verwijderen?</string>
     <string name="sheet_delete_body">Het wordt op al je apparaten verwijderd.</string>
-    <string name="pen_default_name">Neo M1+-pen</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">Status: %1$s</string>
     <string name="pen_battery">Batterij: %1$d%%</string>
     <string name="pen_battery_charging">Batterij: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Pen verbinden</string>
     <string name="pen_tab_config">Configuratie</string>
     <string name="pen_tab_memory">Geheugen</string>
-    <string name="pen_disconnected_hint">Vereist een ingeschakelde Neo smartpen M1+ en Bluetooth-rechten. Schrijf op Ncode-papier: de pagina\'s verschijnen in de Inbox en worden naar de server geüpload.</string>
+    <string name="pen_disconnected_hint">Vereist een ingeschakelde Neo smartpen en Bluetooth-rechten. Schrijf op Ncode-papier: de pagina\'s verschijnen in de Inbox en worden naar de server geüpload.</string>
     <string name="pen_view_log">Verbindingslogboek bekijken (%1$d)</string>
     <string name="pen_auto_power_on_title">Automatisch inschakelen</string>
     <string name="pen_auto_power_on_desc">Schakelt in zodra je begint te schrijven</string>

@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Orriaren etiketak</string>
     <string name="sheet_delete_title">«%1$s» ezabatu?</string>
     <string name="sheet_delete_body">Zure gailu guztietan ezabatuko da.</string>
-    <string name="pen_default_name">Neo M1+ boligrafoa</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">Egoera: %1$s</string>
     <string name="pen_battery">Bateria: %%%1$d</string>
     <string name="pen_battery_charging">Bateria: %%%1$d ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Konektatu boligrafoa</string>
     <string name="pen_tab_config">Konfigurazioa</string>
     <string name="pen_tab_memory">Memoria</string>
-    <string name="pen_disconnected_hint">Neo smartpen M1+ bat piztuta eta Bluetooth baimenak behar ditu. Idatzi Ncode paperean: orriak Sarrera-ontzian agertzen dira eta zerbitzarira igotzen dira.</string>
+    <string name="pen_disconnected_hint">Neo smartpen bat piztuta eta Bluetooth baimenak behar ditu. Idatzi Ncode paperean: orriak Sarrera-ontzian agertzen dira eta zerbitzarira igotzen dira.</string>
     <string name="pen_view_log">Ikusi konexio-erregistroa (%1$d)</string>
     <string name="pen_auto_power_on_title">Pizte automatikoa</string>
     <string name="pen_auto_power_on_desc">Idazten hastean pizten da</string>

@@ -362,7 +362,7 @@ private fun SettingsScreen(s: AppSettings, vm: MainViewModel) {
     ) {
         SectionHeader("Servidor neopen")
         OutlinedTextField(url, { url = it; vm.resetServerCheck() }, label = { Text("URL del servidor") },
-            placeholder = { Text("https://neopen.midominio.net") }, singleLine = true,
+            placeholder = { Text("https://neopen.ejemplo.com") }, singleLine = true,
             modifier = Modifier.fillMaxWidth())
         OutlinedTextField(pw, { pw = it; vm.resetServerCheck() }, label = { Text("Contraseña") },
             visualTransformation = PasswordVisualTransformation(), singleLine = true,

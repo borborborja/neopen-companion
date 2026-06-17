@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Etiquetes del full</string>
     <string name="sheet_delete_title">Esborrar «%1$s»?</string>
     <string name="sheet_delete_body">S\'eliminarà a tots els teus dispositius.</string>
-    <string name="pen_default_name">Boli Neo M1+</string>
+    <string name="pen_default_name">Boli Neo smartpen</string>
     <string name="pen_status">Estat: %1$s</string>
     <string name="pen_battery">Bateria: %1$d%%</string>
     <string name="pen_battery_charging">Bateria: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Connectar boli</string>
     <string name="pen_tab_config">Configuració</string>
     <string name="pen_tab_memory">Memòria</string>
-    <string name="pen_disconnected_hint">Necessita un Neo smartpen M1+ encès i permisos de Bluetooth. Escriu en paper Ncode: les pàgines apareixen a la Safata i es pugen al servidor.</string>
+    <string name="pen_disconnected_hint">Necessita un Neo smartpen encès i permisos de Bluetooth. Escriu en paper Ncode: les pàgines apareixen a la Safata i es pugen al servidor.</string>
     <string name="pen_view_log">Veure registre de connexió (%1$d)</string>
     <string name="pen_auto_power_on_title">Encesa automàtica</string>
     <string name="pen_auto_power_on_desc">S\'encén en començar a escriure</string>
@@ -148,6 +148,7 @@
     <string name="pen_status_disconnected">Desconnectat</string>
     <string name="pen_status_scanning">Cercant…</string>
     <string name="pen_status_connecting">Connectant…</string>
+    <string name="pen_status_auto_reconnecting">Reconnectant automàticament…</string>
     <string name="pen_status_connected">Connectat</string>
     <string name="pen_status_locked">Bloquejat (PIN)</string>
     <string name="pen_locked_enter_pin">Boli bloquejat — introdueix el PIN</string>
@@ -196,8 +197,8 @@
     <string name="settings_overlap_min_strokes">Traços mín.</string>
     <string name="settings_overlap_min_area">% àrea mín.</string>
     <string name="settings_bluetooth_sync_title">Bluetooth i sincronització</string>
-    <string name="settings_background_title">Connexió en segon pla</string>
-    <string name="settings_background_desc">Manté el boli connectat amb l\'app tancada</string>
+    <string name="settings_background_title">Mantenir connectat amb l\'app tancada</string>
+    <string name="settings_background_desc">Usa una notificació persistent per reconnectar el boli fora de l\'app</string>
     <string name="settings_import_on_connect_title">Bolcar la memòria en connectar</string>
     <string name="settings_import_on_connect_desc">Importa l\'escriptura offline del boli tan bon punt es connecta</string>
     <string name="settings_offline_dump">Bolcat de la memòria offline</string>

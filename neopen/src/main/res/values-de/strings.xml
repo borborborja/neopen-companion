@@ -105,7 +105,7 @@
     <string name="sheet_tags_title">Schlagwörter des Blattes</string>
     <string name="sheet_delete_title">\"%1$s\" löschen?</string>
     <string name="sheet_delete_body">Es wird auf allen deinen Geräten gelöscht.</string>
-    <string name="pen_default_name">Neo M1+ Stift</string>
+    <string name="pen_default_name">Neo smartpen</string>
     <string name="pen_status">Status: %1$s</string>
     <string name="pen_battery">Akku: %1$d%%</string>
     <string name="pen_battery_charging">Akku: %1$d%% ⚡</string>
@@ -117,7 +117,7 @@
     <string name="pen_connect">Stift verbinden</string>
     <string name="pen_tab_config">Konfiguration</string>
     <string name="pen_tab_memory">Speicher</string>
-    <string name="pen_disconnected_hint">Benötigt einen eingeschalteten Neo smartpen M1+ und Bluetooth-Berechtigungen. Schreibe auf Ncode-Papier: Die Seiten erscheinen im Posteingang und werden auf den Server hochgeladen.</string>
+    <string name="pen_disconnected_hint">Benötigt einen eingeschalteten Neo smartpen und Bluetooth-Berechtigungen. Schreibe auf Ncode-Papier: Die Seiten erscheinen im Posteingang und werden auf den Server hochgeladen.</string>
     <string name="pen_view_log">Verbindungsprotokoll ansehen (%1$d)</string>
     <string name="pen_auto_power_on_title">Automatisches Einschalten</string>
     <string name="pen_auto_power_on_desc">Schaltet sich beim Schreiben ein</string>

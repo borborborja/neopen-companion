@@ -1,0 +1,1 @@
+Afegeix reconnexió automàtica del boli amb l'app oberta, metadata/captures per a F-Droid i textos públics per a Neo smartpen en general.

@@ -123,6 +123,8 @@ data class PenState(
     /** Intentos de PIN usados y máximo (al llegar al máximo el boli se restablece). */
     val passwordRetry: Int = 0,
     val passwordMaxRetry: Int = 10,
+    /** La app está buscando/reintentando sin acción manual del usuario. */
+    val autoReconnecting: Boolean = false,
 ) {
     val connected get() = status == PenStatus.AUTHORIZED
     /** Conectado pero esperando el PIN para poder usar el boli. */

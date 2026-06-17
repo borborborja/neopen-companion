@@ -64,6 +64,9 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.21.5** — Reconexión automática del boli mientras la app está abierta,
+  preparación para F-Droid (`-Pfdroid`, metadata, licencia y screenshots) y textos
+  públicos genéricos para Neo smartpen.
 - **v0.21.4** — Ajuste de contraste para presión→grosor en `:neopen`/`:live` y
   pestañas de Ajustes con iconos para evitar cortes visuales en pantallas estrechas.
 - **v0.21.3** — Boli: sensibilidad de presión en `:neopen`/`:live`, ajuste de

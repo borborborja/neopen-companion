@@ -1,0 +1,1 @@
+Adds automatic pen reconnection while the app is open, F-Droid metadata/screenshots, and public wording for Neo smartpens in general.

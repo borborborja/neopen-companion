@@ -1,0 +1,17 @@
+neopen is an Android companion for Neo smartpens.
+
+It connects to the pen over Bluetooth LE, captures handwriting live, and can also import pages stored in the pen's offline memory.
+
+You can use it in local mode, keeping notebooks on the phone, or connect it to a self-hosted neopen server for synchronization.
+
+Main features:
+
+* Bluetooth capture for Neo smartpens
+* Local notebooks and inbox
+* Offline memory import from the pen
+* Optional sync with a self-hosted neopen server
+* Overlap warnings when rewriting the same Ncode page
+* Optional foreground service to keep the pen connected
+* Server password encrypted with Android Keystore
+
+This is an independent community project. It is not affiliated with, authorized by, endorsed by, or sponsored by NeoLAB Convergence Inc.

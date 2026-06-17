@@ -2,8 +2,8 @@
 
 > Léeme **antes de tocar nada**. Este fichero evita los errores más comunes del
 > repo. Hay guías detalladas en [`docs/`](docs/). El repo del **servidor** es
-> [`neopen`](https://github.com/borborborja/neopen) (en este equipo:
-> `/Users/borja/Codi/neopen`); muchas funciones del companion dependen de él
+> [`neopen`](https://github.com/borborborja/neopen); muchas funciones del
+> companion dependen de él
 > (ver [docs/INTEGRATION.md](docs/INTEGRATION.md)).
 
 ## Qué es neopen-companion

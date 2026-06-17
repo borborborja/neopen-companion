@@ -265,7 +265,7 @@ class Graph(app: Application) {
             val locked = cur.lockedPenMac
             when {
                 locked.isNotBlank() -> mac == locked
-                !manual && cur.forgottenPens.contains(mac) -> false
+                !manual -> cur.knownPens.any { it.mac == mac } && !cur.forgottenPens.contains(mac)
                 else -> true
             }
         }

@@ -1,0 +1,1 @@
+Añade reconexión automática del boli, control de contraste del grosor por presión, bloqueo/olvido de bolis y avisos de reimportación offline.
