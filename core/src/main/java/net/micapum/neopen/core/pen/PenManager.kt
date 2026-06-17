@@ -117,11 +117,17 @@ class PenManager(
     /** Permite a otros componentes (p. ej. la subida al servidor) escribir en el registro. */
     fun pushLog(msg: String) = log(msg)
 
-    // --- Herramienta "Leer SOBP": captura puntual del SOBP del próximo trazo. ---
+    // --- Herramientas puntuales: leer SOBP / punto de calibración. ---
     private var sobpRequest: ((Sobp) -> Unit)? = null
+    private var pointRequest: ((Sobp, Dot) -> Unit)? = null
+    private var suppressCurrentStroke = false
     /** Entrega (una sola vez) el SOBP del siguiente dot que escriba el usuario. */
     fun captureNextSobp(cb: (Sobp) -> Unit) { sobpRequest = cb }
     fun cancelSobpCapture() { sobpRequest = null }
+
+    /** Entrega (una sola vez) el SOBP + coordenada Ncode del siguiente dot, sin guardar ese trazo. */
+    fun captureNextPoint(cb: (Sobp, Dot) -> Unit) { pointRequest = cb }
+    fun cancelPointCapture() { pointRequest = null }
 
     private fun ByteArray.toHex(): String = joinToString(" ") { "%02X".format(it) }
 
@@ -607,10 +613,23 @@ class PenManager(
             sobpRequest = null
             main.post { req(s) }
         }
+        val pointReq = pointRequest
+        if (pointReq != null && s != null) {
+            pointRequest = null
+            suppressCurrentStroke = true
+            val dot = strokeDots.last()
+            main.post { pointReq(s, dot) }
+        }
     }
 
     private fun endStroke() {
         if (strokeDots.isEmpty()) return
+        if (suppressCurrentStroke) {
+            suppressCurrentStroke = false
+            strokeDots.clear()
+            strokeStart = 0L
+            return
+        }
         // Sella el estilo del boli en el trazo (congelado al capturar).
         val s = currentStyle()
         val stroke = Stroke(strokeStart, strokeDots.last().t, strokeDots.toList(), s.color, s.width)

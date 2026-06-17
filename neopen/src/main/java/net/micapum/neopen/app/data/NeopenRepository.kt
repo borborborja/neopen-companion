@@ -36,6 +36,7 @@ import net.micapum.neopen.core.data.resolveOfflineReimport
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.StrokeDto
 import net.micapum.neopen.core.pen.PaperLookup
+import net.micapum.neopen.core.pen.Sobp
 import net.micapum.neopen.core.pen.StrokePage
 import java.security.MessageDigest
 import java.time.Instant
@@ -65,6 +66,8 @@ object PenPageAction {
     const val DELETED = "deleted"
     const val MOVED = "moved"
 }
+
+enum class PhotoScanDestination { MERGE_CAPTURE, NOTEBOOK, INBOX }
 
 /**
  * Acceso offline-first a los datos locales (Room). La UI lee SIEMPRE de aquí
@@ -456,6 +459,100 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun enqueueCreateCapture(input: CreateCaptureInput, optimistic: CaptureEntity) {
         db.captures().upsertOne(optimistic)
         enqueue(OutboxKind.CREATE_CAPTURE, optimistic.id, Json.createCapture.toJson(input))
+    }
+
+    suspend fun photoScanTarget(sobp: Sobp): PhotoScanTarget {
+        val paper = PaperLookup.lookup(sobp.section, sobp.owner, sobp.book, sobp.page)
+        val capture = db.captures().findBySobp(sobp.section, sobp.owner, sobp.book, sobp.page)?.toDomain()
+        val notebook = db.notebooks().findByBookKey(sobp.bookKey)?.let { nb ->
+            nb.toDomain(pageCount = db.captures().getByNotebook(nb.id).size)
+        }
+        return PhotoScanTarget(capture, notebook, paper)
+    }
+
+    suspend fun savePhotoScan(
+        sobp: Sobp,
+        strokes: List<StrokeDto>,
+        paper: PaperDto?,
+        destination: PhotoScanDestination,
+        targetCaptureId: String?,
+        targetNotebookId: String?,
+        syncRemote: Boolean,
+    ): Boolean {
+        if (strokes.isEmpty()) return false
+        val now = nowIso()
+        val name = "Escaneo ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}"
+        val inputBase = CreateCaptureInput(
+            sobp = SobpDto(sobp.section, sobp.owner, sobp.book, sobp.page),
+            source = "photo_scan",
+            capturedAt = now,
+            name = name,
+            strokes = strokes,
+            paper = paper,
+        )
+        if (destination == PhotoScanDestination.MERGE_CAPTURE && targetCaptureId != null) {
+            val target = db.captures().getById(targetCaptureId)?.takeIf { it.clonedFrom == null && !it.sealed } ?: return false
+            val fresh = freshPhotoScanStrokes(Json.strokes(target.strokesJson), strokes)
+            if (fresh.isNotEmpty()) {
+                db.captures().upsertOne(
+                    target.copy(
+                        strokesJson = Json.strokesJson(Json.strokes(target.strokesJson) + fresh),
+                        transcriptionJson = null,
+                        updatedAt = now,
+                        importedAt = now,
+                    ),
+                )
+            }
+            if (syncRemote) {
+                enqueue(
+                    OutboxKind.CREATE_CAPTURE,
+                    target.id,
+                    Json.createCapture.toJson(
+                        inputBase.copy(
+                            strokes = fresh.ifEmpty { strokes },
+                            notebookId = target.notebookId,
+                            destination = target.destination,
+                        ),
+                    ),
+                )
+            }
+            return true
+        }
+
+        val notebook = when {
+            destination == PhotoScanDestination.NOTEBOOK && targetNotebookId != null -> db.notebooks().getById(targetNotebookId)
+            !syncRemote -> db.notebooks().findByBookKey(sobp.bookKey) ?: createLocalNotebook(sobp.bookKey, paper)
+            else -> null
+        }
+        val captureId = "local-" + UUID.randomUUID()
+        val position = notebook?.let { db.captures().getByNotebook(it.id).size } ?: 0
+        val entity = CaptureEntity(
+            id = captureId,
+            rev = 0,
+            section = sobp.section,
+            owner = sobp.owner,
+            book = sobp.book,
+            page = sobp.page,
+            notebook = notebook?.name,
+            source = "photo_scan",
+            capturedAt = now,
+            importedAt = now,
+            updatedAt = now,
+            name = name,
+            strokesJson = Json.strokesJson(strokes),
+            destination = if (notebook != null) "notebook" else "inbox",
+            notebookId = notebook?.id,
+            position = position,
+            paperJson = Json.paperJson(paper ?: Json.paperOf(notebook?.paperJson)),
+        )
+        val input = inputBase.copy(
+            notebook = notebook?.name,
+            notebookId = notebook?.id,
+            destination = if (notebook != null) "notebook" else null,
+            paper = paper ?: Json.paperOf(notebook?.paperJson),
+        )
+        if (syncRemote) enqueueCreateCapture(input, entity) else db.captures().upsertOne(entity)
+        return true
     }
 
     /**
@@ -861,6 +958,22 @@ class NeopenRepository(private val db: NeopenDb) {
             }
         }
         return "offline-" + sha1(raw)
+    }
+
+    private fun freshPhotoScanStrokes(existing: List<StrokeDto>, incoming: List<StrokeDto>): List<StrokeDto> =
+        incoming.filter { n -> existing.none { sameGeometry(it, n) } }
+
+    private fun sameGeometry(a: StrokeDto, b: StrokeDto): Boolean {
+        val ad = a.dots
+        val bd = b.dots
+        if (ad.isEmpty() || bd.isEmpty()) return false
+        val af = ad.first()
+        val al = ad.last()
+        val bf = bd.first()
+        val bl = bd.last()
+        val start = kotlin.math.hypot((af.x - bf.x).toDouble(), (af.y - bf.y).toDouble())
+        val end = kotlin.math.hypot((al.x - bl.x).toDouble(), (al.y - bl.y).toDouble())
+        return start < 1.2 && end < 1.2 && kotlin.math.abs(ad.size - bd.size) <= 2
     }
 
     private fun sha1(s: String): String {

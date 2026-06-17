@@ -1,12 +1,15 @@
 package net.micapum.neopen.app.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.core.content.FileProvider
 import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -93,7 +96,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -152,12 +154,17 @@ import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.data.OfflineImportWarning
 import net.micapum.neopen.app.data.PAPER_PRESETS
 import net.micapum.neopen.app.data.PaperPreset
+import net.micapum.neopen.app.data.PhotoScanDestination
+import net.micapum.neopen.app.data.PhotoScanTarget
 import net.micapum.neopen.app.data.paperFromPreset
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.render.InkCanvas
 import net.micapum.neopen.app.render.OverlapPreview
 import net.micapum.neopen.app.render.buildModel
+import net.micapum.neopen.app.scan.CalibrationPair
+import net.micapum.neopen.app.scan.PhotoStrokeExtraction
 import kotlin.math.roundToInt
+import java.io.File
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.Capability
@@ -172,7 +179,9 @@ import net.micapum.neopen.core.data.phoneCapable
 import net.micapum.neopen.core.data.availabilityOf
 import net.micapum.neopen.core.data.sourceOf
 import net.micapum.neopen.core.data.SyncMode
+import net.micapum.neopen.core.data.StrokeDto
 import net.micapum.neopen.app.widget.TAB_NOTEBOOKS
+import net.micapum.neopen.core.pen.Sobp
 import net.micapum.neopen.core.pen.PenStatus
 
 private val NotebookColors = listOf(
@@ -183,6 +192,7 @@ private enum class PageView { Grid, List, Large }
 
 private enum class NotebookView { Mosaic, Compact, List }
 private enum class ExportMode { Share, Save }
+private enum class PhotoScanStep { Sobp, Destination, Photo, Review, Calibrate, Save }
 
 private fun parseTags(s: String): List<String> =
     s.split(",").map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -244,6 +254,7 @@ fun AppRoot(
     var openPageId by rememberSaveable { mutableStateOf<String?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var scanningPage by rememberSaveable { mutableStateOf(false) }
 
     // Modo PUENTE → solo Boli + Ajustes; modo COMPLETO → todas las pestañas.
     val tabs = if (settings.appMode == AppMode.BRIDGE) {
@@ -269,6 +280,10 @@ fun AppRoot(
         NotebookScreen(vm, nbId, title, notebooks, onOpenPage = { openPageId = it }, onBack = { openNotebookId = null })
         return
     }
+    if (scanningPage) {
+        PhotoScanWizard(vm, onClose = { scanningPage = false })
+        return
+    }
 
     val syncing by vm.syncing.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
@@ -280,7 +295,22 @@ fun AppRoot(
         topBar = { HomeBar(stringResource(current.titleRes), syncing, pending, status != null, onSync = vm::syncNow) },
         floatingActionButton = {
             if (current == HomeTab.NOTEBOOKS) {
-                FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, stringResource(R.string.notebook_new)) }
+                var addOpen by remember { mutableStateOf(false) }
+                Box {
+                    FloatingActionButton(onClick = { addOpen = true }) { Icon(Icons.Filled.Add, stringResource(R.string.notebook_add_menu)) }
+                    DropdownMenu(expanded = addOpen, onDismissRequest = { addOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.notebook_new)) },
+                            leadingIcon = { Icon(Icons.Filled.Book, null) },
+                            onClick = { addOpen = false; creating = true },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.photo_scan_action)) },
+                            leadingIcon = { Icon(Icons.Filled.DocumentScanner, null) },
+                            onClick = { addOpen = false; scanningPage = true },
+                        )
+                    }
+                }
             }
         },
         bottomBar = {
@@ -337,6 +367,313 @@ fun AppRoot(
             onConfirm = { n, c, t, cat -> vm.editNotebook(editing.id, n, c, t, cat); editingId = null },
             onDismiss = { editingId = null })
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun PhotoScanWizard(vm: MainViewModel, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val penState by vm.penState.collectAsStateWithLifecycle()
+    val penPoint by vm.photoScanPoint.collectAsStateWithLifecycle()
+    var step by remember { mutableStateOf(PhotoScanStep.Sobp) }
+    var sobp by remember { mutableStateOf<Sobp?>(null) }
+    var target by remember { mutableStateOf<PhotoScanTarget?>(null) }
+    var destination by remember { mutableStateOf(PhotoScanDestination.INBOX) }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
+    var photoFile by remember { mutableStateOf<File?>(null) }
+    var extraction by remember { mutableStateOf<PhotoStrokeExtraction?>(null) }
+    var selectedCandidate by remember { mutableStateOf<Int?>(null) }
+    var waitingPoint by remember { mutableStateOf(false) }
+    var pairs by remember { mutableStateOf<List<CalibrationPair>>(emptyList()) }
+    var calibrated by remember { mutableStateOf<List<StrokeDto>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var expandedPreview by remember { mutableStateOf(false) }
+
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val uri = photoUri
+        if (ok && uri != null) {
+            busy = true
+            vm.extractPhotoStrokes(uri) { result ->
+                busy = false
+                extraction = result
+                pairs = emptyList()
+                calibrated = null
+                selectedCandidate = null
+                if (result != null) step = PhotoScanStep.Review
+            }
+        } else {
+            message = ctx.getString(R.string.photo_scan_photo_failed)
+        }
+    }
+
+    DisposableEffect(step) {
+        if (step == PhotoScanStep.Sobp) vm.startPhotoScanPointCapture()
+        onDispose {
+            if (step == PhotoScanStep.Sobp || step == PhotoScanStep.Calibrate) vm.cancelPhotoScanPointCapture()
+        }
+    }
+
+    LaunchedEffect(step, penPoint, waitingPoint) {
+        val point = penPoint ?: return@LaunchedEffect
+        val currentSobp = sobp
+        if (step == PhotoScanStep.Sobp) {
+            sobp = point.sobp
+            vm.clearPhotoScanPoint()
+            vm.loadPhotoScanTarget(point.sobp) { found ->
+                target = found
+                destination = when {
+                    found.capture != null -> PhotoScanDestination.MERGE_CAPTURE
+                    found.notebook != null -> PhotoScanDestination.NOTEBOOK
+                    else -> PhotoScanDestination.INBOX
+                }
+                step = PhotoScanStep.Destination
+            }
+        } else if (step == PhotoScanStep.Calibrate && waitingPoint && currentSobp != null) {
+            waitingPoint = false
+            if (point.sobp == currentSobp) {
+                val candidate = selectedCandidate?.let { extraction?.candidates?.getOrNull(it) }
+                if (candidate != null) {
+                    pairs = (pairs + CalibrationPair(candidate, point.point)).take(6)
+                    calibrated = null
+                }
+            } else {
+                message = ctx.getString(R.string.photo_scan_wrong_page)
+            }
+            vm.clearPhotoScanPoint()
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.photo_scan_title)) },
+                navigationIcon = {
+                    IconButton(onClick = { photoFile?.delete(); onClose() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_close))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(photoScanStepLabel(step), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            message?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            when (step) {
+                PhotoScanStep.Sobp -> {
+                    Text(stringResource(R.string.photo_scan_sobp_body))
+                    if (!penState.connected) {
+                        FilledTonalButton(onClick = vm::connectPen) {
+                            Icon(Icons.Filled.Draw, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.action_connect))
+                        }
+                    }
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                PhotoScanStep.Destination -> {
+                    val s = sobp ?: return@Column
+                    val t = target
+                    Text(stringResource(R.string.sobp_detected, s.section, s.owner, s.book, s.page))
+                    Text(photoScanTargetText(t), style = MaterialTheme.typography.bodyMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (t?.capture != null) {
+                            FilterChip(
+                                selected = destination == PhotoScanDestination.MERGE_CAPTURE,
+                                onClick = { destination = PhotoScanDestination.MERGE_CAPTURE },
+                                label = { Text(stringResource(R.string.photo_scan_dest_merge)) },
+                            )
+                        }
+                        if (t?.notebook != null) {
+                            FilterChip(
+                                selected = destination == PhotoScanDestination.NOTEBOOK,
+                                onClick = { destination = PhotoScanDestination.NOTEBOOK },
+                                label = { Text(stringResource(R.string.photo_scan_dest_notebook)) },
+                            )
+                        }
+                        FilterChip(
+                            selected = destination == PhotoScanDestination.INBOX,
+                            onClick = { destination = PhotoScanDestination.INBOX },
+                            label = { Text(stringResource(R.string.photo_scan_dest_inbox)) },
+                        )
+                    }
+                    Button(onClick = { step = PhotoScanStep.Photo }) { Text(stringResource(R.string.action_continue)) }
+                }
+                PhotoScanStep.Photo -> {
+                    Text(stringResource(R.string.photo_scan_photo_body))
+                    Button(
+                        enabled = !busy,
+                        onClick = {
+                            val created = createPhotoScanUri(ctx)
+                            photoFile?.delete()
+                            photoFile = created.first
+                            photoUri = created.second
+                            camera.launch(created.second)
+                        },
+                    ) {
+                        Icon(Icons.Filled.DocumentScanner, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.photo_scan_take_photo))
+                    }
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                PhotoScanStep.Review -> {
+                    val ex = extraction ?: return@Column
+                    val uri = photoUri ?: return@Column
+                    PhotoExtractionPreview(uri, ex, selectedCandidate, Modifier.fillMaxWidth().heightIn(min = 280.dp, max = 460.dp))
+                    Text(stringResource(R.string.photo_scan_review_count, ex.strokes.size), style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { step = PhotoScanStep.Photo }) { Text(stringResource(R.string.photo_scan_retake)) }
+                        FilledTonalButton(onClick = { expandedPreview = true }) { Text(stringResource(R.string.action_zoom)) }
+                        Button(onClick = { step = PhotoScanStep.Calibrate }) { Text(stringResource(R.string.action_continue)) }
+                    }
+                }
+                PhotoScanStep.Calibrate -> {
+                    val ex = extraction ?: return@Column
+                    val uri = photoUri ?: return@Column
+                    Text(stringResource(R.string.photo_scan_calibrate_body, pairs.size))
+                    PhotoExtractionPreview(uri, ex, selectedCandidate, Modifier.fillMaxWidth().heightIn(min = 250.dp, max = 420.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ex.candidates.forEachIndexed { i, _ ->
+                            FilterChip(
+                                selected = selectedCandidate == i,
+                                onClick = { selectedCandidate = i },
+                                label = { Text((i + 1).toString()) },
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = selectedCandidate != null && !waitingPoint,
+                            onClick = {
+                                waitingPoint = true
+                                vm.startPhotoScanPointCapture()
+                            },
+                        ) { Text(if (waitingPoint) stringResource(R.string.photo_scan_waiting_point) else stringResource(R.string.photo_scan_mark_point)) }
+                        OutlinedButton(enabled = pairs.isNotEmpty(), onClick = { pairs = pairs.dropLast(1); calibrated = null }) {
+                            Text(stringResource(R.string.action_undo))
+                        }
+                    }
+                    Button(
+                        enabled = pairs.size >= 3,
+                        onClick = {
+                            val strokes = vm.calibratedPhotoStrokes(ex, pairs, target?.paper)
+                            if (strokes == null) {
+                                message = ctx.getString(R.string.photo_scan_calibration_failed)
+                            } else {
+                                calibrated = strokes
+                                step = PhotoScanStep.Save
+                            }
+                        },
+                    ) { Text(stringResource(R.string.photo_scan_preview_result)) }
+                }
+                PhotoScanStep.Save -> {
+                    val s = sobp ?: return@Column
+                    val strokes = calibrated ?: return@Column
+                    InkCanvas(strokes, target?.paper, Modifier.fillMaxWidth().heightIn(min = 300.dp, max = 520.dp).border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)))
+                    Text(stringResource(R.string.photo_scan_save_body, strokes.size), style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { step = PhotoScanStep.Calibrate }) { Text(stringResource(R.string.photo_scan_recalibrate)) }
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                busy = true
+                                vm.savePhotoScan(
+                                    sobp = s,
+                                    strokes = strokes,
+                                    paper = target?.paper,
+                                    destination = destination,
+                                    targetCaptureId = target?.capture?.id,
+                                    targetNotebookId = target?.notebook?.id,
+                                ) { ok ->
+                                    busy = false
+                                    if (ok) {
+                                        photoFile?.delete()
+                                        onClose()
+                                    }
+                                }
+                            },
+                        ) { Text(stringResource(R.string.action_save)) }
+                    }
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+        }
+    }
+
+    if (expandedPreview) {
+        AlertDialog(
+            onDismissRequest = { expandedPreview = false },
+            confirmButton = { TextButton(onClick = { expandedPreview = false }) { Text(stringResource(R.string.action_close)) } },
+            text = {
+                val ex = extraction
+                val uri = photoUri
+                if (ex != null && uri != null) PhotoExtractionPreview(uri, ex, selectedCandidate, Modifier.fillMaxWidth().height(560.dp))
+            },
+        )
+    }
+}
+
+@Composable
+private fun photoScanStepLabel(step: PhotoScanStep): String = when (step) {
+    PhotoScanStep.Sobp -> stringResource(R.string.photo_scan_step_sobp)
+    PhotoScanStep.Destination -> stringResource(R.string.photo_scan_step_destination)
+    PhotoScanStep.Photo -> stringResource(R.string.photo_scan_step_photo)
+    PhotoScanStep.Review -> stringResource(R.string.photo_scan_step_review)
+    PhotoScanStep.Calibrate -> stringResource(R.string.photo_scan_step_calibrate)
+    PhotoScanStep.Save -> stringResource(R.string.photo_scan_step_save)
+}
+
+@Composable
+private fun photoScanTargetText(target: PhotoScanTarget?): String = when {
+    target?.capture != null -> stringResource(R.string.photo_scan_target_capture, target.capture.name)
+    target?.notebook != null -> stringResource(R.string.photo_scan_target_notebook, target.notebook.name)
+    else -> stringResource(R.string.photo_scan_target_none)
+}
+
+@Composable
+private fun PhotoExtractionPreview(
+    uri: Uri,
+    extraction: PhotoStrokeExtraction,
+    selectedCandidate: Int?,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.aspectRatio(extraction.width.toFloat() / extraction.height.toFloat()).clip(RoundedCornerShape(8.dp)).background(Color.White)) {
+        AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+        Canvas(Modifier.fillMaxSize()) {
+            val sx = size.width / extraction.width.toFloat()
+            val sy = size.height / extraction.height.toFloat()
+            extraction.strokes.forEach { stroke ->
+                stroke.points.zipWithNext().forEach { (a, b) ->
+                    drawLine(
+                        color = Color(0xFFEF4444),
+                        start = androidx.compose.ui.geometry.Offset(a.x * sx, a.y * sy),
+                        end = androidx.compose.ui.geometry.Offset(b.x * sx, b.y * sy),
+                        strokeWidth = 2.dp.toPx(),
+                    )
+                }
+            }
+            extraction.candidates.forEachIndexed { i, p ->
+                drawCircle(
+                    color = if (selectedCandidate == i) Color(0xFF22C55E) else Color(0xFFEAB308),
+                    radius = if (selectedCandidate == i) 7.dp.toPx() else 5.dp.toPx(),
+                    center = androidx.compose.ui.geometry.Offset(p.x * sx, p.y * sy),
+                )
+            }
+        }
+    }
+}
+
+private fun createPhotoScanUri(context: Context): Pair<File, Uri> {
+    val dir = File(context.cacheDir, "photo_scan").apply { mkdirs() }
+    val file = File.createTempFile("page-scan-", ".jpg", dir)
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    return file to uri
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

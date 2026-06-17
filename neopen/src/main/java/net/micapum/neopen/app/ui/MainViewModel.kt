@@ -21,6 +21,8 @@ import net.micapum.neopen.app.data.Capture
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.data.OfflineImportWarning
 import net.micapum.neopen.app.data.PageBackground
+import net.micapum.neopen.app.data.PhotoScanDestination
+import net.micapum.neopen.app.data.PhotoScanTarget
 import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.app.render.ExportFormat
@@ -30,6 +32,10 @@ import net.micapum.neopen.app.render.rasterizePng
 import net.micapum.neopen.app.render.renderNotebookPdf
 import net.micapum.neopen.app.render.renderPagePdf
 import net.micapum.neopen.app.render.renderSvg
+import net.micapum.neopen.app.scan.CalibrationPair
+import net.micapum.neopen.app.scan.PaperPoint
+import net.micapum.neopen.app.scan.PhotoStrokeExtraction
+import net.micapum.neopen.app.scan.PhotoStrokeExtractor
 import net.micapum.neopen.core.data.AnchorDto
 import net.micapum.neopen.core.data.ApiFactory
 import net.micapum.neopen.core.data.AppMode
@@ -46,6 +52,7 @@ import net.micapum.neopen.core.data.SyncStatus
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.SobpScanDto
 import net.micapum.neopen.core.data.StudioItemDto
+import net.micapum.neopen.core.data.StrokeDto
 import net.micapum.neopen.core.pen.KnownPen
 import net.micapum.neopen.core.pen.OfflineNote
 import net.micapum.neopen.core.pen.PenState
@@ -301,6 +308,84 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         mutate { graph.repo.editNotebook(id, name, color, tags, category) }
     fun deleteNotebook(id: String) = mutate { graph.repo.deleteNotebook(id) }
     fun setTags(id: String, tags: List<String>) = mutate { graph.repo.setCaptureTags(id, tags) }
+
+    // --- Escanear página en papel (foto + calibración con boli) ---
+
+    data class PhotoScanPenPoint(val sobp: Sobp, val point: PaperPoint)
+
+    private val _photoScanPoint = MutableStateFlow<PhotoScanPenPoint?>(null)
+    val photoScanPoint: StateFlow<PhotoScanPenPoint?> = _photoScanPoint.asStateFlow()
+
+    fun startPhotoScanPointCapture() {
+        _photoScanPoint.value = null
+        graph.pen.captureNextPoint { sobp, dot ->
+            _photoScanPoint.value = PhotoScanPenPoint(sobp, PaperPoint(dot.x, dot.y))
+        }
+    }
+
+    fun cancelPhotoScanPointCapture() {
+        graph.pen.cancelPointCapture()
+        _photoScanPoint.value = null
+    }
+
+    fun clearPhotoScanPoint() {
+        _photoScanPoint.value = null
+    }
+
+    fun loadPhotoScanTarget(sobp: Sobp, onResult: (PhotoScanTarget) -> Unit) {
+        viewModelScope.launch {
+            onResult(withContext(Dispatchers.IO) { graph.repo.photoScanTarget(sobp) })
+        }
+    }
+
+    fun extractPhotoStrokes(uri: android.net.Uri, onResult: (PhotoStrokeExtraction?) -> Unit) {
+        viewModelScope.launch {
+            val extraction = withContext(Dispatchers.IO) {
+                runCatching { PhotoStrokeExtractor.extract(getApplication(), uri) }.getOrNull()
+            }
+            if (extraction == null || extraction.strokes.isEmpty()) {
+                _status.value = getApplication<Application>().getString(R.string.photo_scan_no_strokes)
+                onResult(null)
+            } else {
+                onResult(extraction)
+            }
+        }
+    }
+
+    fun calibratedPhotoStrokes(
+        extraction: PhotoStrokeExtraction,
+        pairs: List<CalibrationPair>,
+        paper: PaperDto?,
+    ): List<StrokeDto>? {
+        val style = settings.value.styleFor(penState.value.mac)
+        return PhotoStrokeExtractor.transform(extraction, pairs, paper, style.color, style.width)
+    }
+
+    fun savePhotoScan(
+        sobp: Sobp,
+        strokes: List<StrokeDto>,
+        paper: PaperDto?,
+        destination: PhotoScanDestination,
+        targetCaptureId: String?,
+        targetNotebookId: String?,
+        onResult: (Boolean) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val s = settings.value
+            val syncRemote = s.appMode != AppMode.LOCAL && s.serverUrl.isNotBlank()
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    graph.repo.savePhotoScan(sobp, strokes, paper, destination, targetCaptureId, targetNotebookId, syncRemote)
+                }.getOrDefault(false)
+            }
+            if (ok) {
+                graph.syncNow()
+            } else {
+                _status.value = getApplication<Application>().getString(R.string.photo_scan_save_failed)
+            }
+            onResult(ok)
+        }
+    }
 
     // --- Formato de página (proporciones) ---
 

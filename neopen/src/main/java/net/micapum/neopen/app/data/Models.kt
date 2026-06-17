@@ -84,6 +84,12 @@ data class Notebook(
     val pageCount: Int = 0,
 )
 
+data class PhotoScanTarget(
+    val capture: Capture?,
+    val notebook: Notebook?,
+    val paper: PaperDto?,
+)
+
 /** Fondo (plantilla) resuelto para un cuaderno o una hoja. */
 data class PageBackground(
     val id: String,
