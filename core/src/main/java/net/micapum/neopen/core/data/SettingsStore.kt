@@ -353,7 +353,8 @@ class SettingsStore(private val context: Context) {
                     .put("mac", p.mac)
                     .put("alias", p.alias)
                     .put("color", p.style.color)
-                    .put("width", p.style.width.toDouble()),
+                    .put("width", p.style.width.toDouble())
+                    .put("pin", PwCrypto.encrypt(p.pin)),
             )
         }
         return arr.toString()
@@ -372,6 +373,7 @@ class SettingsStore(private val context: Context) {
                         color = o.optInt("color", 0xFF111111.toInt()),
                         width = o.optDouble("width", 1.6).toFloat(),
                     ),
+                    pin = PwCrypto.decrypt(o.optString("pin")),
                 )
             }
         }.getOrDefault(emptyList())

@@ -86,6 +86,11 @@ class PenManager(
     /** Notifica un boli recién autorizado (MAC, nombre) para registrarlo si es nuevo. */
     var onPenSeen: (String, String?) -> Unit = { _, _ -> }
 
+    /** PIN recordado para un boli (MAC) → null si no hay. Lo provee el grafo (cifrado). */
+    var savedPinFor: (String) -> String? = { null }
+    /** Persiste (o borra con pin=null) el PIN recordado de un boli. */
+    var onPinRemembered: (String, String?) -> Unit = { _, _ -> }
+
     /** Estilo a sellar en los trazos capturados por el boli conectado. */
     private fun currentStyle(): StrokeStyle = styleProvider(_state.value.mac)
     /** Valor de `offlineData` antes de entrar en modo-vivo, para restaurarlo al salir. */
@@ -190,6 +195,7 @@ class PenManager(
     private fun connect(device: BluetoothDevice) {
         target = device
         connectAttempts = 0
+        autoUnlockTried = false
         reassembler = Protocol.FrameReassembler(::onFrame)
         openGatt(device)
     }
@@ -228,6 +234,9 @@ class PenManager(
         txBusy = false
         pwOp = PwOp.NONE
         pendingNewPassword = ""
+        rememberPin = null
+        unlockIsAuto = false
+        autoUnlockTried = false
         gatt?.disconnect()
         gatt?.close()
         gatt = null
@@ -424,9 +433,15 @@ class PenManager(
                     )
                 }
                 if (firstTime && locked) {
-                    // Boli con contraseña: queda bloqueado a la espera del PIN.
-                    log("🔒 Boli con contraseña (intentos $retry/$maxRetry) → se requiere PIN")
                     update { it.copy(status = PenStatus.LOCKED) }
+                    // ¿Tenemos PIN guardado para este boli? Desbloqueo automático (1 intento).
+                    val saved = _state.value.mac?.let { savedPinFor(it) }
+                    if (!saved.isNullOrEmpty() && !autoUnlockTried) {
+                        autoUnlockTried = true
+                        autoUnlock(saved)
+                    } else {
+                        log("🔒 Boli con contraseña (intentos $retry/$maxRetry) → se requiere PIN")
+                    }
                 } else if (firstTime) {
                     onAuthorized(settings.battery)
                 }
@@ -447,10 +462,27 @@ class PenManager(
                 } else {
                     // Resultado de desbloquear con el PIN.
                     when (status) {
-                        1 -> { pwOp = PwOp.NONE; log("✓ PIN correcto"); onAuthorized(_state.value.settings.battery) }
+                        1 -> {
+                            pwOp = PwOp.NONE
+                            log("✓ PIN correcto")
+                            // Guarda el PIN si el usuario lo pidió ("recordar").
+                            rememberPin?.let { p -> _state.value.mac?.let { onPinRemembered(it, p) } }
+                            rememberPin = null
+                            onAuthorized(_state.value.settings.battery)
+                        }
                         2 -> update { it.copy(error = "password-reset", passwordRetry = retry) } // boli restablecido
-                        else -> update { it.copy(status = PenStatus.LOCKED, error = "password-wrong", passwordRetry = retry, passwordMaxRetry = if (reset > 0) reset else it.passwordMaxRetry) }
+                        else -> {
+                            // PIN incorrecto. Si venía del PIN guardado, olvídalo para no
+                            // gastar más intentos automáticamente; pasa a pedirlo a mano.
+                            if (unlockIsAuto) {
+                                log("⚠ El PIN guardado es incorrecto → lo olvido y pido el PIN")
+                                _state.value.mac?.let { onPinRemembered(it, null) }
+                            }
+                            rememberPin = null
+                            update { it.copy(status = PenStatus.LOCKED, error = "password-wrong", passwordRetry = retry, passwordMaxRetry = if (reset > 0) reset else it.passwordMaxRetry) }
+                        }
                     }
+                    unlockIsAuto = false
                 }
             }
             Protocol.PASSWORD_CHANGE_RESPONSE -> {
@@ -567,6 +599,9 @@ class PenManager(
     private enum class PwOp { NONE, UNLOCK, SETUP }
     private var pwOp = PwOp.NONE
     private var pendingNewPassword = ""
+    private var rememberPin: String? = null   // PIN a recordar si el desbloqueo va bien
+    private var unlockIsAuto = false           // el intento actual vino del PIN guardado
+    private var autoUnlockTried = false        // ya probamos el PIN guardado en esta conexión
 
     /** Tras autenticar: marca AUTORIZADO, pide datos en tiempo real y auto-vuelca offline. */
     private fun onAuthorized(battery: Int?) {
@@ -581,10 +616,21 @@ class PenManager(
         }
     }
 
-    /** Envía el PIN para desbloquear un boli con contraseña. */
-    fun unlockPen(pin: String) {
+    /** Envía el PIN para desbloquear (manual). remember = guardarlo si es correcto. */
+    fun unlockPen(pin: String, remember: Boolean = false) {
         pwOp = PwOp.UNLOCK
+        unlockIsAuto = false
+        rememberPin = if (remember) pin else null
         log("Enviando PIN para desbloquear…")
+        write(Protocol.reqInputPassword(pin))
+    }
+
+    /** Desbloqueo automático con el PIN guardado (no reintenta si falla). */
+    private fun autoUnlock(pin: String) {
+        pwOp = PwOp.UNLOCK
+        unlockIsAuto = true
+        rememberPin = null // ya está guardado
+        log("PIN guardado → desbloqueo automático")
         write(Protocol.reqInputPassword(pin))
     }
 

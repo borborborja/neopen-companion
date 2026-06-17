@@ -26,8 +26,16 @@ data class Stroke(
 /** Estilo de trazo (color ARGB + grueso) configurable por boli. Defaults = render actual. */
 data class StrokeStyle(val color: Int = 0xFF111111.toInt(), val width: Float = 1.6f)
 
-/** Boli emparejado: identidad (MAC), alias y su estilo de trazo actual. */
-data class KnownPen(val mac: String, val alias: String, val style: StrokeStyle = StrokeStyle())
+/**
+ * Boli emparejado: identidad (MAC), alias, estilo de trazo y, opcionalmente, el PIN
+ * recordado para desbloquearlo automáticamente (se guarda CIFRADO en reposo).
+ */
+data class KnownPen(
+    val mac: String,
+    val alias: String,
+    val style: StrokeStyle = StrokeStyle(),
+    val pin: String = "",
+)
 
 /**
  * Presets de estilo compartidos por la UI (paleta) y la notificación de control (ciclado), para

@@ -335,9 +335,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setAutoShutdown(min: Int) = graph.pen.setAutoShutdown(min)
 
     // Contraseña / PIN del boli
-    fun unlockPen(pin: String) = graph.pen.unlockPen(pin)
+    fun unlockPen(pin: String, remember: Boolean) = graph.pen.unlockPen(pin, remember)
     fun setOrChangePenPassword(current: String, new: String) = graph.pen.setOrChangePenPassword(current, new)
     fun removePenPassword(current: String) = graph.pen.removePenPassword(current)
+    /** ¿Hay PIN recordado para el boli (por MAC)? Para mostrar "Olvidar PIN". */
+    fun hasSavedPin(mac: String?): Boolean =
+        mac != null && graph.currentSettings.knownPens.any { it.mac == mac && it.pin.isNotEmpty() }
+    /** Olvida el PIN recordado del boli. */
+    fun forgetPin(mac: String?) { mac?.let { graph.pen.onPinRemembered(it, null) } }
 
     // Memoria offline
     fun listOffline() = graph.pen.listOffline()

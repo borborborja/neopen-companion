@@ -133,6 +133,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Checkbox
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -1362,7 +1363,7 @@ private fun PenTabContent(vm: MainViewModel) {
         PenDebugLogDialog(logs, onClear = vm::clearLogs, onDismiss = { showLogs = false })
     }
     if (showPin && state.status == PenStatus.LOCKED) {
-        PinUnlockDialog(state, onUnlock = { vm.unlockPen(it) }, onDismiss = { showPin = false })
+        PinUnlockDialog(state, onUnlock = { pin, remember -> vm.unlockPen(pin, remember) }, onDismiss = { showPin = false })
     }
 }
 
@@ -1370,10 +1371,11 @@ private fun PenTabContent(vm: MainViewModel) {
 @Composable
 private fun PinUnlockDialog(
     state: net.micapum.neopen.core.pen.PenState,
-    onUnlock: (String) -> Unit,
+    onUnlock: (String, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var pin by remember { mutableStateOf("") }
+    var remember by remember { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.pen_pw_unlock_title)) },
@@ -1388,6 +1390,10 @@ private fun PinUnlockDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = remember, onCheckedChange = { remember = it })
+                    Text(stringResource(R.string.pen_pw_remember), style = MaterialTheme.typography.bodyMedium)
+                }
                 if (state.error == "password-wrong") {
                     Text(stringResource(R.string.pen_pw_wrong, state.passwordRetry, state.passwordMaxRetry),
                         color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -1401,7 +1407,7 @@ private fun PinUnlockDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { if (pin.isNotBlank()) onUnlock(pin) }) { Text(stringResource(R.string.pen_pw_unlock_action)) }
+            TextButton(onClick = { if (pin.isNotBlank()) onUnlock(pin, remember) }) { Text(stringResource(R.string.pen_pw_unlock_action)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
@@ -1455,6 +1461,11 @@ private fun PenPasswordSection(state: net.micapum.neopen.core.pen.PenState, vm: 
     } else {
         TextButton(onClick = { dialog = "set" }, contentPadding = PaddingValues(vertical = 6.dp)) {
             Text(stringResource(R.string.pen_pw_set), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+    if (vm.hasSavedPin(state.mac)) {
+        TextButton(onClick = { vm.forgetPin(state.mac) }, contentPadding = PaddingValues(vertical = 6.dp)) {
+            Text(stringResource(R.string.pen_pw_forget_saved), style = MaterialTheme.typography.bodyMedium)
         }
     }
     Text(stringResource(R.string.pen_pw_reset_warning, state.passwordMaxRetry),
