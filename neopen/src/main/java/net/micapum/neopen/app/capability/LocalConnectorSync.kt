@@ -21,6 +21,7 @@ import net.micapum.neopen.core.capability.WebdavConnector
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.CapabilitySource
 import java.security.MessageDigest
+import kotlin.math.roundToInt
 
 /**
  * Espejo (mirroring) de las capturas/cuadernos a los conectores locales del
@@ -59,7 +60,15 @@ class LocalConnectorSync(private val graph: Graph) {
         val nbById = notebooks.associateBy { it.id }
         val noSync = notebooks.filter { it.tags.contains(NO_SYNC_TAG) }.map { it.id }.toSet()
 
-        val desired = computeDesired(captures, notebooks, nbById, noSync, connectors.map { it.id }, s.pressureWidthEnabled)
+        val desired = computeDesired(
+            captures,
+            notebooks,
+            nbById,
+            noSync,
+            connectors.map { it.id },
+            s.pressureWidthEnabled,
+            s.pressureWidthContrast,
+        )
         val stateRows = db.connectorSyncState().all()
         val stateByKey = stateRows.associateBy { fileKey(it.itemId, it.connectorId, it.format) }
 
@@ -114,6 +123,7 @@ class LocalConnectorSync(private val graph: Graph) {
         noSync: Set<String>,
         connectorIds: List<String>,
         pressureWidthEnabled: Boolean,
+        pressureWidthContrast: Float,
     ): Map<String, Desired> {
         val desired = LinkedHashMap<String, Desired>()
 
@@ -129,12 +139,12 @@ class LocalConnectorSync(private val graph: Graph) {
                     if (cap.transcription == null) continue // solo hojas transcritas
                 }
                 val relativePath = "$folder/$base.$format"
-                val hash = pageHash(cap, format, relativePath)
+                val hash = pageHash(cap, format, relativePath, pressureWidthEnabled, pressureWidthContrast)
                 for (cid in connectorIds) {
                     desired[fileKey(cap.id, cid, format)] = Desired(
                         itemId = cap.id, connectorId = cid, format = format,
                         relativePath = relativePath, hash = hash,
-                        render = { renderFormat(cap, format, "$base.png", nbById, pressureWidthEnabled) },
+                        render = { renderFormat(cap, format, "$base.png", nbById, pressureWidthEnabled, pressureWidthContrast) },
                     )
                 }
             }
@@ -149,12 +159,12 @@ class LocalConnectorSync(private val graph: Graph) {
             if (pages.isEmpty()) continue
             val folder = slug(nb.name)
             val relativePath = "$folder/${slug(nb.name)}.pdf"
-            val hash = notebookHash(nb, pages, relativePath)
+            val hash = notebookHash(nb, pages, relativePath, pressureWidthEnabled, pressureWidthContrast)
             for (cid in connectorIds) {
                 desired[fileKey("nb:${nb.id}", cid, "pdf")] = Desired(
                     itemId = "nb:${nb.id}", connectorId = cid, format = "pdf",
                     relativePath = relativePath, hash = hash,
-                        render = { renderNotebookPdf(pages, pressureWidthEnabled) to "application/pdf" },
+                        render = { renderNotebookPdf(pages, pressureWidthEnabled, pressureWidthContrast) to "application/pdf" },
                 )
             }
         }
@@ -183,10 +193,11 @@ class LocalConnectorSync(private val graph: Graph) {
         attachmentName: String,
         nbById: Map<String, Notebook>,
         pressureWidthEnabled: Boolean,
+        pressureWidthContrast: Float,
     ): Pair<ByteArray, String> = when (format) {
-        "svg" -> renderSvg(cap.strokes, cap.paper, pressureWidthEnabled).toByteArray() to "image/svg+xml"
-        "png" -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = pressureWidthEnabled) to "image/png"
-        "pdf" -> renderPagePdf(cap.strokes, cap.paper, pressureWidthEnabled) to "application/pdf"
+        "svg" -> renderSvg(cap.strokes, cap.paper, pressureWidthEnabled, pressureWidthContrast).toByteArray() to "image/svg+xml"
+        "png" -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = pressureWidthEnabled, pressureWidthContrast = pressureWidthContrast) to "image/png"
+        "pdf" -> renderPagePdf(cap.strokes, cap.paper, pressureWidthEnabled, pressureWidthContrast) to "application/pdf"
         "md" -> buildMarkdown(cap, nbById[cap.notebookId]?.name, attachmentName).toByteArray() to "text/markdown"
         else -> throw IllegalArgumentException(format)
     }
@@ -224,11 +235,20 @@ class LocalConnectorSync(private val graph: Graph) {
 
     // --- Hashes (estables entre pasadas; no necesitan coincidir con el servidor) ---
 
-    private fun pageHash(cap: Capture, format: String, path: String): String =
-        sha1(Json.strokesJson(cap.strokes) + "|" + cap.name + "|" + (Json.ocrJson(cap.transcription) ?: "") + "|" + format + "|" + path)
+    private fun pageHash(cap: Capture, format: String, path: String, pressureWidthEnabled: Boolean, pressureWidthContrast: Float): String =
+        sha1(
+            Json.strokesJson(cap.strokes) + "|" + cap.name + "|" + (Json.ocrJson(cap.transcription) ?: "") +
+                "|" + format + "|" + path + "|pw=$pressureWidthEnabled:${pressureWidthKey(pressureWidthContrast)}",
+        )
 
-    private fun notebookHash(nb: Notebook, pages: List<Capture>, path: String): String =
-        sha1(pages.joinToString("|") { it.id + ":" + it.position + ":" + Json.strokesJson(it.strokes) } + "||" + nb.name + "|" + path)
+    private fun notebookHash(nb: Notebook, pages: List<Capture>, path: String, pressureWidthEnabled: Boolean, pressureWidthContrast: Float): String =
+        sha1(
+            pages.joinToString("|") { it.id + ":" + it.position + ":" + Json.strokesJson(it.strokes) } +
+                "||" + nb.name + "|" + path + "|pw=$pressureWidthEnabled:${pressureWidthKey(pressureWidthContrast)}",
+        )
+
+    private fun pressureWidthKey(contrast: Float): Int =
+        (contrast.coerceIn(0.5f, 3f) * 100).roundToInt()
 
     private fun yaml(s: String): String = "\"" + s.replace("\"", "\\\"") + "\""
 

@@ -21,6 +21,7 @@
     <string name="pen_sensitivity_level">Nivel %1$d</string>
     <string name="pressure_width">Presión como grosor</string>
     <string name="pressure_width_desc">La presión modifica el grosor del trazo. Solo aplica en bolis compatibles.</string>
+    <string name="pressure_width_contrast">Diferencia fino/grueso: %1$sx</string>
     <string name="known_pens">Bolis conectados</string>
     <string name="known_pens_empty">Conecta un boli y aparecerá aquí.</string>
     <string name="lock_to_pen">Conectar solo este boli</string>

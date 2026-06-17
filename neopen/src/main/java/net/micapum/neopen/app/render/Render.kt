@@ -48,6 +48,7 @@ fun buildModel(
     padding: Float = 24f,
     strokeWidth: Float = 1.6f,
     pressureWidthEnabled: Boolean = false,
+    pressureWidthContrast: Float = 2f,
 ): RenderModel {
     val b = if (paper != null) {
         Bounds(paper.x0, paper.y0, paper.x0 + paper.width, paper.y0 + paper.height)
@@ -64,7 +65,7 @@ fun buildModel(
             points = pts,
             color = st.color ?: INK,
             width = baseWidth,
-            pointWidths = if (pressureWidthEnabled) st.dots.map { d -> pressureWidth(baseWidth, d.f) } else null,
+            pointWidths = if (pressureWidthEnabled) st.dots.map { d -> pressureWidth(baseWidth, d.f, pressureWidthContrast) } else null,
         )
     }
     return RenderModel(
@@ -75,13 +76,14 @@ fun buildModel(
     )
 }
 
-private fun pressureWidth(base: Float, force: Float): Float {
+private fun pressureWidth(base: Float, force: Float, contrast: Float): Float {
     val normalized = when {
         force.isNaN() || force <= 0f -> 0.5f
         force <= 1f -> force
         else -> force / 1023f
     }.coerceIn(0f, 1f)
-    return base * (0.55f + normalized * 0.9f)
+    val factor = (1f + (normalized - 0.5f) * 0.9f * contrast.coerceIn(0.5f, 3f)).coerceIn(0.2f, 2.4f)
+    return base * factor
 }
 
 private fun computeBounds(strokes: List<StrokeDto>): Bounds {
@@ -143,6 +145,7 @@ fun rasterizePng(
     paper: PaperDto?,
     dpiScale: Float = 2f,
     pressureWidthEnabled: Boolean = false,
+    pressureWidthContrast: Float = 2f,
 ): ByteArray {
     val m = buildModel(
         strokes,
@@ -151,6 +154,7 @@ fun rasterizePng(
         padding = 24f * dpiScale,
         strokeWidth = 1.6f * dpiScale,
         pressureWidthEnabled = pressureWidthEnabled,
+        pressureWidthContrast = pressureWidthContrast,
     )
     val w = m.width.toInt().coerceIn(1, 6000)
     val h = m.height.toInt().coerceIn(1, 6000)
@@ -276,8 +280,11 @@ fun InkCanvas(
     bgImage: ImageBitmap? = null,
     bgPreset: String? = null,
     pressureWidthEnabled: Boolean = false,
+    pressureWidthContrast: Float = 2f,
 ) {
-    val model = remember(strokes, paper, pressureWidthEnabled) { buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled) }
+    val model = remember(strokes, paper, pressureWidthEnabled, pressureWidthContrast) {
+        buildModel(strokes, paper, pressureWidthEnabled = pressureWidthEnabled, pressureWidthContrast = pressureWidthContrast)
+    }
     Canvas(modifier) {
         if (model.width <= 0f || model.height <= 0f || size.minDimension <= 0f) return@Canvas
         val s = minOf(size.width / model.width, size.height / model.height)

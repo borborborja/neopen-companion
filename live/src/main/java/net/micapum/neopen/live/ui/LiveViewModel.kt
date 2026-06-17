@@ -57,6 +57,10 @@ class LiveViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { liveApp.settings.update(settings.value.copy(pressureWidthEnabled = on)) }
     }
 
+    fun setPressureWidthContrast(contrast: Float) {
+        viewModelScope.launch { liveApp.settings.update(settings.value.copy(pressureWidthContrast = contrast.coerceIn(0.5f, 3f))) }
+    }
+
     fun setSensitivity(level: Int) = liveApp.pen.setSensitivity(level)
 
     fun setLockedPen(mac: String?) {
