@@ -13,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -100,6 +101,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -153,10 +155,12 @@ import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.Capability
 import net.micapum.neopen.core.data.CapabilitySource
+import net.micapum.neopen.core.data.DEFAULT_OCR_INSTRUCTIONS
 import net.micapum.neopen.core.data.FtpLocalConfig
 import net.micapum.neopen.core.data.LanguageToolLocalConfig
 import net.micapum.neopen.core.data.OcrLocalConfig
 import net.micapum.neopen.core.data.WebdavLocalConfig
+import net.micapum.neopen.core.data.phoneCapable
 import net.micapum.neopen.core.data.availabilityOf
 import net.micapum.neopen.core.data.sourceOf
 import net.micapum.neopen.core.data.SyncMode
@@ -1698,7 +1702,7 @@ private fun SettingsScreen(vm: MainViewModel) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        SecondaryTabRow(selectedTabIndex = settingsTab) {
+        SecondaryScrollableTabRow(selectedTabIndex = settingsTab, edgePadding = 16.dp) {
             listOf(
                 stringResource(R.string.settings_tab_general),
                 stringResource(R.string.settings_tab_connection),
@@ -1706,7 +1710,7 @@ private fun SettingsScreen(vm: MainViewModel) {
                 stringResource(R.string.settings_tab_other),
                 stringResource(R.string.settings_tab_server),
             ).forEachIndexed { i, label ->
-                Tab(settingsTab == i, { settingsTab = i }, text = { Text(label) })
+                Tab(settingsTab == i, { settingsTab = i }, text = { Text(label, maxLines = 1) })
             }
         }
         Column(
@@ -1807,23 +1811,26 @@ private fun SettingsScreen(vm: MainViewModel) {
                 // ========================= CAPACIDADES =========================
                 2 -> {
                     Text(stringResource(R.string.settings_cap_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                    Text(stringResource(R.string.settings_cap_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.settings_cap_local_intro), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                    CapabilityRow(stringResource(R.string.cap_ocr), stringResource(R.string.cap_ocr_help), Capability.OCR, settings, online) {
-                        vm.saveSettings(settings.copy(ocrSource = it))
-                    }
-                    CapabilityRow(stringResource(R.string.cap_lt), stringResource(R.string.cap_lt_help), Capability.LANGUAGE_TOOL, settings, online) {
-                        vm.saveSettings(settings.copy(languageToolSource = it))
-                    }
-                    CapabilityRow(stringResource(R.string.cap_marker), stringResource(R.string.cap_marker_help), Capability.MARKER_DETECTION, settings, online) {
-                        vm.saveSettings(settings.copy(markerDetectionSource = it))
-                    }
-                    CapabilityRow(stringResource(R.string.cap_connector), stringResource(R.string.cap_connector_help), Capability.CONNECTOR_SYNC, settings, online) {
-                        vm.saveSettings(settings.copy(connectorSyncSource = it))
-                    }
+                    // Importar del servidor: rellena lo no-secreto de la config local.
+                    val canImport = settings.appMode != AppMode.LOCAL && settings.configured && online
+                    var importMsg by rememberSaveable { mutableStateOf<String?>(null) }
+                    val importOkMsg = stringResource(R.string.cap_import_ok)
+                    val importFailMsg = stringResource(R.string.cap_import_failed)
+                    OutlinedButton(
+                        onClick = { importMsg = null; vm.importServerConfig { ok -> importMsg = if (ok) importOkMsg else importFailMsg } },
+                        enabled = canImport,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.cap_import_server)) }
+                    Text(stringResource(R.string.cap_import_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    importMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
 
-                    HorizontalDivider()
-                    LocalCredentialsEditor(settings) { vm.saveSettings(it) }
+                    // Una tarjeta colapsable por servicio (colapsadas por defecto).
+                    OcrCapabilityCard(settings, online) { vm.saveSettings(it) }
+                    LanguageToolCapabilityCard(settings, online) { vm.saveSettings(it) }
+                    MarkerCapabilityCard(settings, online) { vm.saveSettings(it) }
+                    ConnectorCapabilityCard(settings, online) { vm.saveSettings(it) }
                 }
 
                 // ============================ OTROS ============================
@@ -1937,14 +1944,69 @@ private fun SettingsScreen(vm: MainViewModel) {
     }
 }
 
+/** Etiqueta + color de estado para la cabecera colapsada de una tarjeta de capacidad. */
+@Composable
+private fun capStatus(settings: AppSettings, cap: Capability): Pair<String, Color> = when {
+    settings.sourceOf(cap) == CapabilitySource.OFF ->
+        stringResource(R.string.cap_status_off) to MaterialTheme.colorScheme.outline
+    settings.sourceOf(cap) == CapabilitySource.SERVER ->
+        stringResource(R.string.cap_status_server) to MaterialTheme.colorScheme.primary
+    settings.phoneCapable(cap) ->
+        stringResource(R.string.cap_status_phone) to MaterialTheme.colorScheme.primary
+    else ->
+        stringResource(R.string.cap_status_no_creds) to MaterialTheme.colorScheme.error
+}
+
 /**
- * Conmutador de 3 estados (Desactivado / Teléfono / Servidor) de una capacidad.
- * Atenúa la fila y deshabilita los segmentos no disponibles, y explica el estado
- * efectivo bajo el control.
+ * Tarjeta colapsable de un servicio: cabecera clicable (icono + título + estado +
+ * chevron) que alterna [expanded]; el cuerpo solo se muestra al expandir. Sigue el
+ * patrón de colapso del árbol de cuadernos. Colapsada por defecto.
  */
 @Composable
-private fun CapabilityRow(
+private fun CapabilityCard(
     title: String,
+    icon: ImageVector,
+    statusLabel: String,
+    statusColor: Color,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    body: @Composable ColumnScope.() -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall)
+                    Text(statusLabel, style = MaterialTheme.typography.bodySmall, color = statusColor)
+                }
+                Icon(
+                    if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (expanded) {
+                Column(
+                    Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    content = body,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Conmutador de 3 estados (Desactivado / Teléfono / Servidor) de una capacidad.
+ * Atenúa y deshabilita los segmentos no disponibles, y explica el estado efectivo.
+ */
+@Composable
+private fun CapabilitySourceControl(
     help: String,
     cap: Capability,
     settings: AppSettings,
@@ -1958,7 +2020,6 @@ private fun CapabilityRow(
         Modifier.fillMaxWidth().alpha(if (usable) 1f else 0.5f),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(title, style = MaterialTheme.typography.bodyMedium)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             SegmentedButton(
                 selected = current == CapabilitySource.OFF,
@@ -1994,76 +2055,109 @@ private fun CapabilityRow(
     }
 }
 
-/** Editores de credenciales locales (teléfono) para OCR, LanguageTool, WebDAV y FTP. */
+/** Tarjeta OCR: 3 estados + prompt local prominente + credenciales locales. */
 @Composable
-private fun LocalCredentialsEditor(settings: AppSettings, onSave: (AppSettings) -> Unit) {
+private fun OcrCapabilityCard(settings: AppSettings, online: Boolean, onSave: (AppSettings) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
     var ocrUrl by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.baseUrl) }
     var ocrModel by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.model) }
     var ocrKey by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.apiKey) }
     var ocrInstr by rememberSaveable(settings.ocrLocal) { mutableStateOf(settings.ocrLocal.instructions) }
+    val (status, statusColor) = capStatus(settings, Capability.OCR)
+    val fieldMod = Modifier.fillMaxWidth()
+    CapabilityCard(stringResource(R.string.cap_ocr), Icons.Filled.DocumentScanner, status, statusColor, expanded, { expanded = !expanded }) {
+        CapabilitySourceControl(stringResource(R.string.cap_ocr_help), Capability.OCR, settings, online) {
+            onSave(settings.copy(ocrSource = it))
+        }
+        Text(stringResource(R.string.cap_ocr_prompt_label), style = MaterialTheme.typography.bodyMedium)
+        OutlinedTextField(
+            ocrInstr, { ocrInstr = it },
+            label = { Text(stringResource(R.string.cap_ocr_prompt_field)) },
+            placeholder = { Text(DEFAULT_OCR_INSTRUCTIONS, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            minLines = 3, modifier = fieldMod,
+        )
+        TextButton(onClick = { ocrInstr = "" }, enabled = ocrInstr.isNotBlank()) {
+            Text(stringResource(R.string.cap_ocr_prompt_reset))
+        }
+        Text(stringResource(R.string.cap_ocr_local_creds), style = MaterialTheme.typography.bodyMedium)
+        OutlinedTextField(ocrUrl, { ocrUrl = it }, label = { Text(stringResource(R.string.cap_field_ocr_url)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(ocrModel, { ocrModel = it }, label = { Text(stringResource(R.string.cap_field_ocr_model)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(ocrKey, { ocrKey = it }, label = { Text(stringResource(R.string.cap_field_ocr_key)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+        Button(onClick = { onSave(settings.copy(ocrLocal = OcrLocalConfig(ocrUrl.trim(), ocrKey, ocrModel.trim(), ocrInstr))) }, modifier = fieldMod) {
+            Text(stringResource(R.string.settings_save))
+        }
+    }
+}
 
+/** Tarjeta LanguageTool: 3 estados + credenciales locales. */
+@Composable
+private fun LanguageToolCapabilityCard(settings: AppSettings, online: Boolean, onSave: (AppSettings) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
     var ltUrl by rememberSaveable(settings.ltLocal) { mutableStateOf(settings.ltLocal.baseUrl) }
     var ltUser by rememberSaveable(settings.ltLocal) { mutableStateOf(settings.ltLocal.username) }
     var ltKey by rememberSaveable(settings.ltLocal) { mutableStateOf(settings.ltLocal.apiKey) }
+    val (status, statusColor) = capStatus(settings, Capability.LANGUAGE_TOOL)
+    val fieldMod = Modifier.fillMaxWidth()
+    CapabilityCard(stringResource(R.string.cap_lt), Icons.Filled.Edit, status, statusColor, expanded, { expanded = !expanded }) {
+        CapabilitySourceControl(stringResource(R.string.cap_lt_help), Capability.LANGUAGE_TOOL, settings, online) {
+            onSave(settings.copy(languageToolSource = it))
+        }
+        OutlinedTextField(ltUrl, { ltUrl = it }, label = { Text(stringResource(R.string.cap_field_lt_url)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(ltUser, { ltUser = it }, label = { Text(stringResource(R.string.cap_field_lt_user)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(ltKey, { ltKey = it }, label = { Text(stringResource(R.string.cap_field_lt_key)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+        Button(onClick = { onSave(settings.copy(ltLocal = LanguageToolLocalConfig(ltUrl.trim(), ltUser, ltKey))) }, modifier = fieldMod) {
+            Text(stringResource(R.string.settings_save))
+        }
+    }
+}
 
+/** Tarjeta de detección de marcadores: solo el conmutador (sin credenciales). */
+@Composable
+private fun MarkerCapabilityCard(settings: AppSettings, online: Boolean, onSave: (AppSettings) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val (status, statusColor) = capStatus(settings, Capability.MARKER_DETECTION)
+    CapabilityCard(stringResource(R.string.cap_marker), Icons.Filled.Flag, status, statusColor, expanded, { expanded = !expanded }) {
+        CapabilitySourceControl(stringResource(R.string.cap_marker_help), Capability.MARKER_DETECTION, settings, online) {
+            onSave(settings.copy(markerDetectionSource = it))
+        }
+    }
+}
+
+/** Tarjeta de conectores: 3 estados + WebDAV + FTP/SFTP (un solo guardado). */
+@Composable
+private fun ConnectorCapabilityCard(settings: AppSettings, online: Boolean, onSave: (AppSettings) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
     var wdUrl by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.url) }
     var wdUser by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.username) }
     var wdPass by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.password) }
     var wdBase by rememberSaveable(settings.webdavLocal) { mutableStateOf(settings.webdavLocal.basePath) }
-
     var ftpUrl by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.url) }
     var ftpUser by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.username) }
     var ftpPass by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.password) }
     var ftpBase by rememberSaveable(settings.ftpLocal) { mutableStateOf(settings.ftpLocal.basePath) }
-
+    val (status, statusColor) = capStatus(settings, Capability.CONNECTOR_SYNC)
     val fieldMod = Modifier.fillMaxWidth()
-
-    Text(stringResource(R.string.settings_cap_creds_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-    Text(stringResource(R.string.settings_cap_creds_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-    // OCR
-    Text(stringResource(R.string.cap_ocr), style = MaterialTheme.typography.bodyMedium)
-    OutlinedTextField(ocrUrl, { ocrUrl = it }, label = { Text(stringResource(R.string.cap_field_ocr_url)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ocrModel, { ocrModel = it }, label = { Text(stringResource(R.string.cap_field_ocr_model)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ocrKey, { ocrKey = it }, label = { Text(stringResource(R.string.cap_field_ocr_key)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ocrInstr, { ocrInstr = it }, label = { Text(stringResource(R.string.cap_field_ocr_instr)) }, modifier = fieldMod)
-
-    HorizontalDivider()
-    // LanguageTool
-    Text(stringResource(R.string.cap_lt), style = MaterialTheme.typography.bodyMedium)
-    OutlinedTextField(ltUrl, { ltUrl = it }, label = { Text(stringResource(R.string.cap_field_lt_url)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ltUser, { ltUser = it }, label = { Text(stringResource(R.string.cap_field_lt_user)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ltKey, { ltKey = it }, label = { Text(stringResource(R.string.cap_field_lt_key)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
-
-    HorizontalDivider()
-    // WebDAV
-    Text(stringResource(R.string.cap_section_webdav), style = MaterialTheme.typography.bodyMedium)
-    OutlinedTextField(wdUrl, { wdUrl = it }, label = { Text(stringResource(R.string.cap_field_webdav_url)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(wdUser, { wdUser = it }, label = { Text(stringResource(R.string.cap_field_user)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(wdPass, { wdPass = it }, label = { Text(stringResource(R.string.cap_field_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
-    OutlinedTextField(wdBase, { wdBase = it }, label = { Text(stringResource(R.string.cap_field_basepath)) }, singleLine = true, modifier = fieldMod)
-
-    HorizontalDivider()
-    // FTP / SFTP
-    Text(stringResource(R.string.cap_section_ftp), style = MaterialTheme.typography.bodyMedium)
-    OutlinedTextField(ftpUrl, { ftpUrl = it }, label = { Text(stringResource(R.string.cap_field_ftp_url)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ftpUser, { ftpUser = it }, label = { Text(stringResource(R.string.cap_field_user)) }, singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ftpPass, { ftpPass = it }, label = { Text(stringResource(R.string.cap_field_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
-    OutlinedTextField(ftpBase, { ftpBase = it }, label = { Text(stringResource(R.string.cap_field_basepath)) }, singleLine = true, modifier = fieldMod)
-
-    Button(
-        onClick = {
-            onSave(
-                settings.copy(
-                    ocrLocal = OcrLocalConfig(ocrUrl.trim(), ocrKey, ocrModel.trim(), ocrInstr),
-                    ltLocal = LanguageToolLocalConfig(ltUrl.trim(), ltUser, ltKey),
-                    webdavLocal = WebdavLocalConfig(wdUrl.trim(), wdUser, wdPass, wdBase.trim()),
-                    ftpLocal = FtpLocalConfig(ftpUrl.trim(), ftpUser, ftpPass, ftpBase.trim()),
-                ),
-            )
-        },
-        modifier = fieldMod,
-    ) { Text(stringResource(R.string.cap_save_creds)) }
+    CapabilityCard(stringResource(R.string.cap_connector), Icons.Filled.Cloud, status, statusColor, expanded, { expanded = !expanded }) {
+        CapabilitySourceControl(stringResource(R.string.cap_connector_help), Capability.CONNECTOR_SYNC, settings, online) {
+            onSave(settings.copy(connectorSyncSource = it))
+        }
+        Text(stringResource(R.string.cap_section_webdav), style = MaterialTheme.typography.bodyMedium)
+        OutlinedTextField(wdUrl, { wdUrl = it }, label = { Text(stringResource(R.string.cap_field_webdav_url)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(wdUser, { wdUser = it }, label = { Text(stringResource(R.string.cap_field_user)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(wdPass, { wdPass = it }, label = { Text(stringResource(R.string.cap_field_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+        OutlinedTextField(wdBase, { wdBase = it }, label = { Text(stringResource(R.string.cap_field_basepath)) }, singleLine = true, modifier = fieldMod)
+        Text(stringResource(R.string.cap_section_ftp), style = MaterialTheme.typography.bodyMedium)
+        OutlinedTextField(ftpUrl, { ftpUrl = it }, label = { Text(stringResource(R.string.cap_field_ftp_url)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(ftpUser, { ftpUser = it }, label = { Text(stringResource(R.string.cap_field_user)) }, singleLine = true, modifier = fieldMod)
+        OutlinedTextField(ftpPass, { ftpPass = it }, label = { Text(stringResource(R.string.cap_field_password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = fieldMod)
+        OutlinedTextField(ftpBase, { ftpBase = it }, label = { Text(stringResource(R.string.cap_field_basepath)) }, singleLine = true, modifier = fieldMod)
+        Button(onClick = {
+            onSave(settings.copy(
+                webdavLocal = WebdavLocalConfig(wdUrl.trim(), wdUser, wdPass, wdBase.trim()),
+                ftpLocal = FtpLocalConfig(ftpUrl.trim(), ftpUser, ftpPass, ftpBase.trim()),
+            ))
+        }, modifier = fieldMod) { Text(stringResource(R.string.settings_save)) }
+    }
 }
 
 // --- Diálogos y piezas reutilizables -----------------------------------------

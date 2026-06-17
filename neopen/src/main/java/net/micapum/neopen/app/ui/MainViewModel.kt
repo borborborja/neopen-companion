@@ -209,6 +209,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Importa a la config LOCAL (teléfono) la configuración del servidor (GET /api/settings).
+     * Solo lo no-secreto: URLs, modelo, usuarios y carpetas base. Las API keys y contraseñas
+     * NO se exponen por el servidor, así que se preservan las locales. `onResult(true)` si fue ok.
+     */
+    fun importServerConfig(onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val s = settings.value
+            val dto = runCatching { ApiFactory.create(s.serverUrl).serverSettings(s.password) }.getOrNull()
+            if (dto == null) { onResult(false); return@launch }
+            val newS = s.copy(
+                ocrLocal = s.ocrLocal.copy(
+                    baseUrl = dto.ocr?.baseUrl?.value?.ifBlank { null } ?: s.ocrLocal.baseUrl,
+                    model = dto.ocr?.model?.value?.ifBlank { null } ?: s.ocrLocal.model,
+                ),
+                ltLocal = s.ltLocal.copy(
+                    baseUrl = dto.languageTool?.baseUrl?.value?.ifBlank { null } ?: s.ltLocal.baseUrl,
+                    username = dto.languageTool?.username?.value?.ifBlank { null } ?: s.ltLocal.username,
+                ),
+                webdavLocal = s.webdavLocal.copy(
+                    url = dto.webdav?.url?.value?.ifBlank { null } ?: s.webdavLocal.url,
+                    username = dto.webdav?.username?.value?.ifBlank { null } ?: s.webdavLocal.username,
+                    basePath = dto.webdav?.basePath?.value?.ifBlank { null } ?: s.webdavLocal.basePath,
+                ),
+                ftpLocal = s.ftpLocal.copy(
+                    url = dto.ftp?.url?.value?.ifBlank { null } ?: s.ftpLocal.url,
+                    username = dto.ftp?.username?.value?.ifBlank { null } ?: s.ftpLocal.username,
+                    basePath = dto.ftp?.basePath?.value?.ifBlank { null } ?: s.ftpLocal.basePath,
+                ),
+            )
+            graph.settings.update(newS)
+            onResult(true)
+        }
+    }
+
     // --- Backup (copia completa del servidor) ---
 
     /** Descarga la copia completa del servidor (JSON) como bytes. */

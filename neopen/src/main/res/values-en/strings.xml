@@ -284,4 +284,17 @@
     <string name="cap_field_password">Password</string>
     <string name="cap_field_basepath">Base folder</string>
     <string name="cap_save_creds">Save credentials</string>
+    <string name="settings_cap_local_intro">Here you configure the LOCAL version (on the phone). The server has its own separate configuration. Per feature, choose who runs it: off, on the phone (with your credentials) or on the server.</string>
+    <string name="cap_status_off">Off</string>
+    <string name="cap_status_phone">Phone</string>
+    <string name="cap_status_server">Server</string>
+    <string name="cap_status_no_creds">No credentials</string>
+    <string name="cap_ocr_prompt_label">Transcription prompt (local)</string>
+    <string name="cap_ocr_prompt_field">Instructions for the model</string>
+    <string name="cap_ocr_prompt_reset">Reset to default</string>
+    <string name="cap_ocr_local_creds">Local credentials (Phone mode)</string>
+    <string name="cap_import_server">Import server configuration</string>
+    <string name="cap_import_note">API keys and passwords are not imported for security: enter them manually. Check that the URLs are reachable from the phone.</string>
+    <string name="cap_import_ok">Configuration imported from the server.</string>
+    <string name="cap_import_failed">Could not import from the server.</string>
 </resources>

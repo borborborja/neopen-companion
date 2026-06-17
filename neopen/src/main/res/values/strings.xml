@@ -288,6 +288,19 @@
     <string name="cap_field_password">Contraseña</string>
     <string name="cap_field_basepath">Carpeta base</string>
     <string name="cap_save_creds">Guardar credenciales</string>
+    <string name="settings_cap_local_intro">Aquí configuras la versión LOCAL (en el teléfono). El servidor tiene su propia configuración aparte. Por funcionalidad eliges quién la ejecuta: desactivada, en el teléfono (con tus credenciales) o en el servidor.</string>
+    <string name="cap_status_off">Desactivado</string>
+    <string name="cap_status_phone">Teléfono</string>
+    <string name="cap_status_server">Servidor</string>
+    <string name="cap_status_no_creds">Sin credenciales</string>
+    <string name="cap_ocr_prompt_label">Prompt de transcripción (local)</string>
+    <string name="cap_ocr_prompt_field">Instrucciones para el modelo</string>
+    <string name="cap_ocr_prompt_reset">Restablecer</string>
+    <string name="cap_ocr_local_creds">Credenciales locales (modo Teléfono)</string>
+    <string name="cap_import_server">Importar configuración del servidor</string>
+    <string name="cap_import_note">Las claves y contraseñas no se importan por seguridad: introdúcelas a mano. Revisa que las URLs sean accesibles desde el teléfono.</string>
+    <string name="cap_import_ok">Configuración importada del servidor.</string>
+    <string name="cap_import_failed">No se pudo importar del servidor.</string>
 
     <string name="settings_app_mode_full_desc">Completo: cuadernos, capturas y sincronización con el servidor en el propio móvil.</string>
     <string name="settings_app_mode_bridge_desc">Solo puente: el boli se vuelca al servidor y la app no guarda cuadernos en el móvil.</string>
