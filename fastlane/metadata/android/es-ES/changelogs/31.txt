@@ -1,0 +1,1 @@
+Corrige el desbloqueo automatico con PIN recordado del boli.

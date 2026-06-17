@@ -282,7 +282,9 @@ class Graph(app: Application) {
             }
             val forgotten = cur.forgottenPens.filterNot { it == mac }
             if (knownPens != cur.knownPens || forgotten != cur.forgottenPens) {
-                scope.launch { settings.update(cur.copy(knownPens = knownPens, forgottenPens = forgotten)) }
+                val next = cur.copy(knownPens = knownPens, forgottenPens = forgotten)
+                lastSettings = next
+                scope.launch { settings.update(next) }
             }
         }
         // PIN recordado para desbloqueo automático (cifrado en reposo).
@@ -297,7 +299,9 @@ class Graph(app: Application) {
                 pin != null -> cur.knownPens + KnownPen(mac, mac, cur.defaultStyle, pin)
                 else -> cur.knownPens
             }
-            scope.launch { settings.update(cur.copy(knownPens = updated)) }
+            val next = cur.copy(knownPens = updated)
+            lastSettings = next
+            scope.launch { settings.update(next) }
         }
         // Mantén al día el flag de auto-volcado y el modo local desde los ajustes.
         scope.launch {
