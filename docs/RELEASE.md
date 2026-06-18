@@ -64,6 +64,10 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.22.0** — Render: en modo servidor, la presión→grosor usa los ajustes del
+  servidor (`GET /api/render-settings`) como fuente de verdad, para que web y Android
+  rendericen igual; en modo local sigue mandando el ajuste local. Requiere
+  `neopen` ≥ v0.22.0.
 - **v0.21.6** — Widgets mejorados: cuadernos y ediciones recientes con botón de
   compartir, y widget del boli con estado, batería, volcado y conexión permanente.
 - **v0.21.5** — Reconexión automática del boli mientras la app está abierta,

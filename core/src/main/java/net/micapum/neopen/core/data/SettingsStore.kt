@@ -133,6 +133,10 @@ data class AppSettings(
     val pressureWidthEnabled: Boolean = false,
     /** Intensidad del contraste entre presión suave y fuerte: 1 = sutil, 2 = visible, 3 = marcado. */
     val pressureWidthContrast: Float = 2f,
+    /** Presión→grosor que impone el servidor (GET /api/render-settings). null = aún no traído. */
+    val serverPressureWidthEnabled: Boolean? = null,
+    /** Contraste presión→grosor del servidor. null = aún no traído. */
+    val serverPressureWidthContrast: Float? = null,
     /** Bolis emparejados (MAC + alias + estilo de trazo). Tope práctico: 2. */
     val knownPens: List<KnownPen> = emptyList(),
     /** Bolis olvidados: se ignoran en conexiones automáticas hasta que el usuario los conecte a mano. */
@@ -164,6 +168,17 @@ data class AppSettings(
     /** Estilo del boli (por MAC) o el por defecto si no está registrado. */
     fun styleFor(mac: String?): StrokeStyle =
         knownPens.firstOrNull { it.mac == mac }?.style ?: defaultStyle
+
+    /**
+     * Presión→grosor EFECTIVA para el render: en modo servidor manda el servidor
+     * (si ya se trajo `/api/render-settings`); en modo local, el ajuste local. Así web
+     * y Android renderizan igual sin perder el ajuste local cuando no hay servidor.
+     */
+    val effectivePressureWidthEnabled: Boolean
+        get() = if (appMode != AppMode.LOCAL) serverPressureWidthEnabled ?: pressureWidthEnabled else pressureWidthEnabled
+    val effectivePressureWidthContrast: Float
+        get() = (if (appMode != AppMode.LOCAL) serverPressureWidthContrast ?: pressureWidthContrast else pressureWidthContrast)
+            .coerceIn(0.5f, 3f)
 }
 
 class SettingsStore(private val context: Context) {
@@ -190,6 +205,8 @@ class SettingsStore(private val context: Context) {
         val controlNotification = booleanPreferencesKey("control_notification")
         val pressureWidthEnabled = booleanPreferencesKey("pressure_width_enabled")
         val pressureWidthContrast = floatPreferencesKey("pressure_width_contrast")
+        val serverPwEnabled = booleanPreferencesKey("server_pressure_width_enabled")
+        val serverPwContrast = floatPreferencesKey("server_pressure_width_contrast")
         val knownPens = stringPreferencesKey("known_pens")          // JSON
         val forgottenPens = stringPreferencesKey("forgotten_pens")  // JSON array de MACs
         val lockedPenMac = stringPreferencesKey("locked_pen_mac")
@@ -238,6 +255,8 @@ class SettingsStore(private val context: Context) {
             controlNotification = p[Keys.controlNotification] ?: false,
             pressureWidthEnabled = p[Keys.pressureWidthEnabled] ?: false,
             pressureWidthContrast = (p[Keys.pressureWidthContrast] ?: 2f).coerceIn(0.5f, 3f),
+            serverPressureWidthEnabled = p[Keys.serverPwEnabled],
+            serverPressureWidthContrast = p[Keys.serverPwContrast]?.coerceIn(0.5f, 3f),
             knownPens = decodeKnownPens(p[Keys.knownPens]),
             forgottenPens = decodeStringList(p[Keys.forgottenPens]),
             lockedPenMac = p[Keys.lockedPenMac] ?: "",
@@ -280,6 +299,8 @@ class SettingsStore(private val context: Context) {
             p[Keys.controlNotification] = s.controlNotification
             p[Keys.pressureWidthEnabled] = s.pressureWidthEnabled
             p[Keys.pressureWidthContrast] = s.pressureWidthContrast.coerceIn(0.5f, 3f)
+            s.serverPressureWidthEnabled?.let { p[Keys.serverPwEnabled] = it } ?: p.remove(Keys.serverPwEnabled)
+            s.serverPressureWidthContrast?.let { p[Keys.serverPwContrast] = it.coerceIn(0.5f, 3f) } ?: p.remove(Keys.serverPwContrast)
             p[Keys.knownPens] = encodeKnownPens(s.knownPens)
             p[Keys.forgottenPens] = encodeStringList(s.forgottenPens)
             p[Keys.lockedPenMac] = s.lockedPenMac

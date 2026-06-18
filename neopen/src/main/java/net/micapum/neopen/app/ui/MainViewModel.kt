@@ -465,9 +465,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val bytes = withContext(Dispatchers.IO) {
             val s = settings.value
             when (format) {
-                ExportFormat.PDF -> renderPagePdf(cap.strokes, cap.paper, s.pressureWidthEnabled, s.pressureWidthContrast)
-                ExportFormat.PNG -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = s.pressureWidthEnabled, pressureWidthContrast = s.pressureWidthContrast)
-                ExportFormat.SVG -> renderSvg(cap.strokes, cap.paper, s.pressureWidthEnabled, s.pressureWidthContrast).toByteArray()
+                ExportFormat.PDF -> renderPagePdf(cap.strokes, cap.paper, s.effectivePressureWidthEnabled, s.effectivePressureWidthContrast)
+                ExportFormat.PNG -> rasterizePng(cap.strokes, cap.paper, pressureWidthEnabled = s.effectivePressureWidthEnabled, pressureWidthContrast = s.effectivePressureWidthContrast)
+                ExportFormat.SVG -> renderSvg(cap.strokes, cap.paper, s.effectivePressureWidthEnabled, s.effectivePressureWidthContrast).toByteArray()
             }
         }
         return ExportFile("${fileBaseName(cap.name)}.${format.ext}", format.mime, bytes)
@@ -478,7 +478,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val pages = graph.repo.capturesIn(notebookId).first()
         val bytes = withContext(Dispatchers.IO) {
             val s = settings.value
-            renderNotebookPdf(pages, s.pressureWidthEnabled, s.pressureWidthContrast)
+            renderNotebookPdf(pages, s.effectivePressureWidthEnabled, s.effectivePressureWidthContrast)
         }
         return ExportFile("${fileBaseName(nb.name)}.pdf", ExportFormat.PDF.mime, bytes)
     }

@@ -55,6 +55,16 @@ class SyncEngine(
             runCatching { repo.applyServerNotebook(api.unclassifiedNotebook(s.password)) }
             // Fondos (anclajes) del servidor → caché local (la web gestiona la BBDD).
             runCatching { repo.applyServerAnchors(api.listAnchors(s.password)) }
+            // Ajustes de render del servidor (presión→grosor): fuente de verdad en modo servidor.
+            runCatching {
+                val rs = api.renderSettings(s.password)
+                settings.update(
+                    settings.flow.first().copy(
+                        serverPressureWidthEnabled = rs.pressureWidthEnabled,
+                        serverPressureWidthContrast = rs.pressureWidthContrast,
+                    ),
+                )
+            }
             Result(ok = true, pulled = pulled)
         } catch (e: Exception) {
             Result(ok = false, pulled = pulled, error = e.message ?: e.javaClass.simpleName)

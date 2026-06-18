@@ -1134,8 +1134,8 @@ private fun OfflineImportWarningCard(vm: MainViewModel, warning: OfflineImportWa
                     warning.strokes,
                     warning.paper,
                     Modifier.fillMaxSize(),
-                    pressureWidthEnabled = settings.pressureWidthEnabled,
-                    pressureWidthContrast = settings.pressureWidthContrast,
+                    pressureWidthEnabled = settings.effectivePressureWidthEnabled,
+                    pressureWidthContrast = settings.effectivePressureWidthContrast,
                 )
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2115,6 +2115,13 @@ private fun SettingsScreen(vm: MainViewModel) {
                     HorizontalDivider()
                     // --- Presión como grosor ---
                     Text(stringResource(R.string.settings_pressure_width_title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    if (settings.appMode != AppMode.LOCAL && settings.serverPressureWidthEnabled != null) {
+                        Text(
+                            stringResource(R.string.settings_pressure_width_server),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     PenToggleRow(
                         stringResource(R.string.settings_pressure_width_toggle_title),
                         stringResource(R.string.settings_pressure_width_toggle_desc),

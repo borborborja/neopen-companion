@@ -370,6 +370,7 @@
     <string name="settings_pressure_width_toggle_desc">Dibuja más fino o más grueso según la presión detectada.</string>
     <string name="settings_pressure_width_contrast_label">Diferencia fino/grueso: %1$sx</string>
     <string name="settings_pressure_width_note">Solo se aprecia en bolis compatibles o capturas con presión fiable.</string>
+    <string name="settings_pressure_width_server">En modo servidor manda el ajuste del servidor; este control local se usa cuando no hay servidor.</string>
     <string name="settings_reimport_policy_title">Reimportaciones desde memoria del boli</string>
     <string name="settings_reimport_policy_desc">Cuando el volcado offline trae trazos de una página que ya eliminaste o moviste, la app puede preguntarte o aplicar una decisión por defecto.</string>
     <string name="reimport_policy_ask">Preguntar siempre</string>
