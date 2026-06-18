@@ -62,6 +62,9 @@ data class RegisterPenInput(val mac: String, val name: String? = null, val firmw
 
 data class PenInfoDto(val mac: String, val alias: String? = null)
 
+/** Ajustes de render del servidor (presión→grosor). Espejo de RenderSettings (packages/shared). */
+data class RenderSettingsDto(val pressureWidthEnabled: Boolean = false, val pressureWidthContrast: Float = 2f)
+
 data class HealthDto(val status: String? = null)
 
 // --- Lectura / sincronización incremental ---
@@ -318,6 +321,10 @@ interface NeopenApi {
     /** Capacidades tipadas (p. ej. si Studio está activo → recientes/presets). */
     @GET("api/capabilities")
     suspend fun capabilitiesInfo(@Header("X-Auth-Password") password: String): CapabilitiesDto
+
+    /** Ajustes de render del servidor (presión→grosor): fuente de verdad en modo servidor. */
+    @GET("api/render-settings")
+    suspend fun renderSettings(@Header("X-Auth-Password") password: String): RenderSettingsDto
 
     // --- Fondos / anclajes de diseño ---
 

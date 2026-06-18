@@ -350,6 +350,7 @@
     <string name="settings_pressure_width_toggle_desc">Draws thinner or thicker strokes based on detected pressure.</string>
     <string name="settings_pressure_width_contrast_label">Thin/thick difference: %1$sx</string>
     <string name="settings_pressure_width_note">Only visible in practice on compatible pens or captures with reliable pressure.</string>
+    <string name="settings_pressure_width_server">In server mode the server setting wins; this local control applies when there is no server.</string>
     <string name="settings_reimport_policy_title">Reimports from pen memory</string>
     <string name="settings_reimport_policy_desc">When an offline dump brings back strokes from a page you deleted or moved, the app can ask you or apply a default decision.</string>
     <string name="reimport_policy_ask">Always ask</string>

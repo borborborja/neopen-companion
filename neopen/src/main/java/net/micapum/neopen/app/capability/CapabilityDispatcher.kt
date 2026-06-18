@@ -69,8 +69,8 @@ class CapabilityDispatcher(private val graph: Graph) {
         val png = rasterizePng(
             cap.strokes,
             cap.paper,
-            pressureWidthEnabled = s.pressureWidthEnabled,
-            pressureWidthContrast = s.pressureWidthContrast,
+            pressureWidthEnabled = s.effectivePressureWidthEnabled,
+            pressureWidthContrast = s.effectivePressureWidthContrast,
         )
         val part = MultipartBody.Part.createFormData(
             "image", "page.png", png.toRequestBody("image/png".toMediaType()),
@@ -85,8 +85,8 @@ class CapabilityDispatcher(private val graph: Graph) {
         val png = rasterizePng(
             cap.strokes,
             cap.paper,
-            pressureWidthEnabled = s.pressureWidthEnabled,
-            pressureWidthContrast = s.pressureWidthContrast,
+            pressureWidthEnabled = s.effectivePressureWidthEnabled,
+            pressureWidthContrast = s.effectivePressureWidthContrast,
         )
         var result = LocalOcrProvider(s.ocrLocal).transcribe(png, s.ocrLocal.effectiveInstructions)
 

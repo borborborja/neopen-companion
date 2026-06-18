@@ -123,8 +123,8 @@ fun PageCanvas(vm: MainViewModel, page: Capture, modifier: Modifier = Modifier) 
         modifier = modifier,
         bgImage = bgImage,
         bgPreset = if (bgImage == null) bg?.bgPreset else null,
-        pressureWidthEnabled = settings.pressureWidthEnabled,
-        pressureWidthContrast = settings.pressureWidthContrast,
+        pressureWidthEnabled = settings.effectivePressureWidthEnabled,
+        pressureWidthContrast = settings.effectivePressureWidthContrast,
     )
 }
 

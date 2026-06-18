@@ -60,7 +60,7 @@ class ShareExportActivity : ComponentActivity() {
                 WidgetExportFile(
                     "${fileBaseName(nb.name)}.pdf",
                     "application/pdf",
-                    renderNotebookPdf(pages, s.pressureWidthEnabled, s.pressureWidthContrast),
+                    renderNotebookPdf(pages, s.effectivePressureWidthEnabled, s.effectivePressureWidthContrast),
                 )
             }
             SHARE_KIND_CAPTURE -> {
@@ -68,7 +68,7 @@ class ShareExportActivity : ComponentActivity() {
                 WidgetExportFile(
                     "${fileBaseName(cap.name)}.pdf",
                     "application/pdf",
-                    renderPagePdf(cap.strokes, cap.paper, s.pressureWidthEnabled, s.pressureWidthContrast),
+                    renderPagePdf(cap.strokes, cap.paper, s.effectivePressureWidthEnabled, s.effectivePressureWidthContrast),
                 )
             }
             else -> null

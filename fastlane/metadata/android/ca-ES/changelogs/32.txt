@@ -1,0 +1,1 @@
+En mode servidor, la pressió→gruix del traç ara fa servir els ajustos del teu servidor neopen autoallotjat, perquè el mòbil i el web es vegin igual. En mode local continua manant l'ajust del propi mòbil.

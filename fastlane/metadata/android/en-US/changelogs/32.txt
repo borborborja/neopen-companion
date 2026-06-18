@@ -1,0 +1,1 @@
+In server mode, stroke pressure-to-width now uses your self-hosted neopen server settings, so phone and web render the same. In local mode it keeps the phone's own setting.
