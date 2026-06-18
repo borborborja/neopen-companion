@@ -1,0 +1,1 @@
+En modo servidor, la presión→grosor del trazo usa ahora los ajustes de tu servidor neopen autoalojado, para que el móvil y la web se vean igual. En modo local sigue mandando el ajuste del propio móvil.
