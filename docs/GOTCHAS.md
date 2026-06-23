@@ -62,6 +62,20 @@
 - **URLs del servidor pueden ser internas** (Docker, p. ej. `http://ollama:11434`):
   importadas al teléfono pueden no ser accesibles. El usuario debe revisarlas.
 
+## Notificación de control / foreground service
+
+- **`PenService` hospeda la notificación de control persistente** y se arranca al *Guardar*
+  ajustes, desde el widget de sync y **al abrir la app** (`AppRoot` la asegura vía
+  `vm.ensurePenService()` si `controlNotification`/`backgroundEnabled` están activos). Sin ese
+  arranque-al-abrir, la notificación no reaparecía tras matar el proceso (solo volvía al
+  re-*Guardar*).
+- **Tras reiniciar el teléfono sin abrir la app, la notificación NO reaparece**: arrancar un
+  foreground service `connectedDevice` desde `BOOT_COMPLETED` está restringido en Android 12+
+  (`ForegroundServiceStartNotAllowedException`). Vuelve al abrir la app. No lo "arregles" con un
+  BootReceiver ingenuo.
+- **El color/grueso es metadato de la app**, no se envía al boli: se sella en cada trazo al
+  capturar (`PenManager.currentStyle()`). Cambiarlo solo afecta a los trazos futuros.
+
 ## Contrato cross-repo
 
 - **Los desajustes fallan en SILENCIO.** Moshi ignora campos no declarados y el

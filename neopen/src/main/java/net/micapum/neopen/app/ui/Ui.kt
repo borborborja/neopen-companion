@@ -219,6 +219,12 @@ fun AppRoot(
         return
     }
     LaunchedEffect(Unit) { vm.syncNow() }
+    // Asegura la notificación de control / conexión en segundo plano al abrir la app: el servicio
+    // que la hospeda solo se arrancaba al *Guardar* ajustes, así que no reaparecía tras matar el
+    // proceso o reiniciar. Se decide con el ajuste persistido (settings del DataStore).
+    LaunchedEffect(settings.controlNotification, settings.backgroundEnabled) {
+        if (settings.controlNotification || settings.backgroundEnabled) vm.ensurePenService()
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         vm.startForegroundPenReconnect()
