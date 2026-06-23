@@ -1,0 +1,1 @@
+Importing the pen's offline memory no longer shows half-drawn pages: each sheet appears complete at once. On reconnect, already-imported notes aren't downloaded again, so it's much faster when there are many pages. The app also opens faster from a cold start.

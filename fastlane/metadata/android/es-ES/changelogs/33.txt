@@ -1,0 +1,1 @@
+El volcado de la memoria del bolígrafo ya no muestra páginas a medio cargar: cada hoja aparece completa de una vez. Al reconectar, las notas que ya estaban importadas no se vuelven a descargar, así que es mucho más rápido cuando hay muchas páginas. La app también abre antes en frío.

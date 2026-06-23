@@ -17,7 +17,24 @@
 - **Migraciones nunca destructivas.** Solo `fallbackToDestructiveMigrationFrom(1)`
   está permitido (v1 efímera). Toda v2→vN tiene `Migration` explícita. Si añades una
   columna/tabla y no subes `@Database(version)` + migración, Room **borra la BD del
-  usuario** en la siguiente actualización. La versión actual es **7**.
+  usuario** en la siguiente actualización. La versión actual es **9**.
+
+## Volcado offline del boli
+
+- **El volcado es secuencial, nota a nota.** `PenManager` pide cada nota, lee su total de
+  trazos (0xa3) y, al cerrarla (`transPosition==2`), emite **una `StrokePage` por SOBP**
+  bufferizada — NO una por paquete. Así la bandeja no muestra páginas a medias ni se
+  reorganiza a la vista. No vuelvas a emitir `onPage` por paquete.
+- **Un solo sync al final.** En modo servidor las páginas offline NO disparan `syncNow()`
+  por página; lo hace `onOfflineImportComplete` una vez (ver `NeopenFullApp`). Las páginas
+  en tiempo real sí se suben al momento.
+- **Gate de re-descarga por contador (no destructivo).** Si el total que reporta el boli
+  para una nota coincide con el guardado en `offline_note_state` (por MAC), se **omite** su
+  transferencia dejando de acusar sus paquetes. Granularidad **por nota/cuaderno**: si la
+  nota creció, se re-transfiere entera (la dedup por trazo evita duplicar). El **primer**
+  volcado nunca tiene contador → se importa entero. Lógica pura en `canSkipOfflineNote`
+  (con test). **Verifica en boli físico** que dejar de acusar detiene la nota; hay un
+  watchdog (`OFFLINE_NOTE_TIMEOUT_MS`) que avanza si una nota no progresa.
 - **Outbox y last-write-wins.** Las escrituras locales son optimistas a Room + op en
   el outbox. `SyncEngine` repunta ids temporales→reales (`outboxRepoint`). No subas
   cosas por REST saltándote el outbox: rompes el orden y la reconciliación.

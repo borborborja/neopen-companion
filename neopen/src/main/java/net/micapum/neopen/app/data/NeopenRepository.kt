@@ -1,8 +1,10 @@
 package net.micapum.neopen.app.data
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import net.micapum.neopen.app.db.CaptureEntity
 import net.micapum.neopen.app.db.NeopenDb
@@ -85,12 +87,14 @@ class NeopenRepository(private val db: NeopenDb) {
             nbs.map { it.toDomain(pageCount = byId[it.id] ?: 0) }
         }
 
+    // El parseo de strokesJson (Moshi) de toda la lista se hace en Dispatchers.Default para
+    // no bloquear el hilo principal en el arranque en frío (muchas capturas → mucho parseo).
     fun inbox(): Flow<List<Capture>> =
-        db.captures().observeInbox().map { rows -> rows.map { it.toDomain() } }
+        db.captures().observeInbox().map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
     /** Todas las capturas por última edición (equivalente a "últimas ediciones"). */
     fun recent(): Flow<List<Capture>> =
-        db.captures().observeAll().map { rows -> rows.map { it.toDomain() } }
+        db.captures().observeAll().map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
     fun offlineImportWarnings(): Flow<List<OfflineImportWarning>> =
         db.offlineImportWarnings().observePending().map { rows -> rows.map { it.toDomain() } }
@@ -99,7 +103,7 @@ class NeopenRepository(private val db: NeopenDb) {
         db.offlineImportWarnings().observePendingCount()
 
     fun capturesIn(notebookId: String): Flow<List<Capture>> =
-        db.captures().observeByNotebook(notebookId).map { rows -> rows.map { it.toDomain() } }
+        db.captures().observeByNotebook(notebookId).map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
     suspend fun capture(id: String): Capture? = db.captures().getById(id)?.toDomain()
 

@@ -75,6 +75,19 @@ class PenManager(
     var autoImportOnConnect = false
 
     /**
+     * Gate de re-descarga (Problema 2): nº de trazos ya importado por nota, indexado por
+     * `"section.owner.note"`. Lo mantiene el grafo desde Room. Si al pedir una nota el total
+     * de trazos que reporta el boli coincide con el guardado, se omite su transferencia (no
+     * destructivo: el boli conserva su copia). El primer volcado nunca tiene contador → se
+     * importa entero; el gate solo actúa en re-volcados.
+     */
+    @Volatile var knownOfflineCounts: Map<String, Int> = emptyMap()
+    /** Una nota se ha importado por completo: (nota, total de trazos) para persistir su contador. */
+    var onOfflineNoteImported: ((OfflineNote, Int) -> Unit)? = null
+    /** El volcado completo (toda la cola de notas) ha terminado: dispara UN solo sync al final. */
+    var onOfflineImportComplete: (() -> Unit)? = null
+
+    /**
      * Modo escritura en vivo: cada trazo completo se entrega de inmediato por `onStroke`
      * (en vez de esperar al `flushPage` de 8 s), y NO se acumulan ni suben páginas — así el
      * texto de transcripción no ensucia el cuaderno de la app. Lo activa/desactiva el IME.
@@ -143,6 +156,8 @@ class PenManager(
     private companion object {
         const val TAG = "PenManager"
         const val AUTO_RECONNECT_DELAY_MS = 8_000L
+        /** Backstop: si una nota offline no progresa en este tiempo, se pasa a la siguiente. */
+        const val OFFLINE_NOTE_TIMEOUT_MS = 8_000L
     }
 
     private val autoReconnectScan = Runnable {
@@ -276,6 +291,7 @@ class PenManager(
         stopScan()
         txQueue.clear()
         txBusy = false
+        resetOfflineState()
         pwOp = PwOp.NONE
         pendingNewPassword = ""
         rememberPin = null
@@ -368,6 +384,7 @@ class PenManager(
                 connecting = false
                 g.close()
                 if (gatt === g) gatt = null
+                resetOfflineState()
                 val device = target
                 // Desconexión inesperada (target != null = no la pidió el usuario):
                 // reintenta sola si la reconexión automática está activa.
@@ -574,11 +591,7 @@ class PenManager(
                 val notes = Protocol.parseNoteList(frame.data)
                 update { it.copy(offlinePhase = OfflinePhase.IDLE, notes = notes) }
             }
-            Protocol.OFFLINE_DATA_RESPONSE -> {
-                offlineTotalStrokes = Protocol.parseOfflineTotalStrokes(frame.data)
-                offlineReceivedStrokes = 0
-                update { it.copy(offlinePhase = OfflinePhase.TRANSFERRING, offlineProgress = 0) }
-            }
+            Protocol.OFFLINE_DATA_RESPONSE -> onOfflineDataResponse(Protocol.parseOfflineTotalStrokes(frame.data))
             Protocol.OFFLINE_PACKET_REQUEST -> handleOfflinePacket(frame.data)
             Protocol.OFFLINE_DATA_DELETE_RESPONSE ->
                 update { it.copy(notes = emptyList()) }
@@ -772,13 +785,14 @@ class PenManager(
         write(Protocol.reqOfflineNoteList())
     }
 
+    /** Importa una sola nota (botón por-nota de la UI). */
     fun importOffline(note: OfflineNote) {
-        update { it.copy(offlinePhase = OfflinePhase.TRANSFERRING, offlineProgress = 0) }
-        write(Protocol.reqOfflineData(note.section, note.owner, note.note))
+        startOfflineImport(listOf(note))
     }
 
+    /** Importa todas las notas listadas, una a una (con gate por contador). */
     fun importAllOffline() {
-        _state.value.notes?.forEach { importOffline(it) }
+        startOfflineImport(_state.value.notes ?: emptyList())
     }
 
     fun clearOffline(notes: List<OfflineNote>) {
@@ -787,28 +801,116 @@ class PenManager(
         }
     }
 
-    private var offlineTotalStrokes = 0
+    // ----------------------------------------------------------------------------------
+    // Volcado offline secuencial (una nota a la vez)
+    //
+    // Por cada nota: pedir datos → leer total de trazos (0xa3) → [gate por contador]
+    // importar o saltar → al cerrar la nota (transPosition==2) emitir UNA StrokePage por
+    // SOBP (bufferizado, sin parpadeo) y pasar a la siguiente. Al vaciar la cola, un único
+    // aviso de "volcado completo" para que el grafo sincronice una sola vez.
+    // ----------------------------------------------------------------------------------
+    private val offlineQueue = ArrayDeque<OfflineNote>()
+    @Volatile private var currentNote: OfflineNote? = null
+    @Volatile private var skipCurrentNote = false
+    private val offlineBuffer = LinkedHashMap<Sobp, MutableList<Stroke>>()
+    @Volatile private var offlineTotalStrokes = 0
     private var offlineReceivedStrokes = 0
 
+    private fun noteKey(n: OfflineNote) = "${n.section}.${n.owner}.${n.note}"
+
+    /** Watchdog: si la nota en curso no progresa, avanza para no quedarse colgado. */
+    private val offlineWatchdog = Runnable {
+        if (currentNote != null) {
+            log("⏱ Nota offline sin progreso → paso a la siguiente")
+            requestNextOfflineNote()
+        }
+    }
+    private fun armOfflineWatchdog() {
+        main.removeCallbacks(offlineWatchdog)
+        main.postDelayed(offlineWatchdog, OFFLINE_NOTE_TIMEOUT_MS)
+    }
+
+    /** Limpia el estado del volcado (al desconectar o terminar). */
+    private fun resetOfflineState() {
+        main.removeCallbacks(offlineWatchdog)
+        offlineQueue.clear()
+        currentNote = null
+        skipCurrentNote = false
+        offlineBuffer.clear()
+        offlineTotalStrokes = 0
+        offlineReceivedStrokes = 0
+    }
+
+    private fun startOfflineImport(notes: List<OfflineNote>) {
+        if (notes.isEmpty()) {
+            main.post { onOfflineImportComplete?.invoke() }
+            return
+        }
+        offlineQueue.clear()
+        offlineQueue.addAll(notes)
+        requestNextOfflineNote()
+    }
+
+    private fun requestNextOfflineNote() {
+        offlineBuffer.clear()
+        skipCurrentNote = false
+        offlineReceivedStrokes = 0
+        offlineTotalStrokes = 0
+        val note = if (offlineQueue.isEmpty()) null else offlineQueue.removeFirst()
+        if (note == null) {
+            main.removeCallbacks(offlineWatchdog)
+            currentNote = null
+            update { it.copy(offlinePhase = OfflinePhase.IDLE, offlineProgress = 100) }
+            main.post { onOfflineImportComplete?.invoke() }
+            return
+        }
+        currentNote = note
+        update { it.copy(offlinePhase = OfflinePhase.TRANSFERRING, offlineProgress = 0) }
+        write(Protocol.reqOfflineData(note.section, note.owner, note.note))
+        armOfflineWatchdog()
+    }
+
+    /** 0xa3: total de trazos de la nota en curso. Aplica el gate por contador. */
+    private fun onOfflineDataResponse(total: Int) {
+        offlineTotalStrokes = total
+        offlineReceivedStrokes = 0
+        val note = currentNote
+        val known = note?.let { knownOfflineCounts[noteKey(it)] }
+        if (note != null && canSkipOfflineNote(known, total)) {
+            // Nota sin cambios: no la transferimos (no acusaremos sus paquetes) y avanzamos.
+            skipCurrentNote = true
+            log("⏭ Nota ${noteKey(note)} sin cambios ($total trazos) → omito descarga")
+            requestNextOfflineNote()
+        } else {
+            update { it.copy(offlinePhase = OfflinePhase.TRANSFERRING, offlineProgress = 0) }
+            armOfflineWatchdog()
+        }
+    }
+
     /**
-     * Recibe un chunk offline (0x24): parsea la cabecera, descomprime (zlib) si
-     * procede, extrae strokes/dots, los agrupa por SOBP de página y los sube como
-     * StrokePage(source="offline") — el servidor las fusiona por SOBP. Acusa el
-     * paquete (con su packetId) salvo el último (transPosition==2), igual que el SDK.
+     * Recibe un chunk offline (0x24): lo acumula en el buffer de la nota en curso (agrupado
+     * por SOBP) y acusa para recibir el siguiente. NO emite páginas por paquete: lo hace una
+     * sola vez al cerrar la nota (transPosition==2), para que la bandeja no muestre páginas a
+     * medias ni se reorganice a la vista. Paquetes de una nota que ya no transferimos (gate)
+     * se ignoran sin acusar, para que el boli deje de enviarla.
      */
     private fun handleOfflinePacket(data: ByteArray) {
         try {
             val chunk = Protocol.parseOfflineChunk(data)
+            val note = currentNote
+            if (note != null &&
+                (chunk.section != note.section || chunk.owner != note.owner || chunk.note != note.note)
+            ) {
+                return // paquete de otra nota (resto de una omitida): ni procesar ni acusar
+            }
+            if (skipCurrentNote) return
+            armOfflineWatchdog()
             val raw = if (chunk.isCompressed) inflateZlib(chunk.data, chunk.beforeSize) else chunk.data
             val parsed = Protocol.parseOfflineStrokes(raw, chunk.section, chunk.owner, chunk.note, chunk.strokeCount)
             // Híbrido: sella en los trazos volcados el estilo ACTUAL del boli al volcar.
             val s = currentStyle()
-            val mac = _state.value.mac
-            val strokes = parsed.map { it.first to it.second.copy(color = s.color, width = s.width) }
-            // Agrupa por página física y sube una StrokePage por SOBP.
-            strokes.groupBy({ it.first }, { it.second }).forEach { (sobp, pageStrokes) ->
-                log("📄 Offline sobp ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}: ${pageStrokes.size} trazos → subiendo…")
-                onPage(StrokePage(sobp, "offline", iso.format(System.currentTimeMillis()), pageStrokes, mac))
+            parsed.forEach { (sobp, stroke) ->
+                offlineBuffer.getOrPut(sobp) { ArrayList() }.add(stroke.copy(color = s.color, width = s.width))
             }
             // Acusa para recibir el siguiente (el último no se acusa, como el SDK).
             if (chunk.transPosition != 2) write(Protocol.resOfflinePacket(chunk.packetId))
@@ -816,15 +918,30 @@ class PenManager(
             val pct =
                 if (offlineTotalStrokes > 0) (offlineReceivedStrokes * 100 / offlineTotalStrokes).coerceIn(0, 100)
                 else if (chunk.transPosition == 2) 100 else 50
-            if (chunk.transPosition == 2) {
-                update { it.copy(offlinePhase = OfflinePhase.IDLE, offlineProgress = 100) }
-            } else {
-                update { it.copy(offlineProgress = pct) }
-            }
+            update { it.copy(offlineProgress = pct) }
+            if (chunk.transPosition == 2) finishOfflineNote()
         } catch (e: Exception) {
             log("⚠ Error parseando chunk offline: ${e.message}")
             update { it.copy(error = "offline-parse") }
         }
+    }
+
+    /** Cierre de la nota en curso: emite UNA página por SOBP, persiste su contador y sigue. */
+    private fun finishOfflineNote() {
+        main.removeCallbacks(offlineWatchdog)
+        val note = currentNote
+        val mac = _state.value.mac
+        val now = iso.format(System.currentTimeMillis())
+        offlineBuffer.forEach { (sobp, strokes) ->
+            log("📄 Offline sobp ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}: ${strokes.size} trazos")
+            onPage(StrokePage(sobp, "offline", now, strokes.toList(), mac))
+        }
+        offlineBuffer.clear()
+        if (note != null) {
+            val total = offlineTotalStrokes
+            main.post { onOfflineNoteImported?.invoke(note, total) }
+        }
+        requestNextOfflineNote()
     }
 
     /** Descomprime datos zlib (cabecera estándar) a su tamaño original. */
