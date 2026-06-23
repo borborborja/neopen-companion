@@ -28,6 +28,10 @@ jobs:
       - name: Set up Gradle (con caché)
         uses: gradle/actions/setup-gradle@v4
 
+      # Tests unitarios de :core (lógica pura). Protege regresiones; hoy ya están en verde.
+      - name: Tests unitarios (:core)
+        run: ./gradlew :core:testDebugUnitTest --stacktrace
+
       # App unificada (completa, con modo "solo puente" integrado).
       - name: Build debug APK (neopen)
         run: ./gradlew :neopen:assembleDebug --stacktrace

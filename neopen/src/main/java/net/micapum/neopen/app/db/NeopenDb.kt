@@ -393,7 +393,7 @@ interface OfflineNoteStateDao {
         OfflineNoteStateEntity::class,
     ],
     version = 9,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class NeopenDb : RoomDatabase() {
     abstract fun captures(): CaptureDao

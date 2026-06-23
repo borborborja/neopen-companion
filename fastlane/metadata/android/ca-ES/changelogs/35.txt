@@ -1,0 +1,1 @@
+Millores internes: els tests s'executen a la integració contínua i es versiona l'esquema de la base de dades per fer més segures les actualitzacions futures. Sense canvis visibles a l'app.

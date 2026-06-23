@@ -1,0 +1,1 @@
+Internal improvements: unit tests now run in CI and the database schema is versioned to make future updates safer. No user-visible changes.
