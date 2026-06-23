@@ -18,6 +18,10 @@
   está permitido (v1 efímera). Toda v2→vN tiene `Migration` explícita. Si añades una
   columna/tabla y no subes `@Database(version)` + migración, Room **borra la BD del
   usuario** en la siguiente actualización. La versión actual es **9**.
+- **`exportSchema = true`**: cada build genera `neopen/schemas/<version>.json` (KSP arg
+  `room.schemaLocation`). **Commitea el nuevo JSON** al subir `@Database(version)`. Estos
+  esquemas habilitan tests de migración (`androidx.room:room-testing` con `MigrationTestHelper`,
+  pendiente: requiere instrumentación o Robolectric).
 
 ## Volcado offline del boli
 

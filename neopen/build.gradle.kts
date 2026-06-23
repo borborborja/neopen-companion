@@ -4,6 +4,12 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Exporta el esquema de Room (JSON por versión) a neopen/schemas. Compile-time: no cambia el
+// runtime. Habilita validar/testear migraciones a futuro y deja constancia del esquema en git.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 android {
     namespace = "net.micapum.neopen.app"
     compileSdk = 34
