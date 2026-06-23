@@ -1,0 +1,1 @@
+Corregido: la notificación de control (cambiar color/grosor del trazo desde la barra de notificaciones) ahora reaparece al abrir la app, no solo justo después de guardar los ajustes. Antes desaparecía al cerrar la app o reiniciar el móvil.

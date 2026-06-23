@@ -1,0 +1,1 @@
+Fixed: the control notification (change stroke color/width from the notification shade) now reappears when you open the app, not only right after saving settings. Before, it disappeared when the app was closed or the phone rebooted.
