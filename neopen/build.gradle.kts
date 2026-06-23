@@ -27,12 +27,28 @@ android {
             keyAlias = "neopen"
             keyPassword = "neopenpen"
         }
+        // Upload key de producción para Google Play. NO se commitea el keystore:
+        // se inyecta por variables de entorno (en local y en CI vía GitHub Secrets).
+        // Si las variables no están presentes, la firma de release no se configura
+        // (las builds debug/CI siguen funcionando sin tocar nada).
+        val ksPath = System.getenv("NEOPEN_KEYSTORE_PATH")
+        if (ksPath != null && file(ksPath).exists()) {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("NEOPEN_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("NEOPEN_KEY_ALIAS") ?: "upload"
+                keyPassword = System.getenv("NEOPEN_KEY_PASSWORD")
+                    ?: System.getenv("NEOPEN_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Firma con la upload key solo si está configurada (env presente).
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {
