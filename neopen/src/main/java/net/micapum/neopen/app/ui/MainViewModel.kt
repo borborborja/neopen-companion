@@ -208,6 +208,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Asegura el servicio en primer plano que hospeda la notificación de control (y la conexión
+     * en segundo plano). Antes solo se arrancaba al *Guardar* ajustes, así que la notificación
+     * "permanente" no reaparecía al reabrir la app tras matar el proceso o reiniciar. Lo llama
+     * la UI al abrir la app si la opción está activada. Idempotente (re-entrega onStartCommand).
+     */
+    fun ensurePenService() {
+        PenService.start(getApplication())
+    }
+
     /** Guarda los ajustes, aplica el calendario de sync y arranca/para el servicio BLE. */
     fun saveSettings(s: AppSettings) {
         viewModelScope.launch {

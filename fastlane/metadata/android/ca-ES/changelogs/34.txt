@@ -1,0 +1,1 @@
+Corregit: la notificació de control (canviar color/gruix del traç des de la barra de notificacions) ara reapareix en obrir l'app, no només just després de desar la configuració. Abans desapareixia en tancar l'app o reiniciar el mòbil.
