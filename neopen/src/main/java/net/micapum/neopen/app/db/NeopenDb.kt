@@ -358,13 +358,41 @@ interface OfflineImportWarningDao {
     suspend fun clear()
 }
 
+/**
+ * Contador de trazos ya importado por nota del boli (gate de re-descarga offline).
+ * Indexado por (mac, section, owner, note): si al re-volcar el total que reporta el boli
+ * coincide con `strokeCount`, se omite la transferencia de esa nota (no destructivo).
+ */
+@Entity(tableName = "offline_note_state", primaryKeys = ["mac", "section", "owner", "note"])
+data class OfflineNoteStateEntity(
+    val mac: String,
+    val section: Int,
+    val owner: Int,
+    val note: Int,
+    val strokeCount: Int,
+    val importedAt: Long,
+)
+
+@Dao
+interface OfflineNoteStateDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: OfflineNoteStateEntity)
+
+    @Query("SELECT * FROM offline_note_state WHERE mac = :mac")
+    suspend fun forPen(mac: String): List<OfflineNoteStateEntity>
+
+    @Query("DELETE FROM offline_note_state")
+    suspend fun clear()
+}
+
 @Database(
     entities = [
         CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
         SyncMetaEntity::class, PageBackgroundEntity::class, ConnectorSyncStateEntity::class,
         PenPageUserActionEntity::class, OfflineImportWarningEntity::class,
+        OfflineNoteStateEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class NeopenDb : RoomDatabase() {
@@ -376,4 +404,5 @@ abstract class NeopenDb : RoomDatabase() {
     abstract fun connectorSyncState(): ConnectorSyncStateDao
     abstract fun penPageUserActions(): PenPageUserActionDao
     abstract fun offlineImportWarnings(): OfflineImportWarningDao
+    abstract fun offlineNoteState(): OfflineNoteStateDao
 }

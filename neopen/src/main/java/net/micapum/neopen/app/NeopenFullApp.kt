@@ -26,12 +26,15 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import net.micapum.neopen.app.capability.CapabilityDispatcher
 import net.micapum.neopen.app.capability.LocalConnectorSync
 import net.micapum.neopen.app.data.NeopenRepository
 import net.micapum.neopen.app.db.NeopenDb
+import net.micapum.neopen.app.db.OfflineNoteStateEntity
 import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.sync.SyncWorker
 import net.micapum.neopen.core.data.AppMode
@@ -192,10 +195,29 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+/** v8→v9: contador de trazos ya importado por nota del boli (gate de re-descarga offline). */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS offline_note_state (
+                mac TEXT NOT NULL,
+                section INTEGER NOT NULL,
+                owner INTEGER NOT NULL,
+                note INTEGER NOT NULL,
+                strokeCount INTEGER NOT NULL,
+                importedAt INTEGER NOT NULL,
+                PRIMARY KEY (mac, section, owner, note)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
-        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
         // Solo permite recrear la BD desde la v1 efímera (dev, nunca publicada; el
         // esquema arrancó en v2). De v2 en adelante SIEMPRE hay migración explícita,
         // así que jamás se borran datos del usuario en una actualización.
@@ -234,17 +256,23 @@ class Graph(app: Application) {
     /** Conexión BLE al boli (una sola, compartida). Cada página → Room (+ sync si hay servidor). */
     val pen = PenManager(app) { page ->
         scope.launch {
+            // En volcado offline llegan muchas páginas en ráfaga: NO sincronizamos ni
+            // refrescamos widgets por página (lo hace una sola vez `onOfflineImportComplete`).
+            // En tiempo real (una página cada vez) sí se sube/refresca al momento.
+            val offline = page.source == "offline"
             if (localMode) {
                 repo.ingestPenPageLocal(page, lastSettings.offlineReimportPolicy)
                 syncStatus.markPenSync(System.currentTimeMillis())
             } else {
                 repo.ingestPenPage(page, lastSettings.offlineReimportPolicy)
                 syncStatus.markPenSync(System.currentTimeMillis())
-                syncNow()
+                if (!offline) syncNow()
             }
-            scheduleConnectorSync()
-            net.micapum.neopen.app.widget.NotebooksWidget.refresh(app)
-            net.micapum.neopen.app.widget.RecentEditsWidget.refresh(app)
+            if (!offline) {
+                scheduleConnectorSync()
+                net.micapum.neopen.app.widget.NotebooksWidget.refresh(app)
+                net.micapum.neopen.app.widget.RecentEditsWidget.refresh(app)
+            }
         }
     }
 
@@ -302,6 +330,46 @@ class Graph(app: Application) {
             val next = cur.copy(knownPens = updated)
             lastSettings = next
             scope.launch { settings.update(next) }
+        }
+        // Gate de re-descarga (Problema 2): persiste el total de trazos tras importar cada
+        // nota y, al terminar todo el volcado, sincroniza una sola vez.
+        pen.onOfflineNoteImported = { note, total ->
+            val mac = pen.state.value.mac
+            if (mac != null) {
+                scope.launch {
+                    db.offlineNoteState().upsert(
+                        OfflineNoteStateEntity(
+                            mac = mac,
+                            section = note.section,
+                            owner = note.owner,
+                            note = note.note,
+                            strokeCount = total,
+                            importedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+            }
+        }
+        pen.onOfflineImportComplete = {
+            scope.launch {
+                if (!localMode) syncNow()
+                scheduleConnectorSync()
+                net.micapum.neopen.app.widget.NotebooksWidget.refresh(app)
+                net.micapum.neopen.app.widget.RecentEditsWidget.refresh(app)
+            }
+        }
+        // En cuanto se conoce la lista de notas del boli, carga sus contadores guardados
+        // (por MAC) para que el gate pueda omitir las notas sin cambios al re-volcar.
+        scope.launch {
+            pen.state
+                .map { it.mac to it.notes }
+                .distinctUntilChanged()
+                .collect { (mac, notes) ->
+                    if (mac != null && notes != null) {
+                        pen.knownOfflineCounts = db.offlineNoteState().forPen(mac)
+                            .associate { "${it.section}.${it.owner}.${it.note}" to it.strokeCount }
+                    }
+                }
         }
         // Mantén al día el flag de auto-volcado y el modo local desde los ajustes.
         scope.launch {
