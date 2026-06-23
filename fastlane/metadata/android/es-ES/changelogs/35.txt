@@ -1,0 +1,1 @@
+Mejoras internas: se ejecutan los tests en la integración continua y se versiona el esquema de la base de datos para hacer más seguras las futuras actualizaciones. Sin cambios visibles en la app.
