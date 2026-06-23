@@ -1,0 +1,1 @@
+El bolcat de la memòria del bolígraf ja no mostra pàgines a mig carregar: cada full apareix complet de cop. En reconnectar, les notes que ja s'havien importat no es tornen a baixar, així que és molt més ràpid quan hi ha moltes pàgines. L'app també obre abans en fred.
