@@ -1,0 +1,1 @@
+Millores de fiabilitat: el contracte amb el servidor es valida automàticament, les actualitzacions de la base de dades es proven des de totes les versions publicades i la sincronització crítica té cobertura en un emulador Android real.

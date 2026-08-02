@@ -34,11 +34,8 @@ Tenlas en cuenta **al programar ahora**: no cierres puertas a estas direcciones.
 
 ## Boli: solicitadas por el usuario
 
-- **Contraseña/PIN del boli en la WEB** (paridad con Android, ya hecho en
-  `:core`/`:neopen` en v0.x): cablear en `apps/web/src/pen/usePen.ts` (repo `neopen`)
-  los eventos del SDK `PEN_PASSWORD_REQUEST` / `PASSWORD_SETUP_SUCCESS|FAILURE`,
-  exponer `InputPassword`/`SetUpPassword`, añadir estado `locked` y la UI de PIN en
-  `PenPanel.tsx` (desbloquear, cambiar, eliminar, poner). Avisar del reset a los 10 fallos.
+- ✅ **Contraseña/PIN del boli en la WEB**: paridad completada en `neopen` v0.22.0;
+  el navegador gestiona el intercambio BLE y avisa del reset tras 10 fallos.
 - ✅ **Android (`:neopen` + `:live`)**: sensibilidad de presión + "la presión modifica
   el grosor del trazo". El control de sensibilidad solo aparece si `SETTING_INFO`
   reporta FSR/sensibilidad; el toggle de presión→grosor vive en ajustes y afecta al
@@ -46,8 +43,8 @@ Tenlas en cuenta **al programar ahora**: no cierres puertas a estas direcciones.
 - ✅ **Android (`:neopen` + `:live`)**: gestión de bolis emparejados. Se registran los
   bolis autorizados, "olvidar" evita la reconexión automática y el bloqueo a un MAC
   concreto impide conectar otros bolis.
-- ⏳ **Web/servidor (`neopen`)**: portar la presión→grosor al render compartido/web y
-  revisar que la sensibilidad se oculte cuando el SDK no reporte compatibilidad.
+- ✅ **Web/servidor (`neopen`)**: presión→grosor portada al render compartido/web en
+  v0.22.0; la sensibilidad se oculta cuando el SDK no reporta compatibilidad.
 - **(Solo Android) Wizard para rellenar páginas no digitalizadas con una foto**:
   conectar el boli y puntear ligeramente la página para detectar su SOBP → buscar si
   esa página/cuaderno existe → preguntar cómo proceder → el usuario hace una foto →

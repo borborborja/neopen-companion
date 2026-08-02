@@ -15,7 +15,7 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 2. **Verifica en local**:
    ```bash
    export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-   ./gradlew :neopen:assembleDebug          # + :core:testDebugUnitTest si tocaste :core
+   ./gradlew checkApiContract checkFileModes :core:testDebugUnitTest :neopen:assembleDebug
    ```
 
 3. **Rama → commit → push → PR → merge** (dos commits: feature + `release: vX.Y.Z`):
@@ -63,6 +63,11 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
   del servidor, publica también el servidor.
 
 ## Historial de releases relevantes
+
+- **v0.23.3** — Sanea el contrato cross-repo: snapshot OpenAPI canónico con
+  checksum, tests Moshi de DTOs críticos, esquemas Room históricos 2..9 y pruebas
+  instrumentadas de migraciones y outbox/delta-sync en Android 14. Sin cambio
+  incompatible de datos ni API.
 
 - **v0.22.0** — Render: en modo servidor, la presión→grosor usa los ajustes del
   servidor (`GET /api/render-settings`) como fuente de verdad, para que web y Android

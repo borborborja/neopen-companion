@@ -14,6 +14,12 @@ El ecosistema son **dos repos** que evolucionan juntos:
 
 ## Dónde vive el contrato
 
+- **Fuente canónica**: `neopen/docs/openapi.yaml` (OpenAPI 3.1, exhaustivo).
+- **Snapshot vendorizado aquí**: `docs/openapi.yaml`, byte a byte idéntico al tag
+  indicado en `docs/openapi.snapshot.json`. El manifiesto fija también su SHA-256.
+  `./gradlew checkApiContract` comprueba checksum, versiones y que toda anotación
+  Retrofit exista en la especificación.
+
 - **Cliente Android**: `core/src/main/java/net/micapum/neopen/core/data/Api.kt`
   (interfaz Retrofit `NeopenApi` + DTOs Moshi). `ApiFactory.create(baseUrl)` lo
   construye. La contraseña va en la cabecera **`X-Auth-Password`** en cada petición
@@ -60,6 +66,8 @@ así que un desajuste **falla en silencio** (no rompe el build, pero el dato se 
    ambos repos y destácalo en las notas de la release (ver
    [RELEASE.md](RELEASE.md) y `neopen/docs/DESPLIEGUE.md`).
 3. Añade/ajusta el DTO en `Api.kt` (Android) y el schema/route en el servidor.
-4. Verifica los dos lados (Android `assembleDebug`; servidor `pnpm -r run typecheck`).
-5. Publica **servidor y app** y, si el servidor se autoaloja, **redeploya** la
-   imagen Docker (`:latest` en cada push a `main`).
+4. Copia el OpenAPI canónico al snapshot, actualiza su manifiesto y ejecuta
+   `./gradlew checkApiContract :core:testDebugUnitTest :neopen:assembleDebug`.
+   En servidor ejecuta typecheck, build, tests y `pnpm check:contract`.
+5. Publica **servidor y app**. El redeploy de una instancia autoalojada es una
+   operación separada que solo debe hacerse cuando se haya autorizado expresamente.

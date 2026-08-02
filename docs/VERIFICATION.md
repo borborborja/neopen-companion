@@ -15,6 +15,8 @@ arriba es la que está verificada que funciona con Gradle.)
 ./gradlew :neopen:compileDebugKotlin :core:compileDebugKotlin   # check rápido de compilación
 ./gradlew :neopen:assembleDebug                                 # APK completo (incluye Room/KSP, dex, recursos)
 ./gradlew :core:testDebugUnitTest                               # tests unitarios de lógica pura (:core)
+./gradlew checkApiContract checkFileModes                      # OpenAPI/Retrofit, Room 2..9 y permisos Git
+./gradlew :neopen:connectedDebugAndroidTest                     # migraciones + outbox/delta en emulador API 34
 ./gradlew :live:compileDebugKotlin                              # :live también depende de :core
 ```
 
@@ -27,8 +29,8 @@ publicar.
 | Cambiaste… | Verifica |
 |---|---|
 | Lógica pura en `:core` (marcadores, LanguageTool, parseo OCR, slug, hash) | `./gradlew :core:testDebugUnitTest` (añade/ajusta tests en `core/src/test/.../CapabilityLogicTest.kt`) |
-| Esquema Room (entidad/columna/tabla) | Migración nueva + subir `@Database(version)`; `assembleDebug` (KSP valida) + instalar sobre una versión previa y comprobar que no recrea la BD |
-| El contrato con el servidor (`Api.kt`/DTOs) | `assembleDebug` **y** el lado servidor (`pnpm -r run typecheck` en `neopen`); ver [INTEGRATION.md](INTEGRATION.md) |
+| Esquema Room (entidad/columna/tabla) | Migración nueva + subir `@Database(version)` + conservar todos los JSON desde v2; `connectedDebugAndroidTest` valida cada salto y la conservación 2→actual |
+| El contrato con el servidor (`Api.kt`/DTOs) | `checkApiContract`, tests Moshi y `assembleDebug`; en servidor: typecheck, tests y `pnpm check:contract`. Ver [INTEGRATION.md](INTEGRATION.md) |
 | UI Compose | `assembleDebug`; revisar en dispositivo (el emulador no tiene BLE pero sirve para ver UI/Ajustes) |
 | Strings | `assembleDebug` falla si falta una clave usada; añade a `values/`, `values-en/`, `values-ca/` |
 
@@ -54,3 +56,7 @@ publicar.
 gh run watch <run-id> --exit-status        # el run del PR/main/tag (NO uses `timeout`, no existe en macOS)
 gh release view vX.Y.Z --json assets --jq '.assets[].name'   # -> neopen-debug.apk
 ```
+
+El job `Migraciones Room y sync (emulador oficial)` debe estar verde: usa una
+imagen AOSP API 34, valida los esquemas históricos y recorre push/outbox + pull
+delta contra MockWebServer. No sustituye las pruebas BLE en hardware físico.
