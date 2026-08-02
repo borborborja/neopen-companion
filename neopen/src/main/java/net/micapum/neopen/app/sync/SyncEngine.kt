@@ -23,6 +23,7 @@ import java.io.IOException
 class SyncEngine(
     private val repo: NeopenRepository,
     private val settings: SettingsStore,
+    private val apiFactory: (String) -> NeopenApi = { ApiFactory.create(it) },
 ) {
     data class Result(val ok: Boolean, val pulled: Int = 0, val pushed: Int = 0, val error: String? = null)
 
@@ -40,7 +41,7 @@ class SyncEngine(
     suspend fun pull(): Result {
         val s = settings.flow.first()
         if (!s.configured) return Result(false, error = "Sin servidor configurado")
-        val api = ApiFactory.create(s.serverUrl)
+        val api = apiFactory(s.serverUrl)
         var pulled = 0
         return try {
             while (true) {
@@ -74,7 +75,7 @@ class SyncEngine(
     suspend fun push(): Result {
         val s = settings.flow.first()
         if (!s.configured) return Result(false, error = "Sin servidor configurado")
-        val api = ApiFactory.create(s.serverUrl)
+        val api = apiFactory(s.serverUrl)
         var pushed = 0
         try {
             while (true) {

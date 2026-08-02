@@ -1,12 +1,12 @@
 openapi: 3.1.0
 info:
   title: neopen API
-  version: "0.3.0"
+  version: "0.23.3"
   description: |
     Contrato de la API del servidor neopen, pensado como **fuente de verdad para
     clientes nativos** (companion Android/iOS) además del frontend web.
 
-    El cometido de un companion es: conectar por BLE al Neo smartpen, captar
+    El cometido de un companion es: conectar por BLE al Neo smartpen M1+, captar
     los trazos (live u offline) y **subirlos en crudo** a `POST /api/captures`.
     El **servidor archiva** automáticamente cada hoja en su cuaderno (por SOBP):
     el cliente NO necesita conocer la lógica de cuadernos ni de formato.
@@ -27,10 +27,20 @@ tags:
     description: Registro del boli
   - name: notebooks
     description: Cuadernos (solo lectura para un companion)
-  - name: sync
-    description: Sincronización incremental (delta-sync para la app completa offline)
   - name: meta
     description: Salud y capacidades
+  - name: settings
+    description: Configuración editable y preferencias del servidor
+  - name: connectors
+    description: Conectores de almacenamiento y rclone
+  - name: sync
+    description: Sincronización incremental y exportación a conectores
+  - name: studio
+    description: Ncode Studio, plantillas, fondos y anclajes
+  - name: admin
+    description: Operaciones administrativas protegidas
+  - name: assets
+    description: Portadas y fondos públicos referenciados por UUID
 
 paths:
   /api/health:
@@ -45,8 +55,10 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [ok, version]
                 properties:
-                  status: { type: string, example: ok }
+                  ok: { type: boolean, const: true }
+                  version: { type: string, example: 0.23.3 }
 
   /api/capabilities:
     get:
@@ -109,16 +121,149 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/captures/{id}:
+    patch:
+      tags: [captures]
+      summary: Actualiza metadatos o destino de una captura
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CapturePatch" }
+      responses:
+        "200":
+          description: Captura actualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [captures]
-      summary: Borra una captura (idempotente)
-      description: Idempotente — si ya estaba borrada (existe tombstone) devuelve 204, no 404.
+      summary: Borra una captura
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
-        "204": { description: Borrada (o ya borrada previamente) }
+        "204": { description: Borrada }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/captures/{id}/split:
+    post:
+      tags: [captures]
+      summary: Corta una hoja con trazos superpuestos
+      description: >
+        Parte la hoja por `cutIndex` (índice en los trazos ordenados por startTime):
+        los anteriores quedan en la original (que se SELLA), los posteriores van a
+        una hoja nueva. Rechaza (404) un corte vacío o en los extremos.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cutIndex, mode]
+              properties:
+                cutIndex: { type: integer, minimum: 0 }
+                mode: { type: string, enum: [newSheet, newNotebook] }
+      responses:
+        "201":
+          description: Hoja original (sellada) + hoja nueva
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  original: { $ref: "#/components/schemas/Capture" }
+                  created: { $ref: "#/components/schemas/Capture" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/captures/{id}/dismiss-overlap:
+    post:
+      tags: [captures]
+      summary: Descarta el aviso de trazos superpuestos (sin cortar)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Captura con el aviso limpiado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/overlap:
+    get:
+      tags: [captures]
+      summary: Umbral de detección de trazos superpuestos
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OverlapConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [captures]
+      summary: Cambia el umbral de detección de trazos superpuestos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OverlapConfig" }
+      responses:
+        "200":
+          description: Config guardada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OverlapConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/finish-mode:
+    get:
+      tags: [captures]
+      summary: Modo al finalizar una hoja
+      responses:
+        "200":
+          description: Modo actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [newSheet, newNotebook] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [captures]
+      summary: Cambia el modo al finalizar una hoja
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [newSheet, newNotebook] }
+      responses:
+        "200":
+          description: Modo guardado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [newSheet, newNotebook] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/pens:
     get:
@@ -162,7 +307,13 @@ paths:
   /api/pens/{mac}:
     patch:
       tags: [pens]
-      summary: Cambia el alias del boli
+      summary: Edita el boli (alias y preferencias de reconexión)
+      description: >
+        Todos los campos son opcionales. `forgotten` saca el boli de la
+        autoselección/reconexión automática; `locked` lo marca como el único
+        preferido; `style` fija su estilo por defecto (o `null` para quitarlo).
+        No tiene nada que ver con el PIN/cifrado del boli (eso es BLE punto a
+        punto, el servidor no lo gestiona).
       parameters:
         - { name: mac, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -171,9 +322,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [alias]
               properties:
                 alias: { type: string }
+                forgotten: { type: boolean }
+                locked: { type: boolean }
+                style:
+                  oneOf:
+                    - { $ref: "#/components/schemas/StrokeStyle" }
+                    - { type: "null" }
       responses:
         "200":
           description: Boli actualizado
@@ -182,6 +338,163 @@ paths:
               schema: { $ref: "#/components/schemas/PenInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/render-settings:
+    get:
+      tags: [captures]
+      summary: Ajustes de render (presión → grosor)
+      responses:
+        "200":
+          description: Ajustes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RenderSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [captures]
+      summary: Cambia los ajustes de render (rehace los ficheros sincronizados afectados)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenderSettings" }
+      responses:
+        "200":
+          description: Ajustes guardados
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RenderSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/captures/ingest:
+    post:
+      tags: [captures]
+      summary: Ingesta consciente de conflictos (variante de POST /api/captures)
+      description: >
+        Como POST /api/captures pero aplica la política de reimportación offline.
+        Si la página fue borrada/movida, devuelve un aviso (o discarded) en vez de
+        fusionar. El companion Android usa hoy el POST /api/captures clásico.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateCaptureInput" }
+      responses:
+        "200":
+          description: Resultado de la ingesta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  capture:
+                    oneOf: [{ $ref: "#/components/schemas/Capture" }, { type: "null" }]
+                  warning:
+                    oneOf: [{ $ref: "#/components/schemas/OfflineImportWarning" }, { type: "null" }]
+                  discarded: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/offline-import-warnings:
+    get:
+      tags: [captures]
+      summary: Avisos de reimportación offline pendientes
+      responses:
+        "200":
+          description: Avisos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  warnings:
+                    type: array
+                    items: { $ref: "#/components/schemas/OfflineImportWarning" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/offline-import-warnings/{id}/discard:
+    post:
+      tags: [captures]
+      summary: Descarta un aviso (los trazos no se importan)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Aviso resuelto
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OfflineImportWarning" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/offline-import-warnings/{id}/new-capture:
+    post:
+      tags: [captures]
+      summary: Crea una hoja nueva con los trazos del aviso
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "201":
+          description: Hoja creada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/offline-import-warnings/{id}/merge:
+    post:
+      tags: [captures]
+      summary: Fusiona los trazos del aviso en la captura destino
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Captura destino actualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/offline-reimport-policy:
+    get:
+      tags: [captures]
+      summary: Política global de reimportación offline
+      responses:
+        "200":
+          description: Política
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policy: { $ref: "#/components/schemas/OfflineReimportPolicy" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [captures]
+      summary: Cambia la política global de reimportación offline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy]
+              properties:
+                policy: { $ref: "#/components/schemas/OfflineReimportPolicy" }
+      responses:
+        "200":
+          description: Política guardada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  policy: { $ref: "#/components/schemas/OfflineReimportPolicy" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/notebooks:
     get:
@@ -199,31 +512,774 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Notebook" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [notebooks]
+      summary: Crea un cuaderno
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotebookInput" }
+      responses:
+        "201":
+          description: Cuaderno creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notebook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/changes:
     get:
-      tags: [sync]
-      summary: Cambios incrementales desde un cursor (delta-sync de la app completa)
-      description: |
-        Devuelve las capturas y cuadernos con `rev > since`, los borrados
-        (tombstones) y el nuevo `cursor`. Pagina con `hasMore`. Si `since`
-        supera la cabeza (BD recreada/restaurada) responde `reset: true` con el
-        estado completo: el cliente debe vaciar su copia local y re-sincronizar.
+      tags: [captures]
+      summary: Delta de capturas, cuadernos y borrados desde un cursor
       parameters:
-        - name: since
-          in: query
-          schema: { type: integer, minimum: 0, default: 0 }
-          description: Último cursor recibido (0 = desde cero).
-        - name: limit
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 500, default: 200 }
+        - { name: since, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
       responses:
         "200":
-          description: Lote de cambios
+          description: Lote incremental
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ChangesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/captures/{id}/clone:
+    post:
+      tags: [captures]
+      summary: Copia una captura a un cuaderno personalizado
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notebookId]
+              properties:
+                notebookId: { type: string }
+                position: { type: integer, minimum: 0 }
+      responses:
+        "201":
+          description: Captura clonada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/captures/{id}/transcribe:
+    post:
+      tags: [captures]
+      summary: Transcribe una captura con el proveedor OCR del servidor
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, format: binary }
+                instructions: { type: string }
+      responses:
+        "200":
+          description: Captura transcrita
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: OCR no configurado }
+
+  /api/captures/{id}/transcription:
+    put:
+      tags: [captures]
+      summary: Guarda una transcripción ya generada por un cliente
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TranscriptionPush" }
+      responses:
+        "200":
+          description: Captura actualizada sin invocar el OCR del servidor
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capture" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/detection:
+    get:
+      tags: [captures]
+      summary: Configuración de detección de marcadores
+      responses:
+        "200": { description: Configuración actual }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [captures]
+      summary: Actualiza la detección de marcadores
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, lines]
+              properties:
+                enabled: { type: boolean }
+                lines: { type: integer, minimum: 1, maximum: 20 }
+      responses:
+        "200": { description: Configuración guardada }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/export:
+    get:
+      tags: [admin]
+      summary: Exporta una copia completa de capturas, cuadernos y portadas
+      responses:
+        "200": { description: Copia JSON completa }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/import:
+    post:
+      tags: [admin]
+      summary: Restaura una copia completa reemplazando el contenido actual
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Totales importados }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notebooks/unclassified:
+    get:
+      tags: [notebooks]
+      summary: Obtiene o crea el cuaderno reservado Sin clasificar
+      responses:
+        "200":
+          description: Cuaderno reservado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notebook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notebooks/{id}:
+    patch:
+      tags: [notebooks]
+      summary: Edita un cuaderno
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotebookPatch" }
+      responses:
+        "200":
+          description: Cuaderno actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notebook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [notebooks]
+      summary: Borra un cuaderno y mueve sus hojas a Sin clasificar
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Borrado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/notebooks/{id}/order:
+    put:
+      tags: [notebooks]
+      summary: Reordena las capturas de un cuaderno
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order]
+              properties:
+                order: { type: array, items: { type: string } }
+      responses:
+        "204": { description: Orden guardado }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/notebooks/{id}/paper:
+    put:
+      tags: [notebooks]
+      summary: Asigna el formato físico del cuaderno
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paper]
+              properties:
+                paper: { $ref: "#/components/schemas/PaperSize" }
+                source: { type: string }
+      responses:
+        "200":
+          description: Cuaderno actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notebook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/notebooks/{id}/finalize:
+    post:
+      tags: [notebooks]
+      summary: Finaliza un cuaderno físico y sella sus hojas
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Cuaderno finalizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notebook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/notebooks/{id}/cover:
+    post:
+      tags: [notebooks]
+      summary: Sube la portada de un cuaderno
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dataUrl]
+              properties:
+                dataUrl: { type: string }
+      responses:
+        "200": { description: Cuaderno actualizado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [notebooks]
+      summary: Elimina la portada de un cuaderno
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Cuaderno actualizado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/papers:
+    get:
+      tags: [notebooks]
+      summary: Lista formatos físicos por clave de libreta Ncode
+      responses:
+        "200": { description: Mapa bookKey a PaperSize }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/papers/{bookKey}:
+    put:
+      tags: [notebooks]
+      summary: Asigna un formato físico a todas las hojas de una libreta
+      parameters:
+        - { name: bookKey, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaperSize" }
+      responses:
+        "200": { description: Formato y número de capturas actualizadas }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/sobp-scans:
+    get:
+      tags: [pens]
+      summary: Historial de páginas Ncode leídas
+      responses:
+        "200":
+          description: Historial
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/SobpScan" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [pens]
+      summary: Guarda una lectura Ncode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SobpScanInput" }
+      responses:
+        "201":
+          description: Lectura guardada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SobpScan" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/sobp-scans/{id}:
+    delete:
+      tags: [pens]
+      summary: Elimina una lectura Ncode
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Eliminada }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/settings:
+    get:
+      tags: [settings]
+      summary: Configuración editable con secretos siempre enmascarados
+      responses:
+        "200":
+          description: Configuración segura para UI y clientes nativos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerSettings" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [settings]
+      summary: Actualiza configuración no bloqueada por variables de entorno
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Configuración segura actualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerSettings" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/ocr/models:
+    post:
+      tags: [settings]
+      summary: Descubre modelos del proveedor OCR
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Modelos disponibles }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { description: Fallo del proveedor }
+
+  /api/connectors:
+    get:
+      tags: [connectors]
+      summary: Lista conectores registrados y su estado
+      responses:
+        "200":
+          description: Conectores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connectors: { type: array, items: { $ref: "#/components/schemas/ConnectorInfo" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/upload:
+    post:
+      tags: [connectors]
+      summary: Sube un fichero a uno o varios conectores
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, meta]
+              properties:
+                file: { type: string, format: binary }
+                meta: { type: string, description: JSON de UploadMeta }
+                targets: { type: string, description: JSON con ids de conectores }
+      responses:
+        "200": { description: Todos los destinos completados }
+        "207": { description: Resultado parcial }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/sync/config:
+    get:
+      tags: [sync]
+      summary: Obtiene la configuración de sincronización a conectores
+      responses:
+        "200": { description: Configuración actual }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    patch:
+      tags: [sync]
+      summary: Actualiza la sincronización a conectores
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Configuración guardada }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/sync/status:
+    get:
+      tags: [sync]
+      summary: Estado global del motor de sincronización
+      responses:
+        "200": { description: Estado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/sync/items:
+    get:
+      tags: [sync]
+      summary: Estado de sincronización por elemento
+      responses:
+        "200": { description: Estados por captura y cuaderno }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/sync/run:
+    post:
+      tags: [sync]
+      summary: Ejecuta la sincronización inmediatamente
+      responses:
+        "200": { description: Resultado del ciclo }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/rclone/providers:
+    get:
+      tags: [connectors]
+      summary: Lista proveedores configurables mediante rclone
+      responses:
+        "200": { description: Proveedores }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/rclone/remotes:
+    get:
+      tags: [connectors]
+      summary: Lista remotes rclone
+      responses:
+        "200": { description: Remotes }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [connectors]
+      summary: Inicia la creación de un remote rclone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Remote creado o siguiente paso interactivo }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/rclone/remotes/continue:
+    post:
+      tags: [connectors]
+      summary: Continúa una configuración interactiva de rclone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Resultado o siguiente paso }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/rclone/remotes/{name}:
+    delete:
+      tags: [connectors]
+      summary: Elimina un remote rclone
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Eliminado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/anchors:
+    get:
+      tags: [studio]
+      summary: Lista anclajes de diseño Ncode
+      responses:
+        "200": { description: Anclajes }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/anchors/{id}:
+    put:
+      tags: [studio]
+      summary: Crea o reemplaza un anclaje
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Anclaje guardado }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [studio]
+      summary: Elimina un anclaje
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Eliminado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/backgrounds:
+    post:
+      tags: [studio]
+      summary: Guarda una imagen de fondo desde un data URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dataUrl]
+              properties:
+                dataUrl: { type: string }
+      responses:
+        "201": { description: URL pública del fondo }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/backgrounds/{file}:
+    delete:
+      tags: [studio]
+      summary: Elimina una imagen de fondo
+      parameters:
+        - { name: file, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Eliminada }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/recents:
+    get:
+      tags: [studio]
+      summary: Lista generaciones recientes
+      responses:
+        "200": { description: Generaciones recientes }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [studio]
+      summary: Guarda una generación reciente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201": { description: Generación guardada }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/recents/{id}:
+    delete:
+      tags: [studio]
+      summary: Elimina una generación reciente
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Eliminada }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/presets:
+    get:
+      tags: [studio]
+      summary: Lista presets de Studio
+      responses:
+        "200": { description: Presets }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [studio]
+      summary: Guarda un preset de Studio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201": { description: Preset guardado }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/presets/{id}:
+    delete:
+      tags: [studio]
+      summary: Elimina un preset de Studio
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Eliminado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/calendars:
+    get:
+      tags: [studio]
+      summary: Lista calendarios importados
+      responses:
+        "200": { description: Calendarios }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [studio]
+      summary: Importa un calendario ICS
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object }
+      responses:
+        "201": { description: Calendario importado }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/calendars/url:
+    post:
+      tags: [studio]
+      summary: Añade un calendario por URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201": { description: Calendario añadido }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/calendars/{id}:
+    patch:
+      tags: [studio]
+      summary: Edita un calendario
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Calendario actualizado }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      tags: [studio]
+      summary: Elimina un calendario
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Eliminado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/studio/calendars/{id}/refresh:
+    post:
+      tags: [studio]
+      summary: Refresca un calendario remoto
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Calendario refrescado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/ncode/generate:
+    post:
+      tags: [studio]
+      summary: Genera un PDF Ncode desde un diseño
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object }
+      responses:
+        "200": { description: PDF y asignación SOBP }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { description: Fallo del sidecar NeoLAB }
+
+  /api/updates:
+    get:
+      tags: [meta]
+      summary: Consulta releases disponibles
+      responses:
+        "200": { description: Historial de releases }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/content:
+    delete:
+      tags: [admin]
+      summary: Elimina capturas, cuadernos y ficheros de contenido
+      responses:
+        "204": { description: Contenido eliminado }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/reset:
+    post:
+      tags: [admin]
+      summary: Restablece contenido y configuración editable
+      responses:
+        "204": { description: Instancia restablecida }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /covers/{file}:
+    get:
+      tags: [assets]
+      summary: Sirve una portada pública por identificador no predecible
+      security: []
+      parameters:
+        - { name: file, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Imagen de portada }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /backgrounds/{file}:
+    get:
+      tags: [assets]
+      summary: Sirve un fondo público por identificador no predecible
+      security: []
+      parameters:
+        - { name: file, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Imagen de fondo }
+        "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   securitySchemes:
@@ -256,6 +1312,129 @@ components:
       properties:
         error: { type: string }
 
+    ConnectorInfo:
+      type: object
+      required: [id, name, configured]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        configured: { type: boolean }
+
+    ConfigField:
+      type: object
+      required: [locked]
+      properties:
+        value: {}
+        locked: { type: boolean }
+
+    SecretConfigField:
+      type: object
+      required: [configured, locked]
+      properties:
+        configured: { type: boolean }
+        locked: { type: boolean }
+      additionalProperties: false
+
+    ServerSettings:
+      type: object
+      description: Los campos secretos nunca incluyen su valor.
+      required: [webdav, ftp, ocr, smtp, languageTool]
+      properties:
+        webdav: { type: object, additionalProperties: { $ref: "#/components/schemas/ConfigField" } }
+        ftp: { type: object, additionalProperties: { $ref: "#/components/schemas/ConfigField" } }
+        ocr: { type: object, additionalProperties: { $ref: "#/components/schemas/ConfigField" } }
+        smtp: { type: object, additionalProperties: { $ref: "#/components/schemas/ConfigField" } }
+        languageTool: { type: object, additionalProperties: { $ref: "#/components/schemas/ConfigField" } }
+
+    CapturePatch:
+      type: object
+      properties:
+        name: { type: string }
+        tags: { type: array, items: { type: string } }
+        destination: { type: string, enum: [inbox, notebook, loose] }
+        notebookId: { oneOf: [{ type: string }, { type: "null" }] }
+        position: { type: integer, minimum: 0 }
+        paper: { oneOf: [{ $ref: "#/components/schemas/PaperSize" }, { type: "null" }] }
+        kind: { oneOf: [{ type: string }, { type: "null" }] }
+        sealed: { type: boolean }
+
+    NotebookInput:
+      type: object
+      required: [name, color]
+      properties:
+        name: { type: string }
+        color: { type: string }
+        tags: { type: array, items: { type: string } }
+        paper: { oneOf: [{ $ref: "#/components/schemas/PaperSize" }, { type: "null" }] }
+        bookKey: { oneOf: [{ type: string }, { type: "null" }] }
+        custom: { type: boolean }
+        unclassified: { type: boolean }
+        category: { oneOf: [{ type: string }, { type: "null" }] }
+
+    NotebookPatch:
+      type: object
+      properties:
+        name: { type: string }
+        color: { type: string }
+        tags: { type: array, items: { type: string } }
+        category: { oneOf: [{ type: string }, { type: "null" }] }
+
+    OcrResult:
+      type: object
+      required: [text, tags, todos, dates]
+      properties:
+        title: { type: string }
+        text: { type: string }
+        language: { type: string }
+        tags: { type: array, items: { type: string } }
+        todos: { type: array, items: { type: object } }
+        dates: { type: array, items: { type: object } }
+
+    TranscriptionPush:
+      type: object
+      required: [transcription]
+      properties:
+        transcription: { $ref: "#/components/schemas/OcrResult" }
+        tags: { type: array, items: { type: string } }
+        name: { type: string }
+        kind: { type: string }
+
+    Deletion:
+      type: object
+      required: [id, kind, rev]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [capture, notebook] }
+        rev: { type: integer, minimum: 1 }
+
+    ChangesResponse:
+      type: object
+      required: [cursor, hasMore, captures, notebooks, deletions]
+      properties:
+        cursor: { type: integer, minimum: 0 }
+        hasMore: { type: boolean }
+        reset: { type: boolean }
+        captures: { type: array, items: { $ref: "#/components/schemas/Capture" } }
+        notebooks: { type: array, items: { $ref: "#/components/schemas/Notebook" } }
+        deletions: { type: array, items: { $ref: "#/components/schemas/Deletion" } }
+
+    SobpScanInput:
+      type: object
+      required: [label, sobp]
+      properties:
+        label: { type: string }
+        sobp: { $ref: "#/components/schemas/Sobp" }
+        pen: { type: string }
+
+    SobpScan:
+      allOf:
+        - $ref: "#/components/schemas/SobpScanInput"
+        - type: object
+          required: [id, scannedAt]
+          properties:
+            id: { type: string }
+            scannedAt: { type: string, format: date-time }
+
     Sobp:
       type: object
       description: Identidad Ncode de la página física (Section.Owner.Book.Page).
@@ -273,7 +1452,7 @@ components:
         x: { type: number, description: Coordenada X en celdas Ncode }
         y: { type: number, description: Coordenada Y en celdas Ncode }
         f: { type: number, description: Presión 0.0–1.0 }
-        t: { type: integer, description: Timestamp absoluto en ms (epoch), si está }
+        t: { type: integer, description: "Timestamp absoluto en ms (epoch), si está" }
 
     Stroke:
       type: object
@@ -325,6 +1504,13 @@ components:
         notebookId:
           type: string
           description: Normalmente OMITIR — el servidor resuelve el cuaderno por SOBP.
+        mergeMode:
+          type: string
+          enum: [auto, forceNew, mergeTarget]
+          description: Ausente/"auto" conserva la fusión por SOBP. Solo lo usa /api/captures/ingest.
+        targetCaptureId:
+          type: string
+          description: Captura destino cuando mergeMode = "mergeTarget".
 
     Capture:
       allOf:
@@ -333,42 +1519,41 @@ components:
           required: [id, rev, importedAt, updatedAt, destination, position]
           properties:
             id: { type: string }
-            rev: { type: integer, description: Revisión global monótona (cursor del delta-sync). }
+            rev: { type: integer, minimum: 1 }
             importedAt: { type: string, format: date-time }
-            updatedAt: { type: string, format: date-time, description: Última modificación (last-write-wins). }
+            updatedAt: { type: string, format: date-time }
             destination: { type: string, enum: [inbox, notebook, loose] }
             notebookId: { type: string }
             position: { type: integer }
             kind: { type: string, description: "Tipo detectado: [TODO], [AGENDA]…" }
+            sealed:
+              type: boolean
+              description: Hoja finalizada; deja de recibir fusiones por SOBP.
+            overlap:
+              oneOf: [{ $ref: "#/components/schemas/Overlap" }, { type: "null" }]
+              description: Aviso de trazos superpuestos (o null si no hay).
             transcription:
-              type: object
+              $ref: "#/components/schemas/OcrResult"
               description: Resultado del OCR/HTR, si la hoja se ha transcrito.
+            clonedFrom: { oneOf: [{ type: string }, { type: "null" }] }
 
-    Deletion:
+    Overlap:
       type: object
-      description: Un borrado propagado a los clientes de sync (tombstone).
-      required: [id, kind, rev]
+      description: Aviso de trazos nuevos escritos encima del contenido previo.
+      required: [strokeIndex, atTime, overlappingStrokes, areaPercent]
       properties:
-        id: { type: string }
-        kind: { type: string, enum: [capture, notebook] }
-        rev: { type: integer }
+        strokeIndex: { type: integer, description: Índice de corte sugerido (trazos ordenados por startTime) }
+        atTime: { type: integer, description: startTime (ms) del primer trazo superpuesto }
+        overlappingStrokes: { type: integer }
+        areaPercent: { type: integer, description: "% del contenido previo pisado (0–100)" }
 
-    ChangesResponse:
+    OverlapConfig:
       type: object
-      required: [cursor, hasMore, captures, notebooks, deletions]
+      required: [enabled, minStrokes, minAreaPercent]
       properties:
-        cursor: { type: integer, description: "Nuevo cursor; pásalo como ?since= en la siguiente petición." }
-        hasMore: { type: boolean, description: "Quedan más cambios por encima del cursor (paginar)." }
-        reset: { type: boolean, description: "El historial previo no es válido; vaciar y re-sincronizar desde cero." }
-        captures:
-          type: array
-          items: { $ref: "#/components/schemas/Capture" }
-        notebooks:
-          type: array
-          items: { $ref: "#/components/schemas/Notebook" }
-        deletions:
-          type: array
-          items: { $ref: "#/components/schemas/Deletion" }
+        enabled: { type: boolean }
+        minStrokes: { type: integer, minimum: 1, maximum: 100 }
+        minAreaPercent: { type: integer, minimum: 0, maximum: 100 }
 
     PenInfo:
       type: object
@@ -380,13 +1565,22 @@ components:
         firmware: { type: string }
         firstSeen: { type: string, format: date-time }
         lastSeen: { type: string, format: date-time }
+        forgotten:
+          type: boolean
+          description: No usar para autoselección/reconexión automática.
+        locked:
+          type: boolean
+          description: Preferir solo este boli para reconexión. NO es el estado de cifrado/PIN.
+        style:
+          oneOf: [{ $ref: "#/components/schemas/StrokeStyle" }, { type: "null" }]
+          description: Estilo por defecto del boli; null = sin definir.
 
     Notebook:
       type: object
       required: [id, rev, name, color, tags, createdAt, updatedAt]
       properties:
         id: { type: string }
-        rev: { type: integer, description: Revisión global monótona (cursor del delta-sync). }
+        rev: { type: integer, minimum: 1 }
         name: { type: string }
         color: { type: string }
         tags:
@@ -401,6 +1595,8 @@ components:
         bookKey: { type: string, description: '"section.owner.book" (solo cuadernos por SOBP)' }
         coverUrl: { type: string, description: Ruta pública de la portada (/covers/...) }
         unclassified: { type: boolean, description: Pila "Sin clasificar" (sus hojas no aplican formato) }
+        custom: { type: boolean }
+        category: { oneOf: [{ type: string }, { type: "null" }] }
 
     Capabilities:
       type: object
@@ -418,3 +1614,58 @@ components:
           properties:
             enabled: { type: boolean }
             model: { type: string }
+
+    StrokeStyle:
+      type: object
+      required: [color, width]
+      properties:
+        color: { type: integer, description: Color ARGB como entero de 32 bits con signo. }
+        width: { type: number, description: Grosor base (> 0). }
+
+    RenderSettings:
+      type: object
+      required: [pressureWidthEnabled, pressureWidthContrast]
+      properties:
+        pressureWidthEnabled:
+          type: boolean
+          description: Si la presión (dot.f) modula el grosor del trazo en el render.
+        pressureWidthContrast:
+          type: number
+          minimum: 0.5
+          maximum: 3
+          description: Multiplicador de diferencia fino/grueso (0.5–3).
+
+    OfflineReimportPolicy:
+      type: string
+      enum: [ask, discard, newCapture, merge]
+      description: >
+        Qué hacer cuando un volcado offline trae trazos de una página borrada/movida.
+        "ask" deja un aviso pendiente; el resto se resuelve automáticamente al ingerir.
+
+    OfflineImportWarning:
+      type: object
+      description: Aviso persistido cuando un volcado offline recupera trazos de una página intervenida.
+      required: [id, sobp, source, capturedAt, importedAt, name, strokes, reasonAction, actionAt, status]
+      properties:
+        id: { type: string }
+        sobp: { $ref: "#/components/schemas/Sobp" }
+        source: { type: string, enum: [offline] }
+        capturedAt: { type: string, format: date-time }
+        importedAt: { type: string, format: date-time }
+        name: { type: string }
+        strokes:
+          type: array
+          items: { $ref: "#/components/schemas/Stroke" }
+        paper:
+          oneOf: [{ $ref: "#/components/schemas/PaperSize" }, { type: "null" }]
+        reasonAction: { type: string, enum: [deleted, moved] }
+        actionCaptureId: { type: [string, "null"] }
+        actionCaptureName: { type: [string, "null"] }
+        actionDestination:
+          oneOf: [{ type: string, enum: [inbox, notebook, loose] }, { type: "null" }]
+        actionNotebookId: { type: [string, "null"] }
+        actionNotebookName: { type: [string, "null"] }
+        actionAt: { type: string, format: date-time }
+        targetCaptureId: { type: [string, "null"] }
+        status: { type: string, enum: [pending, discarded, newCapture, merged] }
+        resolvedAt: { type: [string, "null"], format: date-time }

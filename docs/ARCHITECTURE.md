@@ -63,9 +63,12 @@ Acceso desde Composables/Workers con `Context.graph`.
 
 ### Persistencia (Room)
 `db/NeopenDb.kt`: entidades `captures`, `notebooks`, `outbox`, `sync_meta`,
-`page_backgrounds`, `connector_sync_state`. **Versión actual: 7.** Las migraciones
-están en `NeopenFullApp.kt` (`MIGRATION_2_3 … MIGRATION_6_7`). Regla de oro:
-nunca destructivas (ver [GOTCHAS.md](GOTCHAS.md)).
+`page_backgrounds`, `connector_sync_state`, `pen_page_user_actions`,
+`offline_import_warnings` y `offline_note_state`. **Versión actual: 9.** Las
+migraciones están en `NeopenFullApp.kt` (`MIGRATION_2_3 … MIGRATION_8_9`) y los
+esquemas publicados 2..9 se guardan en `neopen/schemas/`. CI ejecuta cada salto y
+la cadena completa en un emulador Android 14; nunca uses una migración destructiva
+para una versión publicada (ver [GOTCHAS.md](GOTCHAS.md)).
 
 ### Settings (DataStore + cifrado)
 `core/.../data/SettingsStore.kt`: `AppSettings` (data class) persistido en
@@ -94,4 +97,6 @@ de op (incluido `PUSH_TRANSCRIPTION` para el failover del OCR).
 - `.github/workflows/build-apk.yml`: en push a `main`, PRs y tags `v*`. Compila
   `:neopen:assembleDebug`, sube el APK como artifact, actualiza la prerelease
   "latest" en `main` y **publica la release de GitHub con el APK en tags `v*`**.
+  También valida Retrofit contra el snapshot OpenAPI, los permisos Git, los
+  esquemas Room 2..9 y ejecuta migraciones/sync sobre el emulador oficial.
 - `.github/workflows/build-live-apk.yml`: build de `:live`.

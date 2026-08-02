@@ -65,7 +65,7 @@ data class PenInfoDto(val mac: String, val alias: String? = null)
 /** Ajustes de render del servidor (presión→grosor). Espejo de RenderSettings (packages/shared). */
 data class RenderSettingsDto(val pressureWidthEnabled: Boolean = false, val pressureWidthContrast: Float = 2f)
 
-data class HealthDto(val status: String? = null)
+data class HealthDto(val ok: Boolean = false, val version: String? = null)
 
 // --- Lectura / sincronización incremental ---
 
@@ -538,10 +538,10 @@ object ApiFactory {
         name.ifBlank { "Android" }
     }
 
-    fun create(serverUrl: String): NeopenApi {
+    fun create(serverUrl: String, baseClient: OkHttpClient? = null): NeopenApi {
         val base = serverUrl.trim().let { if (it.endsWith("/")) it else "$it/" }
         val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-        val client = OkHttpClient.Builder()
+        val client = (baseClient?.newBuilder() ?: OkHttpClient.Builder())
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             // Identifica el dispositivo en cada petición; el servidor anota el

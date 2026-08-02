@@ -1,0 +1,1 @@
+Reliability improvements: the server contract is now checked automatically, database upgrades are tested from every published version, and critical synchronization has coverage on a real Android emulator.
