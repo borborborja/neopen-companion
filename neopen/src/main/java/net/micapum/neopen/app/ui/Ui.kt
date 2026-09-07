@@ -174,6 +174,8 @@ import net.micapum.neopen.core.data.sourceOf
 import net.micapum.neopen.core.data.SyncMode
 import net.micapum.neopen.app.widget.TAB_NOTEBOOKS
 import net.micapum.neopen.core.pen.PenStatus
+import net.micapum.neopen.core.pen.PenSettingFailure
+import net.micapum.neopen.core.pen.PenSettingKey
 
 private val NotebookColors = listOf(
     "#5b8cff", "#64748b", "#3ad29f", "#ef4444", "#f59e0b", "#a855f7", "#ec4899", "#14b8a6", "#111827",
@@ -1527,18 +1529,65 @@ private fun PinUnlockDialog(
 @Composable
 private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        PenToggleRow(stringResource(R.string.pen_auto_power_on_title), stringResource(R.string.pen_auto_power_on_desc), state.settings.autoPowerOn ?: false, vm::setAutoPowerOn)
-        PenToggleRow(stringResource(R.string.pen_beep_title), stringResource(R.string.pen_beep_desc), state.settings.beep ?: false, vm::setBeep)
-        PenToggleRow(stringResource(R.string.pen_offline_title), stringResource(R.string.pen_offline_desc), state.settings.offlineData ?: false, vm::setOfflineData)
+        state.settingIssue?.let { issue ->
+            Text(
+                stringResource(
+                    penSettingFailureMessage(issue.failure),
+                    stringResource(penSettingTitle(issue.setting)),
+                ),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        val autoPowerPending = PenSettingKey.AUTO_POWER_ON in state.pendingSettings
+        PenToggleRow(
+            stringResource(R.string.pen_auto_power_on_title),
+            stringResource(R.string.pen_auto_power_on_desc),
+            state.settings.autoPowerOn ?: false,
+            enabled = !autoPowerPending,
+            pending = autoPowerPending,
+            onChange = vm::setAutoPowerOn,
+        )
+        val beepPending = PenSettingKey.BEEP in state.pendingSettings
+        PenToggleRow(
+            stringResource(R.string.pen_beep_title),
+            stringResource(R.string.pen_beep_desc),
+            state.settings.beep ?: false,
+            enabled = !beepPending,
+            pending = beepPending,
+            onChange = vm::setBeep,
+        )
+        val offlinePending = PenSettingKey.OFFLINE_DATA in state.pendingSettings
+        PenToggleRow(
+            stringResource(R.string.pen_offline_title),
+            stringResource(R.string.pen_offline_desc),
+            state.settings.offlineData ?: false,
+            enabled = !offlinePending,
+            pending = offlinePending,
+            onChange = vm::setOfflineData,
+        )
         if (state.settings.pressureSupported) {
-            PenSensitivitySection(state.settings.sensitivity ?: 2, vm::setSensitivity)
+            PenSensitivitySection(
+                state.settings.sensitivity ?: 2,
+                PenSettingKey.SENSITIVITY in state.pendingSettings,
+                vm::setSensitivity,
+            )
         }
         Spacer(Modifier.size(8.dp))
-        Text(stringResource(R.string.pen_auto_shutdown), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val shutdownPending = PenSettingKey.AUTO_SHUTDOWN in state.pendingSettings
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.pen_auto_shutdown), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (shutdownPending) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val current = state.settings.autoShutdownTime ?: 20
             SHUTDOWN_OPTIONS.forEach { m ->
-                FilterChip(selected = current == m, onClick = { vm.setAutoShutdown(m) }, label = { Text(stringResource(R.string.pen_minutes, m)) })
+                FilterChip(
+                    selected = current == m,
+                    onClick = { vm.setAutoShutdown(m) },
+                    label = { Text(stringResource(R.string.pen_minutes, m)) },
+                    enabled = !shutdownPending,
+                )
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
@@ -1561,9 +1610,12 @@ private fun PenConfigTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PenSensitivitySection(current: Int, onChange: (Int) -> Unit) {
+private fun PenSensitivitySection(current: Int, pending: Boolean, onChange: (Int) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(stringResource(R.string.pen_sensitivity_title), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.pen_sensitivity_title), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (pending) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        }
         Text(stringResource(R.string.pen_sensitivity_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             (0..4).forEach { level ->
@@ -1571,6 +1623,7 @@ private fun PenSensitivitySection(current: Int, onChange: (Int) -> Unit) {
                     selected = current == level,
                     onClick = { onChange(level) },
                     label = { Text(stringResource(R.string.pen_sensitivity_level, level + 1)) },
+                    enabled = !pending,
                 )
             }
         }
@@ -1862,7 +1915,7 @@ private fun SobpHistorySection(vm: MainViewModel) {
 
 @Composable
 private fun PenMemoryTab(state: net.micapum.neopen.core.pen.PenState, vm: MainViewModel) {
-    val idle = state.offlinePhase == net.micapum.neopen.core.pen.OfflinePhase.IDLE
+    val idle = state.connected && state.offlinePhase == net.micapum.neopen.core.pen.OfflinePhase.IDLE
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = vm::listOffline, enabled = idle, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.pen_read_memory)) }
@@ -1896,7 +1949,7 @@ private fun PenMemoryTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
                         }
                     }
                 }
-                TextButton(onClick = vm::clearOffline) {
+                TextButton(onClick = vm::clearOffline, enabled = idle) {
                     Text(stringResource(R.string.pen_clear_memory), color = MaterialTheme.colorScheme.error)
                 }
             }
@@ -1905,7 +1958,14 @@ private fun PenMemoryTab(state: net.micapum.neopen.core.pen.PenState, vm: MainVi
 }
 
 @Composable
-private fun PenToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun PenToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    pending: Boolean = false,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1915,8 +1975,27 @@ private fun PenToggleRow(title: String, subtitle: String, checked: Boolean, onCh
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked, onChange)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (pending) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        }
     }
+}
+
+@StringRes
+private fun penSettingTitle(setting: PenSettingKey): Int = when (setting) {
+    PenSettingKey.AUTO_POWER_ON -> R.string.pen_auto_power_on_title
+    PenSettingKey.BEEP -> R.string.pen_beep_title
+    PenSettingKey.OFFLINE_DATA -> R.string.pen_offline_title
+    PenSettingKey.AUTO_SHUTDOWN -> R.string.pen_auto_shutdown
+    PenSettingKey.SENSITIVITY -> R.string.pen_sensitivity_title
+}
+
+@StringRes
+private fun penSettingFailureMessage(failure: PenSettingFailure): Int = when (failure) {
+    PenSettingFailure.REJECTED -> R.string.pen_setting_rejected
+    PenSettingFailure.TIMEOUT -> R.string.pen_setting_timeout
+    PenSettingFailure.PROTOCOL -> R.string.pen_setting_protocol_error
 }
 
 @Composable

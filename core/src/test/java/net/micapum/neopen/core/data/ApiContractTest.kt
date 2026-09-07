@@ -1,14 +1,12 @@
 package net.micapum.neopen.core.data
 
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApiContractTest {
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi = apiMoshi()
 
     @Test
     fun healthMatchesTheCanonicalResponse() {

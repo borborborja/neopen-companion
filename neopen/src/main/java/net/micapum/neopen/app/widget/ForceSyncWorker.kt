@@ -3,11 +3,13 @@ package net.micapum.neopen.app.widget
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.core.pen.PenStatus
+import net.micapum.neopen.core.data.AppMode
 
 /**
  * Sincronización forzada desde el widget: asegura conexión con el boli, le pide
@@ -22,26 +24,23 @@ class ForceSyncWorker(context: Context, params: WorkerParameters) :
         val pen = g.pen
 
         if (pen.state.value.status != PenStatus.AUTHORIZED) {
-            pen.scanAndConnect()
+            withContext(Dispatchers.Main.immediate) { pen.scanAndConnect() }
             withTimeoutOrNull(15_000) {
-                pen.state.first { it.status == PenStatus.AUTHORIZED || it.status == PenStatus.IDLE }
+                pen.state.first { it.status == PenStatus.AUTHORIZED || it.status == PenStatus.IDLE || it.status == PenStatus.DISCONNECTED }
             }
         }
-        if (pen.state.value.status == PenStatus.AUTHORIZED) {
-            pen.listOffline()
-            delay(2_500)
-            pen.importAllOffline()
-            delay(3_000)
-            g.syncStatus.markPenSync(System.currentTimeMillis())
-        }
+        val penOk = pen.state.value.connected && pen.importOfflineMemory()
+        val persisted = g.awaitPenPersistence()
 
         val r = g.sync.sync()
-        if (r.ok) g.syncStatus.markServerSync(System.currentTimeMillis())
+        if (r.ok && g.settings.flow.first().appMode != AppMode.LOCAL) {
+            g.syncStatus.markServerSync(System.currentTimeMillis())
+        }
 
         SyncWidget.refresh(applicationContext)
         NotebooksWidget.refresh(applicationContext)
         RecentEditsWidget.refresh(applicationContext)
-        return Result.success()
+        return if (r.ok && penOk && persisted) Result.success() else Result.retry()
     }
 
     companion object {

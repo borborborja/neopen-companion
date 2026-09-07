@@ -19,8 +19,8 @@ android {
         applicationId = "net.micapum.neopen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 36
-        versionName = "0.23.3"
+        versionCode = 37
+        versionName = "0.23.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
@@ -39,7 +39,7 @@ android {
         // Si las variables no están presentes, la firma de release no se configura
         // (las builds debug/CI siguen funcionando sin tocar nada).
         val ksPath = System.getenv("NEOPEN_KEYSTORE_PATH")
-        if (ksPath != null && file(ksPath).exists()) {
+        if (!providers.gradleProperty("fdroid").isPresent && ksPath != null && file(ksPath).exists()) {
             create("release") {
                 storeFile = file(ksPath)
                 storePassword = System.getenv("NEOPEN_KEYSTORE_PASSWORD")
@@ -71,6 +71,7 @@ android {
     }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
     sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 
 dependencies {
@@ -104,6 +105,12 @@ dependencies {
     androidTestImplementation("androidx.room:room-testing:2.6.1")
     androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
 
     // Carga de portadas remotas (Coil)
     implementation("io.coil-kt:coil-compose:2.7.0")

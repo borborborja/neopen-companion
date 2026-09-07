@@ -182,7 +182,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Vincula un servidor a una base LOCAL: valida, migra todo el contenido al
-     * servidor (sin perder datos; el servidor deduplica por bookKey/SOBP) y pasa
+     * servidor (ids estables, sin fusionar revisiones por SOBP) y pasa
      * a modo completo. Si la validación o la migración fallan, no toca lo local.
      */
     fun linkServer(url: String, password: String, onResult: (Boolean, String?) -> Unit) {
@@ -197,7 +197,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onResult(false, if (code == 401 || code == 403) getApplication<Application>().getString(R.string.vm_wrong_password) else getApplication<Application>().getString(R.string.vm_server_error, code))
                 return@launch
             }
-            val migrated = runCatching { graph.repo.linkAndMerge(api, password) }
+            val migrated = runCatching {
+                val result = graph.sync.linkAndMerge(clean, password)
+                check(result.ok) { result.error ?: "Error de sincronización" }
+            }
             if (migrated.isFailure) {
                 onResult(false, getApplication<Application>().getString(R.string.vm_migration_failed, migrated.exceptionOrNull()?.message ?: ""))
                 return@launch

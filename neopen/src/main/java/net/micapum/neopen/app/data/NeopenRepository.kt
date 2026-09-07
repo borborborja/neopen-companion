@@ -19,13 +19,11 @@ import net.micapum.neopen.core.data.CapturePatchDto
 import net.micapum.neopen.core.data.CaptureDto
 import net.micapum.neopen.core.data.ChangesResponseDto
 import net.micapum.neopen.core.data.CreateCaptureInput
-import net.micapum.neopen.core.data.NeopenApi
 import net.micapum.neopen.core.data.NotebookCreateDto
 import net.micapum.neopen.core.data.DotDto
 import net.micapum.neopen.core.data.OfflineReimportDecision
 import net.micapum.neopen.core.data.OfflineReimportPolicy
 import net.micapum.neopen.core.data.NotebookDto
-import net.micapum.neopen.core.data.NotebookPaperBody
 import net.micapum.neopen.core.data.OcrResultDto
 import net.micapum.neopen.core.data.TranscriptionPushDto
 import net.micapum.neopen.core.data.NotebookPatchDto
@@ -54,6 +52,7 @@ object OutboxKind {
     const val REORDER_NOTEBOOK = "reorderNotebook"
     /** Sube al servidor una transcripción generada en el teléfono (failover del OCR). */
     const val PUSH_TRANSCRIPTION = "pushTranscription"
+    const val MIGRATE = "migrate"
 }
 
 object OfflineImportStatus {
@@ -118,7 +117,8 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun cursor(): Long = db.syncMeta().get()?.cursor ?: 0L
 
     /** Aplica un lote de cambios del servidor a Room y avanza el cursor. */
-    suspend fun applyChanges(resp: ChangesResponseDto, now: Long) {
+    suspend fun applyChanges(resp: ChangesResponseDto, now: Long) = db.withTransaction {
+        check(db.outbox().peek(1).isEmpty()) { "Hay cambios locales pendientes" }
         if (resp.reset) {
             db.captures().clear()
             db.notebooks().clear()
@@ -189,20 +189,20 @@ class NeopenRepository(private val db: NeopenDb) {
 
     private fun nowIso(): String = Instant.now().toString()
 
-    suspend fun renameCapture(id: String, name: String) {
-        val e = db.captures().getById(id) ?: return
+    suspend fun renameCapture(id: String, name: String) = db.withTransaction {
+        val e = db.captures().getById(id) ?: return@withTransaction
         db.captures().upsertOne(e.copy(name = name, updatedAt = nowIso()))
         enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(name = name)))
     }
 
-    suspend fun setCaptureTags(id: String, tags: List<String>) {
-        val e = db.captures().getById(id) ?: return
+    suspend fun setCaptureTags(id: String, tags: List<String>) = db.withTransaction {
+        val e = db.captures().getById(id) ?: return@withTransaction
         db.captures().upsertOne(e.copy(tagsJson = Json.tagsJson(tags), updatedAt = nowIso()))
         enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(tags = tags)))
     }
 
-    suspend fun moveCapture(id: String, notebookId: String, position: Int) {
-        val e = db.captures().getById(id) ?: return
+    suspend fun moveCapture(id: String, notebookId: String, position: Int) = db.withTransaction {
+        val e = db.captures().getById(id) ?: return@withTransaction
         val nb = db.notebooks().getById(notebookId)
         recordPageAction(e, PenPageAction.MOVED, notebookId, nb?.name)
         db.captures().upsertOne(
@@ -218,10 +218,10 @@ class NeopenRepository(private val db: NeopenDb) {
     }
 
     /** Formato de una hoja individual (override). Optimista + outbox PATCH. */
-    suspend fun setCapturePaper(id: String, paper: PaperDto?) {
-        val e = db.captures().getById(id) ?: return
+    suspend fun setCapturePaper(id: String, paper: PaperDto?) = db.withTransaction {
+        val e = db.captures().getById(id) ?: return@withTransaction
         db.captures().upsertOne(e.copy(paperJson = Json.paperJson(paper), updatedAt = nowIso()))
-        enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(paper = paper)))
+        enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(paper = paper, paperSpecified = true)))
     }
 
     /**
@@ -251,7 +251,7 @@ class NeopenRepository(private val db: NeopenDb) {
     // --- Finalizar hoja / cuaderno (sellado) -----------------------------------
 
     /** Sella/reabre una hoja (modo completo): optimista + outbox PATCH. */
-    suspend fun setCaptureSealed(id: String, sealed: Boolean) {
+    suspend fun setCaptureSealed(id: String, sealed: Boolean) = db.withTransaction {
         db.captures().setSealed(id, sealed, nowIso())
         enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(sealed = sealed)))
     }
@@ -388,7 +388,7 @@ class NeopenRepository(private val db: NeopenDb) {
         db.captures().upsertOne(created.toEntity())
     }
 
-    suspend fun reorderNotebook(notebookId: String, orderedIds: List<String>) {
+    suspend fun reorderNotebook(notebookId: String, orderedIds: List<String>) = db.withTransaction {
         orderedIds.forEachIndexed { i, cid ->
             db.captures().getById(cid)?.let { db.captures().upsertOne(it.copy(position = i, updatedAt = nowIso())) }
         }
@@ -400,7 +400,7 @@ class NeopenRepository(private val db: NeopenDb) {
         color: String,
         tags: List<String> = emptyList(),
         category: String? = null,
-    ): String {
+    ): String = db.withTransaction {
         val tempId = "local-" + UUID.randomUUID()
         val now = nowIso()
         db.notebooks().upsertOne(
@@ -420,7 +420,7 @@ class NeopenRepository(private val db: NeopenDb) {
             tempId,
             Json.notebookCreate.toJson(NotebookCreateDto(name, color, tags, category?.ifBlank { null })),
         )
-        return tempId
+        tempId
     }
 
     /**
@@ -433,8 +433,8 @@ class NeopenRepository(private val db: NeopenDb) {
         color: String? = null,
         tags: List<String>? = null,
         category: String? = null,
-    ) {
-        val e = db.notebooks().getById(id) ?: return
+    ) = db.withTransaction {
+        val e = db.notebooks().getById(id) ?: return@withTransaction
         db.notebooks().upsertOne(
             e.copy(
                 name = name ?: e.name,
@@ -451,13 +451,13 @@ class NeopenRepository(private val db: NeopenDb) {
         )
     }
 
-    suspend fun deleteNotebook(id: String) {
+    suspend fun deleteNotebook(id: String) = db.withTransaction {
         db.notebooks().deleteById(id)
         enqueue(OutboxKind.DELETE_NOTEBOOK, id, "{}")
     }
 
     /** Inserta la captura optimista en Room y encola su creación (boli — Fase 4). */
-    suspend fun enqueueCreateCapture(input: CreateCaptureInput, optimistic: CaptureEntity) {
+    suspend fun enqueueCreateCapture(input: CreateCaptureInput, optimistic: CaptureEntity) = db.withTransaction {
         db.captures().upsertOne(optimistic)
         enqueue(OutboxKind.CREATE_CAPTURE, optimistic.id, Json.createCapture.toJson(input))
     }
@@ -681,47 +681,37 @@ class NeopenRepository(private val db: NeopenDb) {
     }
 
     /**
-     * Vincula un servidor a una base local: sube TODO al servidor (cuadernos →
-     * mapa de ids; capturas con su notebookId mapeado; el servidor deduplica por
-     * bookKey/SOBP) y, SOLO si todo subió bien, limpia el estado local + outbox y
-     * resetea el cursor para que el caller baje el estado unificado. Si algún POST
-     * falla, propaga la excepción ANTES de limpiar (local intacto, reintentable).
+     * Snapshot duradero de la biblioteca local. Cada registro conserva su id;
+     * los reintentos no duplican hojas ni fusionan revisiones por SOBP.
+     * Las filas de Room nunca se borran para realizar la vinculación.
      */
-    suspend fun linkAndMerge(api: NeopenApi, password: String) {
-        val idMap = HashMap<String, String>()
-        for (nb in db.notebooks().getAll()) {
-            if (nb.unclassified) continue // el servidor resuelve su propia pila
-            val dto = api.createNotebook(
-                password,
-                NotebookCreateDto(
-                    name = nb.name, color = nb.color, tags = Json.tags(nb.tagsJson), category = nb.category,
-                    bookKey = nb.bookKey, paper = Json.paperOf(nb.paperJson), custom = nb.custom,
-                ),
-            )
-            idMap[nb.id] = dto.id
-            // createNotebook puede devolver uno existente sin formato: asegúralo.
-            Json.paperOf(nb.paperJson)?.let { p ->
-                api.setNotebookPaper(password, dto.id, NotebookPaperBody(p, p.source))
+    suspend fun prepareLinkMigration(serverUrl: String) = db.withTransaction {
+        val pending = db.outbox().peek(Int.MAX_VALUE)
+        val migration = pending.filter { it.kind == OutboxKind.MIGRATE }
+        if (migration.isNotEmpty()) {
+            check(migration.all { it.targetId?.trimEnd('/') == serverUrl.trimEnd('/') }) {
+                "Hay una migración pendiente hacia otro servidor"
             }
         }
-        for (c in db.captures().getAll()) {
-            val nbId = c.notebookId?.let { idMap[it] }
-            api.createCapture(
-                password,
-                CreateCaptureInput(
-                    sobp = SobpDto(c.section, c.owner, c.book, c.page),
-                    source = c.source, capturedAt = c.capturedAt, name = c.name,
-                    tags = Json.tags(c.tagsJson), strokes = Json.strokes(c.strokesJson),
-                    paper = Json.paperOf(c.paperJson), notebook = c.notebook,
-                    notebookId = nbId, destination = if (nbId != null) "notebook" else null,
-                ),
-            )
-        }
-        // Todo subido sin error → limpia local para repoblar desde el servidor.
+        val notebooks = db.notebooks().getAll().map { it.toDto() }
+        val captures = db.captures().getAll().map { it.toDto() }
+        // Rehacer el snapshot también recoge ediciones/ingestas LOCAL hechas
+        // después de un intento fallido. Reenviar ids confirmados es idempotente.
+        // El snapshot ya incluye las altas/ediciones/ordenaciones optimistas.
         db.outbox().clear()
-        db.captures().clear()
-        db.notebooks().clear()
-        db.syncMeta().upsert(SyncMetaEntity())
+        for (nb in notebooks) enqueue(OutboxKind.MIGRATE, serverUrl,
+            Json.migration.toJson(net.micapum.neopen.core.data.MigrationDto(notebooks = listOf(nb))))
+        for (cap in captures) enqueue(OutboxKind.MIGRATE, serverUrl,
+            Json.migration.toJson(net.micapum.neopen.core.data.MigrationDto(captures = listOf(cap))))
+        // Un borrado no tiene fila en el snapshot, pero sí intención pendiente.
+        for (op in pending.filter { it.kind == OutboxKind.DELETE_CAPTURE || it.kind == OutboxKind.DELETE_NOTEBOOK }) {
+            enqueue(op.kind, op.targetId, op.payloadJson)
+        }
+    }
+
+    suspend fun resetCursor() {
+        val meta = db.syncMeta().get() ?: SyncMetaEntity()
+        db.syncMeta().upsert(meta.copy(cursor = 0))
     }
 
     private suspend fun enqueue(kind: String, targetId: String?, payloadJson: String) {
@@ -877,7 +867,73 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun outboxPeek(limit: Int): List<OutboxEntity> = db.outbox().peek(limit)
     suspend fun outboxDelete(localId: Long) = db.outbox().deleteById(localId)
     suspend fun outboxMarkFailed(localId: Long, error: String?) = db.outbox().markFailed(localId, error)
-    suspend fun outboxRepoint(oldId: String, newId: String) = db.outbox().repointTarget(oldId, newId)
+    suspend fun outboxRepoint(oldId: String, newId: String) {
+        if (oldId == newId) return
+        for (op in db.outbox().peek(Int.MAX_VALUE)) {
+            val payload = when (op.kind) {
+                OutboxKind.CREATE_CAPTURE -> Json.createCapture.fromJson(op.payloadJson)?.let {
+                    Json.createCapture.toJson(it.copy(notebookId = if (it.notebookId == oldId) newId else it.notebookId))
+                }
+                OutboxKind.PATCH_CAPTURE -> Json.capturePatch.fromJson(op.payloadJson)?.let {
+                    Json.capturePatch.toJson(it.copy(notebookId = if (it.notebookId == oldId) newId else it.notebookId))
+                }
+                OutboxKind.REORDER_NOTEBOOK -> Json.reorder.fromJson(op.payloadJson)?.let {
+                    Json.reorder.toJson(it.copy(order = it.order.map { id -> if (id == oldId) newId else id }))
+                }
+                else -> null
+            }
+            if (payload != null && payload != op.payloadJson) db.outbox().updatePayload(op.localId, payload)
+        }
+        db.outbox().repointTarget(oldId, newId)
+    }
+
+    /** La confirmación y el repunte se confirman juntos; nunca queda un CREATE a medias. */
+    suspend fun acknowledge(op: OutboxEntity, capture: CaptureDto? = null, notebook: NotebookDto? = null) = db.withTransaction {
+        if (capture != null) {
+            if (op.kind == OutboxKind.CREATE_CAPTURE && op.targetId != null) replaceTempCapture(op.targetId, capture)
+            else applyServerCapture(capture)
+        }
+        if (notebook != null) {
+            if (op.kind == OutboxKind.CREATE_NOTEBOOK && op.targetId != null) replaceTempNotebook(op.targetId, notebook)
+            else applyServerNotebook(notebook)
+        }
+        db.outbox().deleteById(op.localId)
+        // La respuesta confirma esta operación, no las ediciones hechas después.
+        if (capture != null) replayPendingEdits(capture.id)
+        if (notebook != null) replayPendingEdits(notebook.id)
+    }
+
+    private suspend fun replayPendingEdits(targetId: String) {
+        for (pending in db.outbox().forTarget(targetId)) {
+            val id = pending.targetId ?: continue
+            when (pending.kind) {
+                OutboxKind.PATCH_CAPTURE -> {
+                    val c = db.captures().getById(id) ?: continue
+                    val p = Json.capturePatch.fromJson(pending.payloadJson) ?: continue
+                    db.captures().upsertOne(c.copy(
+                        name = p.name ?: c.name, tagsJson = p.tags?.let(Json::tagsJson) ?: c.tagsJson,
+                        destination = p.destination ?: c.destination, notebookId = p.notebookId ?: c.notebookId,
+                        position = p.position ?: c.position, kind = p.kind ?: c.kind, sealed = p.sealed ?: c.sealed,
+                        paperJson = if (p.paperSpecified || p.paper != null) Json.paperJson(p.paper) else c.paperJson,
+                    ))
+                }
+                OutboxKind.PUSH_TRANSCRIPTION -> {
+                    val c = db.captures().getById(id) ?: continue
+                    val p = Json.transcriptionPush.fromJson(pending.payloadJson) ?: continue
+                    db.captures().upsertOne(c.copy(transcriptionJson = Json.ocrJson(p.transcription),
+                        name = p.name ?: c.name, tagsJson = p.tags?.let(Json::tagsJson) ?: c.tagsJson, kind = p.kind ?: c.kind))
+                }
+                OutboxKind.PATCH_NOTEBOOK -> {
+                    val n = db.notebooks().getById(id) ?: continue
+                    val p = Json.notebookPatch.fromJson(pending.payloadJson) ?: continue
+                    db.notebooks().upsertOne(n.copy(name = p.name ?: n.name, color = p.color ?: n.color,
+                        tagsJson = p.tags?.let(Json::tagsJson) ?: n.tagsJson, category = p.category ?: n.category))
+                }
+                OutboxKind.DELETE_CAPTURE -> db.captures().deleteById(id)
+                OutboxKind.DELETE_NOTEBOOK -> db.notebooks().deleteById(id)
+            }
+        }
+    }
     suspend fun markPushed(now: Long) {
         val meta = db.syncMeta().get() ?: SyncMetaEntity()
         db.syncMeta().upsert(meta.copy(lastPushAt = now))
@@ -931,6 +987,7 @@ class NeopenRepository(private val db: NeopenDb) {
     /** Sustituye un cuaderno temporal por el real del servidor (repunta sus hojas). */
     suspend fun replaceTempNotebook(tempId: String, dto: NotebookDto) {
         if (tempId != dto.id) {
+            outboxRepoint(tempId, dto.id)
             db.captures().repointNotebook(tempId, dto.id)
             db.notebooks().deleteById(tempId)
         }
@@ -939,7 +996,10 @@ class NeopenRepository(private val db: NeopenDb) {
 
     /** Sustituye una captura temporal por la real del servidor (mismo SOBP). */
     suspend fun replaceTempCapture(tempId: String, dto: CaptureDto) {
-        if (tempId != dto.id) db.captures().deleteById(tempId)
+        if (tempId != dto.id) {
+            outboxRepoint(tempId, dto.id)
+            db.captures().deleteById(tempId)
+        }
         db.captures().upsertOne(dto.toEntity())
     }
 }

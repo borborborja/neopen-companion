@@ -55,6 +55,22 @@ fun NotebookDto.toEntity(): NotebookEntity = NotebookEntity(
 
 // --- Entity (Room) → dominio (UI) ---
 
+/** Snapshot completo para migrar sin perder OCR, revisiones ni propiedades de archivo. */
+fun CaptureEntity.toDto() = CaptureDto(
+    id = id, rev = rev, sobp = net.micapum.neopen.core.data.SobpDto(section, owner, book, page),
+    notebook = notebook, source = source, capturedAt = capturedAt, importedAt = importedAt,
+    updatedAt = updatedAt, name = name, tags = Json.tags(tagsJson), strokes = Json.strokes(strokesJson),
+    transcription = Json.ocrOf(transcriptionJson), destination = destination, notebookId = notebookId,
+    position = position, paper = Json.paperOf(paperJson), kind = kind, sealed = sealed,
+    overlap = Json.overlapOf(overlapJson), clonedFrom = clonedFrom,
+)
+
+fun NotebookEntity.toDto() = NotebookDto(
+    id = id, rev = rev, name = name, color = color, tags = Json.tags(tagsJson),
+    createdAt = createdAt, updatedAt = updatedAt, paper = Json.paperOf(paperJson), paperSource = paperSource,
+    bookKey = bookKey, coverUrl = coverUrl, unclassified = unclassified, custom = custom, category = category,
+)
+
 fun CaptureEntity.toDomain(): Capture = Capture(
     id = id,
     rev = rev,

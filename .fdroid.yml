@@ -1,0 +1,32 @@
+Categories:
+  - Writing
+License: GPL-3.0-only
+AuthorName: neopen contributors
+SourceCode: https://github.com/borborborja/neopen-companion
+IssueTracker: https://github.com/borborborja/neopen-companion/issues
+Changelog: https://github.com/borborborja/neopen-companion/releases
+
+AutoName: neopen
+RepoType: git
+Repo: https://github.com/borborborja/neopen-companion.git
+
+Builds:
+  - versionName: 0.23.4
+    versionCode: 37
+    commit: v0.23.4
+    subdir: neopen
+    gradle:
+      - yes
+    gradleprops:
+      - fdroid
+    scandelete:
+      - companion
+      - live
+      - neopen/signing
+    output: build/outputs/apk/release/neopen-release-unsigned.apk
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^fdroid-v[0-9]+\.[0-9]+\.[0-9]+$
+UpdateCheckData: neopen/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
+CurrentVersion: 0.23.4
+CurrentVersionCode: 37

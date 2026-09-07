@@ -31,13 +31,28 @@ jobs:
       - name: Validar contrato, esquemas y permisos
         run: ./gradlew checkApiContract checkFileModes --stacktrace
 
-      # Tests unitarios de :core (lógica pura). Protege regresiones; hoy ya están en verde.
-      - name: Tests unitarios (:core)
-        run: ./gradlew :core:testDebugUnitTest --stacktrace
+      # Incluye regresiones del outbox/delta con Room y HTTP simulado (Robolectric).
+      - name: Tests unitarios (core y sincronización Android)
+        run: ./gradlew :core:testDebugUnitTest :neopen:testDebugUnitTest --stacktrace
 
       # App unificada (completa, con modo "solo puente" integrado).
       - name: Build debug APK (neopen)
         run: ./gradlew :neopen:assembleDebug --stacktrace
+
+      - name: Verificar candidato F-Droid sin firma ni módulo live
+        env:
+          # Debe ignorarse incluso cuando existe una clave local/de CI.
+          NEOPEN_KEYSTORE_PATH: signing/neopen-full.keystore
+          NEOPEN_KEYSTORE_PASSWORD: deliberately-invalid
+        run: |
+          ./gradlew -Pfdroid :neopen:assembleRelease --stacktrace
+          apk=neopen/build/outputs/apk/release/neopen-release-unsigned.apk
+          test -s "$apk"
+          test -x "$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          if "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify "$apk"; then
+            echo "Error: F-Droid debe recibir un APK sin firmar"
+            exit 1
+          fi
 
       - name: Renombrar APK
         run: cp neopen/build/outputs/apk/debug/neopen-debug.apk neopen-debug.apk

@@ -89,6 +89,21 @@ data class OfflineNote(val section: Int, val owner: Int, val note: Int, val page
 enum class PenStatus { IDLE, SCANNING, CONNECTING, LOCKED, AUTHORIZED, DISCONNECTED }
 enum class OfflinePhase { IDLE, LISTING, TRANSFERRING }
 
+/** Ajustes del boli cuyo cambio se confirma mediante SETTING_CHANGE_RESPONSE. */
+enum class PenSettingKey(val protocolType: Int) {
+    AUTO_POWER_ON(Protocol.SET_AUTO_POWER_ON),
+    BEEP(Protocol.SET_BEEP),
+    OFFLINE_DATA(Protocol.SET_OFFLINE_DATA),
+    AUTO_SHUTDOWN(Protocol.SET_AUTO_POWER_OFF_TIME),
+    SENSITIVITY(Protocol.SET_SENSITIVITY),
+}
+
+/** Motivo por el que un cambio de ajuste no llegó a confirmarse. */
+enum class PenSettingFailure { REJECTED, TIMEOUT, PROTOCOL }
+
+/** Último cambio de ajuste que falló; la UI lo presenta junto a los controles. */
+data class PenSettingIssue(val setting: PenSettingKey, val failure: PenSettingFailure)
+
 /** Ajustes reportados por el boli (SETTING_INFO). */
 data class PenSettings(
     val battery: Int? = null,
@@ -113,6 +128,9 @@ data class PenState(
     val mac: String? = null,
     val firmware: String? = null,
     val settings: PenSettings = PenSettings(),
+    /** Ajustes solicitados al boli cuya confirmación aún no ha llegado. */
+    val pendingSettings: Set<PenSettingKey> = emptySet(),
+    val settingIssue: PenSettingIssue? = null,
     val offlinePhase: OfflinePhase = OfflinePhase.IDLE,
     val offlineProgress: Int = 0,
     val notes: List<OfflineNote>? = null,
