@@ -39,7 +39,7 @@ android {
         // Si las variables no están presentes, la firma de release no se configura
         // (las builds debug/CI siguen funcionando sin tocar nada).
         val ksPath = System.getenv("NEOPEN_KEYSTORE_PATH")
-        if (ksPath != null && file(ksPath).exists()) {
+        if (!providers.gradleProperty("fdroid").isPresent && ksPath != null && file(ksPath).exists()) {
             create("release") {
                 storeFile = file(ksPath)
                 storePassword = System.getenv("NEOPEN_KEYSTORE_PASSWORD")

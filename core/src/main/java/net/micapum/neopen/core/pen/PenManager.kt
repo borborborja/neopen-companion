@@ -25,6 +25,10 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Capa BLE del Neo smartpen. Escanea por el servicio v2 (0x19F1), conecta,
@@ -86,6 +90,7 @@ class PenManager(
     var onOfflineNoteImported: ((OfflineNote, Int) -> Unit)? = null
     /** El volcado completo (toda la cola de notas) ha terminado: dispara UN solo sync al final. */
     var onOfflineImportComplete: (() -> Unit)? = null
+    var onOfflineImportStarted: (() -> Unit)? = null
 
     /**
      * Modo escritura en vivo: cada trazo completo se entrega de inmediato por `onStroke`
@@ -119,7 +124,7 @@ class PenManager(
     private val logClock = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     /** Escribe en logcat y en el buffer en memoria (cap. 300 líneas). */
-    private fun log(msg: String) {
+    @Synchronized private fun log(msg: String) {
         Log.d(TAG, msg)
         val line = "${logClock.format(System.currentTimeMillis())}  $msg"
         _logs.value = (_logs.value + line).takeLast(300)
@@ -156,8 +161,31 @@ class PenManager(
     private companion object {
         const val TAG = "PenManager"
         const val AUTO_RECONNECT_DELAY_MS = 8_000L
-        /** Backstop: si una nota offline no progresa en este tiempo, se pasa a la siguiente. */
+        const val OFFLINE_LIST_TIMEOUT_MS = 15_000L
+        const val SETTING_CHANGE_TIMEOUT_MS = 5_000L
+        /** Backstop: sin progreso, abortar el volcado sin anunciar éxito. */
         const val OFFLINE_NOTE_TIMEOUT_MS = 8_000L
+    }
+
+    private val offlineList = OfflineListCoordinator()
+    private val settingChanges = PenSettingQueue()
+    private var recoveringSettings = false
+
+    private val startAutoOfflineList = Runnable {
+        if (autoImportOnConnect && _state.value.connected) {
+            requestOfflineList(OfflineListMode.AUTO_IMPORT)
+        }
+    }
+
+    private val offlineListTimeout = Runnable {
+        if (offlineList.cancel()) {
+            log("⏱ El boli no respondió a la lectura de memoria offline")
+            abortOffline("offline-list-timeout")
+        }
+    }
+
+    private val settingChangeTimeout = Runnable {
+        handleSettingQueueOutcome(settingChanges.fail(PenSettingFailure.TIMEOUT))
     }
 
     private val autoReconnectScan = Runnable {
@@ -189,6 +217,7 @@ class PenManager(
     }
 
     private fun scanAndConnect(manual: Boolean) {
+        if (Looper.myLooper() != main.looper) { main.post { scanAndConnect(manual) }; return }
         main.removeCallbacks(autoReconnectScan)
         if (connecting || _state.value.status == PenStatus.SCANNING || _state.value.status == PenStatus.CONNECTING) {
             log("Scan ignorado: ya hay una conexión en curso")
@@ -259,6 +288,10 @@ class PenManager(
     }
 
     private fun openGatt(device: BluetoothDevice) {
+        resetTransport()
+        knownOfflineCounts = emptyMap()
+        autoUnlockTried = false
+        reassembler = Protocol.FrameReassembler(::onFrame)
         connectAttempts++
         log("Conectando GATT (intento $connectAttempts) a ${device.address}…")
         update { it.copy(status = PenStatus.CONNECTING, mac = device.address, error = null) }
@@ -270,11 +303,16 @@ class PenManager(
     private fun retryOrFail() {
         gatt?.close()
         gatt = null
+        resetTransport()
+        resetOfflineState()
+        interruptSettingSession()
+        update { it.copy(status = PenStatus.CONNECTING, offlinePhase = OfflinePhase.IDLE,
+            pendingSettings = settingChanges.pendingKeys, notes = null) }
         val device = target
         if (device != null && connectAttempts < 3) {
             // Pequeño respiro para que la pila BLE libere el slot antes de reintentar.
             log("Reintentando conexión en 600 ms…")
-            main.postDelayed({ openGatt(device) }, 600)
+            main.postDelayed({ if (target === device && gatt == null) openGatt(device) }, 600)
         } else {
             log("✗ Conexión fallida tras $connectAttempts intentos")
             connecting = false
@@ -284,14 +322,15 @@ class PenManager(
     }
 
     fun disconnect() {
+        if (Looper.myLooper() != main.looper) { main.post { disconnect() }; return }
         log("Detener / desconectar solicitado")
         connecting = false
         target = null
         main.removeCallbacksAndMessages(null)
         stopScan()
-        txQueue.clear()
-        txBusy = false
+        resetTransport()
         resetOfflineState()
+        resetSettingChanges()
         pwOp = PwOp.NONE
         pendingNewPassword = ""
         rememberPin = null
@@ -300,7 +339,15 @@ class PenManager(
         gatt?.disconnect()
         gatt?.close()
         gatt = null
-        update { it.copy(status = PenStatus.IDLE, offlinePhase = OfflinePhase.IDLE, autoReconnecting = false) }
+        update {
+            it.copy(
+                status = PenStatus.IDLE,
+                offlinePhase = OfflinePhase.IDLE,
+                pendingSettings = emptySet(),
+                settingIssue = null,
+                autoReconnecting = false,
+            )
+        }
     }
 
     private fun shouldAutoReconnect(): Boolean = autoReconnect || foregroundReconnect
@@ -315,7 +362,30 @@ class PenManager(
 
     /** Encola un frame para escribir. Se serializa en el hilo principal. */
     private fun write(frame: ByteArray) {
-        main.post { txQueue.addLast(frame); pumpTx() }
+        val session = gatt ?: return
+        main.post { if (gatt === session) { txQueue.addLast(frame); pumpTx() } }
+    }
+
+    private fun resetTransport() {
+        txQueue.clear()
+        txBusy = false
+        writeChar = null
+        notifyChar = null
+        reassembler = null
+        main.removeCallbacks(settingChangeTimeout)
+    }
+
+    private fun interruptSettingSession() {
+        val failed = settingChanges.fail(PenSettingFailure.PROTOCOL)
+        if (failed is PenSettingQueueOutcome.Failed) {
+            recoveringSettings = true
+            update { it.copy(settingIssue = PenSettingIssue(failed.change.key, failed.reason)) }
+        }
+    }
+
+    /** Todos los callbacks BLE pertenecen a una sesión y se procesan en el mismo hilo. */
+    private fun inSession(g: BluetoothGatt, action: () -> Unit) {
+        main.post { if (gatt === g) action() }
     }
 
     /** Envía el siguiente frame de la cola si no hay otra escritura en curso. */
@@ -332,9 +402,9 @@ class PenManager(
         val ok = g.writeCharacteristic(ch)
         log("→ TX (${if (noResp) "noRsp" else "rsp"}, ok=$ok): ${frame.toHex()}")
         if (!ok) {
-            // No se pudo encolar en la pila: reintenta el bombeo tras un respiro.
-            txBusy = false
-            main.postDelayed({ pumpTx() }, 60)
+            // La trama no se envió. No seguir ni confirmar otra petición de esta sesión.
+            log("⚠ Escritura GATT rechazada → reconectando")
+            retryOrFail()
         }
     }
 
@@ -366,25 +436,33 @@ class PenManager(
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
-        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) = inSession(g) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 // Fallo de conexión (típicamente 133): cierra y reintenta.
                 log("⚠ Cambio de estado con error (status=$status, newState=$newState)")
                 retryOrFail()
-                return
+                return@inSession
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                connectAttempts = 0
                 log("GATT conectado, descubriendo servicios…")
                 // Descubrir servicios en el hilo principal mejora la estabilidad en
                 // algunos fabricantes; un pequeño retardo evita carreras tras conectar.
-                main.postDelayed({ g.discoverServices() }, 250)
+                main.postDelayed({ if (gatt === g) g.discoverServices() }, 250)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 log("GATT desconectado")
                 connecting = false
                 g.close()
                 if (gatt === g) gatt = null
+                resetTransport()
                 resetOfflineState()
+                interruptSettingSession()
+                update {
+                    it.copy(
+                        status = PenStatus.DISCONNECTED,
+                        offlinePhase = OfflinePhase.IDLE,
+                        pendingSettings = settingChanges.pendingKeys,
+                    )
+                }
                 val device = target
                 // Desconexión inesperada (target != null = no la pidió el usuario):
                 // reintenta sola si la reconexión automática está activa.
@@ -394,18 +472,26 @@ class PenManager(
                     update { it.copy(status = PenStatus.CONNECTING, error = null, autoReconnecting = true) }
                     main.postDelayed({ if (shouldAutoReconnect() && target === device) openGatt(device) }, 1500)
                 } else {
-                    update { it.copy(status = PenStatus.DISCONNECTED, autoReconnecting = false) }
+                    update {
+                        it.copy(
+                            status = PenStatus.DISCONNECTED,
+                            pendingSettings = settingChanges.pendingKeys,
+                            autoReconnecting = false,
+                        )
+                    }
                 }
             }
         }
 
-        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) = inSession(g) {
+            if (status != BluetoothGatt.GATT_SUCCESS) { retryOrFail(); return@inSession }
             val service = g.getService(Protocol.SERVICE_V2) ?: g.getService(Protocol.SERVICE_V5)
             if (service == null) {
                 log("✗ Servicio 19F1/v5 no encontrado. Servicios: " +
                     g.services.joinToString { it.uuid.toString() })
                 update { it.copy(status = PenStatus.DISCONNECTED, error = "service-not-found", autoReconnecting = shouldAutoReconnect()) }
-                return
+                retryOrFail()
+                return@inSession
             }
             log("Servicio encontrado: ${service.uuid}")
 
@@ -426,7 +512,8 @@ class PenManager(
                 log("✗ Faltan características. Disponibles: " +
                     chars.joinToString { "${it.uuid}(props=${it.properties})" })
                 update { it.copy(status = PenStatus.DISCONNECTED, error = "chars-not-found", autoReconnecting = shouldAutoReconnect()) }
-                return
+                retryOrFail()
+                return@inSession
             }
             notifyChar = notify
 
@@ -441,20 +528,22 @@ class PenManager(
             }
         }
 
-        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) = inSession(g) {
             log("MTU negociado: $mtu (status=$status)")
             enableNotifications(g)
         }
 
-        override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+        override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) = inSession(g) {
+            if (status != BluetoothGatt.GATT_SUCCESS) { retryOrFail(); return@inSession }
             // Notificaciones habilitadas: ahora sí es seguro arrancar el handshake.
             log("CCCD escrito (status=$status) → enviando reqVersion (0x01)")
             write(Protocol.reqVersion())
         }
 
-        override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
+        override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) = inSession(g) {
             // Escritura completada → libera la cola y manda el siguiente frame.
-            main.post { txBusy = false; pumpTx() }
+            if (status != BluetoothGatt.GATT_SUCCESS) retryOrFail()
+            else { txBusy = false; pumpTx() }
         }
 
         // Android 13+ (API 33): entrega el valor por parámetro.
@@ -463,16 +552,15 @@ class PenManager(
             ch: BluetoothGattCharacteristic,
             value: ByteArray,
         ) {
-            if (_state.value.status != PenStatus.AUTHORIZED) log("← RX crudo: ${value.toHex()}")
-            reassembler?.feed(value)
+            val snapshot = value.copyOf()
+            inSession(g) { reassembler?.feed(snapshot) }
         }
 
         // Android ≤ 12: el valor va en ch.value.
         @Deprecated("Compat <33", ReplaceWith(""))
         override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
-            val value = ch.value ?: return
-            if (_state.value.status != PenStatus.AUTHORIZED) log("← RX crudo: ${value.toHex()}")
-            reassembler?.feed(value)
+            val value = ch.value?.copyOf() ?: return
+            inSession(g) { reassembler?.feed(value) }
         }
     }
 
@@ -494,6 +582,11 @@ class PenManager(
                 write(Protocol.reqSettingInfo()) // ReqPenStatus: la respuesta autoriza
             }
             Protocol.SETTING_INFO_RESPONSE -> {
+                if (frame.result != 0 || frame.data.size < 21) {
+                    log("⚠ SETTING_INFO_RESPONSE inválida → no autorizar")
+                    retryOrFail()
+                    return
+                }
                 val settings = Protocol.parseSettingInfo(frame.data)
                 val (locked, maxRetry, retry) = Protocol.parseLockInfo(frame.data)
                 val firstTime = _state.value.status != PenStatus.AUTHORIZED
@@ -517,6 +610,7 @@ class PenManager(
                     onAuthorized(settings.battery)
                 }
             }
+            Protocol.SETTING_CHANGE_RESPONSE -> handleSettingChangeResponse(frame)
             Protocol.PASSWORD_RESPONSE -> {
                 val (status, retry, reset) = Protocol.parsePasswordResponse(frame.data)
                 log("← PASSWORD_RESPONSE status=$status retry=$retry reset=$reset op=$pwOp")
@@ -587,11 +681,11 @@ class PenManager(
             Protocol.ONLINE_NEW_PEN_DOT -> appendDot(frame.data, true)
             Protocol.ONLINE_NEW_PEN_UP -> endStroke()
 
-            Protocol.OFFLINE_NOTE_LIST_RESPONSE -> {
-                val notes = Protocol.parseNoteList(frame.data)
-                update { it.copy(offlinePhase = OfflinePhase.IDLE, notes = notes) }
+            Protocol.OFFLINE_NOTE_LIST_RESPONSE -> handleOfflineNoteListResponse(frame)
+            Protocol.OFFLINE_DATA_RESPONSE -> if (currentNote != null) {
+                if (frame.result != 0 || frame.data.size < 4) abortOffline("offline-data-failed")
+                else onOfflineDataResponse(Protocol.parseOfflineTotalStrokes(frame.data))
             }
-            Protocol.OFFLINE_DATA_RESPONSE -> onOfflineDataResponse(Protocol.parseOfflineTotalStrokes(frame.data))
             Protocol.OFFLINE_PACKET_REQUEST -> handleOfflinePacket(frame.data)
             Protocol.OFFLINE_DATA_DELETE_RESPONSE ->
                 update { it.copy(notes = emptyList()) }
@@ -672,14 +766,25 @@ class PenManager(
 
     /** Tras autenticar: marca AUTORIZADO, pide datos en tiempo real y auto-vuelca offline. */
     private fun onAuthorized(battery: Int?) {
+        connectAttempts = 0
         update { it.copy(status = PenStatus.AUTHORIZED, error = null, autoReconnecting = false) }
         log("✓ AUTORIZADO (batería ${battery}%) → pido datos en tiempo real")
         _state.value.mac?.let { onPenSeen(it, _state.value.name) }
         write(Protocol.reqOnlineDataAll())
+        if (recoveringSettings) {
+            recoveringSettings = false
+            val next = settingChanges.resumeAfterReconnect()
+            update { it.copy(pendingSettings = settingChanges.pendingKeys) }
+            next?.let(::sendSettingChange)
+        }
+        if (liveMode && offlineDataBeforeLive == null) {
+            offlineDataBeforeLive = _state.value.settings.offlineData
+            if (offlineDataBeforeLive == true) setOfflineData(false)
+        }
         if (autoImportOnConnect) {
             log("Auto-volcado al conectar: leyendo memoria offline…")
-            main.postDelayed({ listOffline() }, 1_500)
-            main.postDelayed({ importAllOffline() }, 4_000)
+            main.removeCallbacks(startAutoOfflineList)
+            main.postDelayed(startAutoOfflineList, 1_500)
         }
     }
 
@@ -718,30 +823,110 @@ class PenManager(
     // ----------------------------------------------------------------------------------
 
     // ----------------------------------------------------------------------------------
-    // Ajustes del boli (pestaña Configuración). VERIFY: ids de SETTING_TYPE contra el SDK.
-    // El estado se actualiza de forma optimista para que la UI responda.
+    // Ajustes del boli (pestaña Configuración). Se aplican al estado únicamente después de
+    // recibir SETTING_CHANGE_RESPONSE; la cola deja una sola petición en vuelo.
     // ----------------------------------------------------------------------------------
 
     fun setAutoPowerOn(on: Boolean) {
-        write(Protocol.reqSettingOnOff(Protocol.SET_AUTO_POWER_ON, on))
-        update { it.copy(settings = it.settings.copy(autoPowerOn = on)) }
+        enqueueSettingChange(PenSettingChange(PenSettingKey.AUTO_POWER_ON, if (on) 1 else 0))
     }
     fun setBeep(on: Boolean) {
-        write(Protocol.reqSettingOnOff(Protocol.SET_BEEP, on))
-        update { it.copy(settings = it.settings.copy(beep = on)) }
+        enqueueSettingChange(PenSettingChange(PenSettingKey.BEEP, if (on) 1 else 0))
     }
     fun setOfflineData(on: Boolean) {
-        write(Protocol.reqSettingOnOff(Protocol.SET_OFFLINE_DATA, on))
-        update { it.copy(settings = it.settings.copy(offlineData = on)) }
+        enqueueSettingChange(PenSettingChange(PenSettingKey.OFFLINE_DATA, if (on) 1 else 0))
     }
     fun setAutoShutdown(minutes: Int) {
-        write(Protocol.reqSettingShort(Protocol.SET_AUTO_POWER_OFF_TIME, minutes))
-        update { it.copy(settings = it.settings.copy(autoShutdownTime = minutes)) }
+        enqueueSettingChange(PenSettingChange(PenSettingKey.AUTO_SHUTDOWN, minutes.coerceIn(0, 0xffff)))
     }
     fun setSensitivity(level: Int) {
         val v = level.coerceIn(0, 4)
-        write(Protocol.reqSettingByte(Protocol.SET_SENSITIVITY, v))
-        update { it.copy(settings = it.settings.copy(sensitivity = v)) }
+        enqueueSettingChange(PenSettingChange(PenSettingKey.SENSITIVITY, v))
+    }
+
+    private fun enqueueSettingChange(change: PenSettingChange) {
+        if (Looper.myLooper() != main.looper) { main.post { enqueueSettingChange(change) }; return }
+        if (!_state.value.connected && !recoveringSettings) {
+            log("⚠ Cambio ${change.key} ignorado: el boli no está autorizado")
+            return
+        }
+        val sendNow = settingChanges.enqueue(change)
+        update {
+            it.copy(pendingSettings = settingChanges.pendingKeys, settingIssue = null)
+        }
+        if (sendNow != null) sendSettingChange(sendNow)
+    }
+
+    private fun sendSettingChange(change: PenSettingChange) {
+        val frame = when (change.key) {
+            PenSettingKey.AUTO_POWER_ON,
+            PenSettingKey.BEEP,
+            PenSettingKey.OFFLINE_DATA ->
+                Protocol.reqSettingOnOff(change.key.protocolType, change.value != 0)
+            PenSettingKey.AUTO_SHUTDOWN ->
+                Protocol.reqSettingShort(change.key.protocolType, change.value)
+            PenSettingKey.SENSITIVITY ->
+                Protocol.reqSettingByte(change.key.protocolType, change.value)
+        }
+        log("Ajuste ${change.key}: solicitando valor ${change.value}")
+        write(frame)
+        main.removeCallbacks(settingChangeTimeout)
+        main.postDelayed(settingChangeTimeout, SETTING_CHANGE_TIMEOUT_MS)
+    }
+
+    private fun handleSettingChangeResponse(frame: Protocol.Frame) {
+        if (frame.result != 0) {
+            main.removeCallbacks(settingChangeTimeout)
+            log("⚠ SETTING_CHANGE_RESPONSE rechazada (result=${frame.result})")
+            handleSettingQueueOutcome(settingChanges.fail(PenSettingFailure.REJECTED))
+            return
+        }
+        val parsed = runCatching { Protocol.parseSettingChange(frame.data) }.getOrElse { e ->
+            log("⚠ SETTING_CHANGE_RESPONSE inválida: ${e.message}")
+            main.removeCallbacks(settingChangeTimeout)
+            handleSettingQueueOutcome(settingChanges.fail(PenSettingFailure.PROTOCOL))
+            return
+        }
+        main.removeCallbacks(settingChangeTimeout)
+        handleSettingQueueOutcome(settingChanges.onResponse(parsed.settingType, parsed.successful))
+    }
+
+    private fun handleSettingQueueOutcome(outcome: PenSettingQueueOutcome) {
+        when (outcome) {
+            PenSettingQueueOutcome.Unexpected ->
+                log("⚠ Respuesta de ajuste sin petición pendiente")
+            is PenSettingQueueOutcome.Confirmed -> {
+                log("✓ Ajuste ${outcome.completed.key} confirmado (${outcome.completed.value})")
+                update {
+                    it.copy(
+                        settings = it.settings.withConfirmed(outcome.completed),
+                        pendingSettings = settingChanges.pendingKeys,
+                        settingIssue = null,
+                    )
+                }
+                outcome.next?.let(::sendSettingChange)
+            }
+            is PenSettingQueueOutcome.Failed -> {
+                main.removeCallbacks(settingChangeTimeout)
+                log("⚠ Ajuste ${outcome.change.key} no confirmado: ${outcome.reason}")
+                update {
+                    it.copy(
+                        pendingSettings = settingChanges.pendingKeys,
+                        settingIssue = PenSettingIssue(outcome.change.key, outcome.reason),
+                    )
+                }
+                // Una lectura en la misma sesión NO identifica ACKs tardíos. Abrir otra
+                // sesión, leer los ajustes reales y reanudar solo lo todavía no enviado.
+                recoveringSettings = true
+                retryOrFail()
+            }
+        }
+    }
+
+    private fun resetSettingChanges() {
+        main.removeCallbacks(settingChangeTimeout)
+        settingChanges.clear()
+        recoveringSettings = false
     }
 
     // ----------------------------------------------------------------------------------
@@ -754,15 +939,18 @@ class PenManager(
      * valor previo, para que lo escrito en modo-vivo no reaparezca en la próxima importación.
      */
     fun enterLiveMode() {
+        if (Looper.myLooper() != main.looper) { main.post { enterLiveMode() }; return }
         if (liveMode) return
+        // Conserva lo escrito en el cuaderno antes de activar el IME.
+        endStroke()
+        flushPage()
         liveMode = true
-        // Descarta cualquier página a medio acumular: en modo-vivo no se suben.
         main.removeCallbacks(idleFlush)
         pageStrokes.clear()
         pageSobp = null
         update { it.copy(capturedPages = 0) }
         offlineDataBeforeLive = _state.value.settings.offlineData
-        if (_state.value.settings.offlineData != false) {
+        if (_state.value.connected && offlineDataBeforeLive == true) {
             log("Modo escritura en vivo: desactivando grabado offline del boli")
             setOfflineData(false)
         }
@@ -770,19 +958,64 @@ class PenManager(
 
     /** Sale del modo en vivo y restaura el grabado offline al valor que tenía antes. */
     fun exitLiveMode() {
+        if (Looper.myLooper() != main.looper) { main.post { exitLiveMode() }; return }
         if (!liveMode) return
         liveMode = false
         val prev = offlineDataBeforeLive
         offlineDataBeforeLive = null
-        if (prev == true && _state.value.settings.offlineData != true) {
+        if (prev == true) {
             log("Saliendo de modo en vivo: restaurando grabado offline del boli")
             setOfflineData(true)
         }
     }
 
-    fun listOffline() {
-        update { it.copy(offlinePhase = OfflinePhase.LISTING, error = null) }
+    fun listOffline() = requestOfflineList(OfflineListMode.MANUAL)
+
+    private fun requestOfflineList(mode: OfflineListMode) {
+        if (Looper.myLooper() != main.looper) { main.post { requestOfflineList(mode) }; return }
+        if (!_state.value.connected) {
+            log("⚠ Lectura offline ignorada: el boli no está autorizado")
+            return
+        }
+        if (_state.value.offlinePhase != OfflinePhase.IDLE || !offlineList.start(mode)) {
+            log("Lectura offline ignorada: ya hay una operación en curso")
+            return
+        }
+        update { it.copy(offlinePhase = OfflinePhase.LISTING, notes = null, error = null) }
+        if (mode == OfflineListMode.AUTO_IMPORT) onOfflineImportStarted?.invoke()
         write(Protocol.reqOfflineNoteList())
+        main.removeCallbacks(offlineListTimeout)
+        main.postDelayed(offlineListTimeout, OFFLINE_LIST_TIMEOUT_MS)
+    }
+
+    private fun handleOfflineNoteListResponse(frame: Protocol.Frame) {
+        if (!offlineList.active) {
+            log("⚠ Lista offline tardía o no solicitada → ignorada")
+            return
+        }
+        main.removeCallbacks(offlineListTimeout)
+        if (frame.result != 0) {
+            offlineList.cancel()
+            log("⚠ El boli rechazó la lectura offline (result=${frame.result})")
+            update { it.copy(offlinePhase = OfflinePhase.IDLE, notes = null, error = "offline-list-failed") }
+            return
+        }
+        val notes = runCatching { Protocol.parseNoteList(frame.data) }.getOrElse { e ->
+            offlineList.cancel()
+            log("⚠ Lista offline inválida: ${e.message}")
+            update { it.copy(offlinePhase = OfflinePhase.IDLE, notes = null, error = "offline-list-invalid") }
+            return
+        }
+        val completion = offlineList.complete(notes) ?: return
+        if (completion.autoImport) {
+            // No emitir IDLE entre LISTING y TRANSFERRING: los workers podrían
+            // interpretar ese estado intermedio como un volcado ya terminado.
+            update { it.copy(notes = completion.notes, error = null) }
+            log("Lista offline recibida (${completion.notes.size} notas) → inicio auto-volcado")
+            startOfflineImport(completion.notes, fromList = true)
+        } else {
+            update { it.copy(offlinePhase = OfflinePhase.IDLE, notes = completion.notes, error = null) }
+        }
     }
 
     /** Importa una sola nota (botón por-nota de la UI). */
@@ -792,10 +1025,32 @@ class PenManager(
 
     /** Importa todas las notas listadas, una a una (con gate por contador). */
     fun importAllOffline() {
+        if (_state.value.notes == null) return
         startOfflineImport(_state.value.notes ?: emptyList())
     }
 
+    /** Espera eventos reales, no temporizadores de "unos segundos". Se une a un volcado activo. */
+    suspend fun importOfflineMemory(): Boolean = withContext(Dispatchers.Main.immediate) {
+        if (!_state.value.connected) return@withContext false
+        main.removeCallbacks(startAutoOfflineList)
+        when (_state.value.offlinePhase) {
+            OfflinePhase.IDLE -> requestOfflineList(OfflineListMode.AUTO_IMPORT)
+            OfflinePhase.LISTING -> {
+                offlineList.requestImportAfterList()
+                onOfflineImportStarted?.invoke()
+            }
+            OfflinePhase.TRANSFERRING -> Unit
+        }
+        val end = withTimeoutOrNull(300_000L) {
+            state.first { !it.connected || it.offlinePhase == OfflinePhase.IDLE }
+        }
+        if (end == null) abortOffline("offline-import-timeout")
+        end?.connected == true && end.error == null
+    }
+
     fun clearOffline(notes: List<OfflineNote>) {
+        if (Looper.myLooper() != main.looper) { main.post { clearOffline(notes) }; return }
+        if (!_state.value.connected || _state.value.offlinePhase != OfflinePhase.IDLE) return
         notes.groupBy { it.section to it.owner }.forEach { (k, ns) ->
             write(Protocol.reqOfflineDelete(k.first, k.second, ns.map { it.note }.toIntArray()))
         }
@@ -818,11 +1073,11 @@ class PenManager(
 
     private fun noteKey(n: OfflineNote) = "${n.section}.${n.owner}.${n.note}"
 
-    /** Watchdog: si la nota en curso no progresa, avanza para no quedarse colgado. */
+    /** Watchdog: aborta una nota incompleta sin guardar un contador de éxito. */
     private val offlineWatchdog = Runnable {
         if (currentNote != null) {
-            log("⏱ Nota offline sin progreso → paso a la siguiente")
-            requestNextOfflineNote()
+            log("⏱ Nota offline sin progreso → volcado incompleto, conservar copia del boli")
+            abortOffline("offline-data-timeout")
         }
     }
     private fun armOfflineWatchdog() {
@@ -832,6 +1087,9 @@ class PenManager(
 
     /** Limpia el estado del volcado (al desconectar o terminar). */
     private fun resetOfflineState() {
+        main.removeCallbacks(startAutoOfflineList)
+        main.removeCallbacks(offlineListTimeout)
+        offlineList.cancel()
         main.removeCallbacks(offlineWatchdog)
         offlineQueue.clear()
         currentNote = null
@@ -841,9 +1099,15 @@ class PenManager(
         offlineReceivedStrokes = 0
     }
 
-    private fun startOfflineImport(notes: List<OfflineNote>) {
+    private fun startOfflineImport(notes: List<OfflineNote>, fromList: Boolean = false) {
+        if (Looper.myLooper() != main.looper) { main.post { startOfflineImport(notes, fromList) }; return }
+        val phase = _state.value.offlinePhase
+        if (!_state.value.connected || (phase != OfflinePhase.IDLE && !(fromList && phase == OfflinePhase.LISTING))) return
+        update { it.copy(error = null) }
+        onOfflineImportStarted?.invoke()
         if (notes.isEmpty()) {
-            main.post { onOfflineImportComplete?.invoke() }
+            update { it.copy(offlinePhase = OfflinePhase.IDLE, offlineProgress = 100) }
+            onOfflineImportComplete?.invoke()
             return
         }
         offlineQueue.clear()
@@ -861,7 +1125,7 @@ class PenManager(
             main.removeCallbacks(offlineWatchdog)
             currentNote = null
             update { it.copy(offlinePhase = OfflinePhase.IDLE, offlineProgress = 100) }
-            main.post { onOfflineImportComplete?.invoke() }
+            onOfflineImportComplete?.invoke()
             return
         }
         currentNote = note
@@ -895,6 +1159,7 @@ class PenManager(
      * se ignoran sin acusar, para que el boli deje de enviarla.
      */
     private fun handleOfflinePacket(data: ByteArray) {
+        if (currentNote == null || _state.value.offlinePhase != OfflinePhase.TRANSFERRING) return
         try {
             val chunk = Protocol.parseOfflineChunk(data)
             val note = currentNote
@@ -922,7 +1187,7 @@ class PenManager(
             if (chunk.transPosition == 2) finishOfflineNote()
         } catch (e: Exception) {
             log("⚠ Error parseando chunk offline: ${e.message}")
-            update { it.copy(error = "offline-parse") }
+            abortOffline("offline-parse")
         }
     }
 
@@ -939,13 +1204,22 @@ class PenManager(
         offlineBuffer.clear()
         if (note != null) {
             val total = offlineTotalStrokes
-            main.post { onOfflineNoteImported?.invoke(note, total) }
+            onOfflineNoteImported?.invoke(note, total)
         }
         requestNextOfflineNote()
     }
 
+    private fun abortOffline(error: String) {
+        // No hay id de solicitud: reconectar impide aceptar una lista/paquete tardío
+        // como parte de un volcado nuevo. No emitir éxito ni persistir el contador.
+        resetOfflineState()
+        retryOrFail()
+        update { it.copy(offlinePhase = OfflinePhase.IDLE, notes = null, error = error) }
+    }
+
     /** Descomprime datos zlib (cabecera estándar) a su tamaño original. */
     private fun inflateZlib(data: ByteArray, expectedSize: Int): ByteArray {
+        require(expectedSize in 0..0xffff) { "Invalid offline decompressed size" }
         val inflater = java.util.zip.Inflater()
         inflater.setInput(data)
         val out = java.io.ByteArrayOutputStream(maxOf(expectedSize, data.size))
@@ -953,9 +1227,11 @@ class PenManager(
         try {
             while (!inflater.finished()) {
                 val n = inflater.inflate(buf)
-                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+                require(n > 0 || inflater.finished()) { "Incomplete offline compressed stream" }
+                require(out.size() + n <= expectedSize) { "Offline compressed size mismatch" }
                 out.write(buf, 0, n)
             }
+            require(out.size() == expectedSize) { "Offline decompressed size mismatch" }
         } finally {
             inflater.end()
         }

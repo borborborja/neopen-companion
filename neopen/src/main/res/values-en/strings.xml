@@ -127,6 +127,9 @@
     <string name="pen_offline_title">Store offline</string>
     <string name="pen_offline_desc">Stores writing without the app open</string>
     <string name="pen_auto_shutdown">Auto power-off</string>
+    <string name="pen_setting_rejected">The pen rejected the change to “%1$s”. The last confirmed value is kept.</string>
+    <string name="pen_setting_timeout">The pen did not confirm the change to “%1$s”. The last confirmed value is kept.</string>
+    <string name="pen_setting_protocol_error">The pen returned an unexpected response while changing “%1$s”. The last confirmed value is kept.</string>
     <string name="pen_minutes">%1$d min</string>
     <string name="pen_mac">MAC: %1$s</string>
     <string name="pen_firmware">Firmware: %1$s</string>

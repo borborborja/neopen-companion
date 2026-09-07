@@ -126,11 +126,13 @@ object Protocol {
                 when {
                     b == STX -> { inFrame = true; escaped = false; buf.clear() }
                     !inFrame -> { /* ruido fuera de frame */ }
-                    b == ETX -> { inFrame = false; emit() }
+                    b == ETX -> { inFrame = false; if (!escaped) emit() }
                     escaped -> { buf.add((b xor 0x20).toByte()); escaped = false }
                     b == DLE -> escaped = true
                     else -> buf.add(b.toByte())
                 }
+                // La longitud del protocolo es uint16; nunca acumular ruido sin límite.
+                if (buf.size > 0xffff + 4) { inFrame = false; escaped = false; buf.clear() }
             }
         }
 
@@ -145,8 +147,8 @@ object Protocol {
             if (buf.size < idx + 2) return
             val len = (buf[idx].toInt() and 0xff) or ((buf[idx + 1].toInt() and 0xff) shl 8)
             idx += 2
-            val end = minOf(idx + len, buf.size)
-            val data = ByteArray(end - idx) { buf[idx + it] }
+            if (buf.size != idx + len) return
+            val data = ByteArray(len) { buf[idx + it] }
             onFrame(Frame(cmd, result, data))
         }
     }
@@ -210,6 +212,14 @@ object Protocol {
     /** Cambio de ajuste con valor short LE: data = [type, lo, hi]. */
     fun reqSettingShort(type: Int, value: Int): ByteArray =
         buildFrame(SETTING_CHANGE_REQUEST, byteArrayOf(type.toByte(), (value and 0xff).toByte(), ((value shr 8) and 0xff).toByte()))
+
+    /** SETTING_CHANGE_RESPONSE → tipo solicitado + confirmación (0 = éxito). */
+    data class SettingChangeResult(val settingType: Int, val successful: Boolean)
+
+    fun parseSettingChange(data: ByteArray): SettingChangeResult {
+        require(data.size >= 2) { "SETTING_CHANGE_RESPONSE incompleta (${data.size} bytes)" }
+        return SettingChangeResult(settingType = u8(data, 0), successful = u8(data, 1) == 0)
+    }
 
     fun reqOfflineNoteList(): ByteArray =
         buildFrame(OFFLINE_NOTE_LIST_REQUEST, byteArrayOf(0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte()))
@@ -341,12 +351,14 @@ object Protocol {
 
     /** OFFLINE_NOTE_LIST_RESPONSE → lista de (section, owner, note). */
     fun parseNoteList(data: ByteArray): List<OfflineNote> {
-        if (data.size < 2) return emptyList()
+        require(data.size >= 2) { "OFFLINE_NOTE_LIST_RESPONSE sin contador" }
         val count = u16(data, 0)
+        require(data.size >= 2 + count * 8) {
+            "OFFLINE_NOTE_LIST_RESPONSE incompleta: count=$count bytes=${data.size}"
+        }
         val out = ArrayList<OfflineNote>(count)
         var o = 2
         repeat(count) {
-            if (o + 8 > data.size) return out
             val section = u8(data, o + 3)
             val owner = u8(data, o) or (u8(data, o + 1) shl 8) or (u8(data, o + 2) shl 16)
             val note = i32(data, o + 4)
@@ -375,6 +387,7 @@ object Protocol {
 
     /** Parsea la cabecera del chunk offline y extrae sus bytes de datos (crudos). */
     fun parseOfflineChunk(d: ByteArray): OfflineChunk {
+        require(d.size >= 18) { "Truncated offline chunk header" }
         var o = 0
         val packetId = u16(d, o); o += 2
         val isCompressed = u8(d, o) == 1; o += 1
@@ -386,10 +399,11 @@ object Protocol {
         val note = i32(d, o); o += 4
         val strokeCount = u16(d, o); o += 2
         val size = if (isCompressed) afterSize else beforeSize
-        val end = minOf(o + size, d.size)
+        require(d.size == o + size) { "Offline chunk length mismatch" }
+        require(transPosition in 0..2) { "Invalid offline transfer position" }
         return OfflineChunk(
             packetId, isCompressed, beforeSize, afterSize, transPosition,
-            section, owner, note, strokeCount, d.copyOfRange(o, end),
+            section, owner, note, strokeCount, d.copyOfRange(o, o + size),
         )
     }
 
@@ -409,7 +423,7 @@ object Protocol {
         val out = ArrayList<Pair<Sobp, Stroke>>(strokeCount)
         var o = 0
         repeat(strokeCount) {
-            if (o + 27 > d.size) return out // cabecera de stroke = 27 bytes
+            require(o + 27 <= d.size) { "Truncated offline stroke header" }
             val page = i32(d, o); o += 4
             var time = u64(d, o); o += 8 // downTime
             o += 8 // upTime (no usado)
@@ -420,7 +434,7 @@ object Protocol {
             val sobp = Sobp(section, owner, note, page)
             val dots = ArrayList<Dot>(dotCount)
             for (j in 0 until dotCount) {
-                if (o + 16 > d.size) return out // cada dot = 16 bytes
+                require(o + 16 <= d.size) { "Truncated offline dot" }
                 val nTimeDelta = u8(d, o); o += 1
                 val force = u16(d, o); o += 2
                 val xi = u16(d, o); o += 2

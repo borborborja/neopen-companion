@@ -37,6 +37,7 @@ import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.db.OfflineNoteStateEntity
 import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.sync.SyncWorker
+import net.micapum.neopen.app.sync.PenPersistenceQueue
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.pen.KnownPen
@@ -233,6 +234,10 @@ class Graph(app: Application) {
     val connectorSync = LocalConnectorSync(this)
     private val workManager = WorkManager.getInstance(app)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val penPersistence = PenPersistenceQueue(scope)
+
+    /** Incluye páginas y contadores del último volcado antes de iniciar push→pull. */
+    suspend fun awaitPenPersistence(): Boolean = penPersistence.completion().await()
 
     /** Debounce del espejo a conectores (colapsa ráfagas de cambios). */
     @Volatile
@@ -255,17 +260,17 @@ class Graph(app: Application) {
 
     /** Conexión BLE al boli (una sola, compartida). Cada página → Room (+ sync si hay servidor). */
     val pen = PenManager(app) { page ->
-        scope.launch {
+        penPersistence.enqueue(requiresPreviousSuccess = false) {
             // En volcado offline llegan muchas páginas en ráfaga: NO sincronizamos ni
             // refrescamos widgets por página (lo hace una sola vez `onOfflineImportComplete`).
             // En tiempo real (una página cada vez) sí se sube/refresca al momento.
             val offline = page.source == "offline"
             if (localMode) {
                 repo.ingestPenPageLocal(page, lastSettings.offlineReimportPolicy)
-                syncStatus.markPenSync(System.currentTimeMillis())
+                if (!offline) syncStatus.markPenSync(System.currentTimeMillis())
             } else {
                 repo.ingestPenPage(page, lastSettings.offlineReimportPolicy)
-                syncStatus.markPenSync(System.currentTimeMillis())
+                if (!offline) syncStatus.markPenSync(System.currentTimeMillis())
                 if (!offline) syncNow()
             }
             if (!offline) {
@@ -336,7 +341,7 @@ class Graph(app: Application) {
         pen.onOfflineNoteImported = { note, total ->
             val mac = pen.state.value.mac
             if (mac != null) {
-                scope.launch {
+                penPersistence.enqueue {
                     db.offlineNoteState().upsert(
                         OfflineNoteStateEntity(
                             mac = mac,
@@ -350,8 +355,15 @@ class Graph(app: Application) {
                 }
             }
         }
+        pen.onOfflineImportStarted = { penPersistence.beginBatch() }
         pen.onOfflineImportComplete = {
+            val persisted = penPersistence.completion()
             scope.launch {
+                if (!persisted.await()) {
+                    pen.pushLog("⚠ Volcado no guardado por completo; se conserva la copia del boli")
+                    return@launch
+                }
+                syncStatus.markPenSync(System.currentTimeMillis())
                 if (!localMode) syncNow()
                 scheduleConnectorSync()
                 net.micapum.neopen.app.widget.NotebooksWidget.refresh(app)

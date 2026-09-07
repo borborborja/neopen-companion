@@ -26,8 +26,19 @@ matching `versionName` and a new `versionCode`.
 
 ## fdroiddata metadata template
 
-Copy this file to `fdroiddata/metadata/net.micapum.neopen.yml` and update the
-first `Builds` entry when submitting the app.
+The root `.fdroid.yml` is the build recipe. Its initial candidate points to the
+GitHub tag `v0.23.4`; automated updates still follow only explicit `fdroid-v*`
+tags. This does not submit the app to F-Droid or create an F-Droid release.
+The repository must be publicly accessible before any F-Droid submission;
+publishing these files does not change its visibility.
+
+`subdir` selects the app module and `output` is relative to it, following the
+[F-Droid metadata reference](https://f-droid.org/en/docs/Build_Metadata_Reference/).
+`-Pfdroid` excludes `:live` and ignores all release-signing environment variables,
+so the result is unsigned even on a machine configured for Play uploads.
+
+Copy the template below to `fdroiddata/metadata/net.micapum.neopen.yml` and review
+the candidate when submitting the app.
 
 ```yaml
 Categories:
@@ -53,9 +64,10 @@ RepoType: git
 Repo: https://github.com/borborborja/neopen-companion.git
 
 Builds:
-  - versionName: 0.21.6
-    versionCode: 30
-    commit: fdroid-v0.21.6
+  - versionName: 0.23.4
+    versionCode: 37
+    commit: v0.23.4
+    subdir: neopen
     gradle:
       - yes
     gradleprops:
@@ -64,11 +76,11 @@ Builds:
       - companion
       - live
       - neopen/signing
-    output: neopen/build/outputs/apk/release/neopen-release-unsigned.apk
+    output: build/outputs/apk/release/neopen-release-unsigned.apk
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^fdroid-v[0-9]+\.[0-9]+\.[0-9]+$
 UpdateCheckData: neopen/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
-CurrentVersion: 0.21.6
-CurrentVersionCode: 30
+CurrentVersion: 0.23.4
+CurrentVersionCode: 37
 ```

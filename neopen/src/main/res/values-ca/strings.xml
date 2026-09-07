@@ -127,6 +127,9 @@
     <string name="pen_offline_title">Desar offline</string>
     <string name="pen_offline_desc">Emmagatzema l\'escriptura sense l\'app oberta</string>
     <string name="pen_auto_shutdown">Apagada automàtica</string>
+    <string name="pen_setting_rejected">El boli ha rebutjat el canvi de «%1$s». Es conserva l\'últim valor confirmat.</string>
+    <string name="pen_setting_timeout">El boli no ha confirmat el canvi de «%1$s». Es conserva l\'últim valor confirmat.</string>
+    <string name="pen_setting_protocol_error">El boli ha retornat una resposta inesperada en canviar «%1$s». Es conserva l\'últim valor confirmat.</string>
     <string name="pen_minutes">%1$d min</string>
     <string name="pen_mac">MAC: %1$s</string>
     <string name="pen_firmware">Firmware: %1$s</string>

@@ -39,6 +39,21 @@ jobs:
       - name: Build debug APK (neopen)
         run: ./gradlew :neopen:assembleDebug --stacktrace
 
+      - name: Verificar candidato F-Droid sin firma ni módulo live
+        env:
+          # Debe ignorarse incluso cuando existe una clave local/de CI.
+          NEOPEN_KEYSTORE_PATH: signing/neopen-full.keystore
+          NEOPEN_KEYSTORE_PASSWORD: deliberately-invalid
+        run: |
+          ./gradlew -Pfdroid :neopen:assembleRelease --stacktrace
+          apk=neopen/build/outputs/apk/release/neopen-release-unsigned.apk
+          test -s "$apk"
+          test -x "$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          if "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify "$apk"; then
+            echo "Error: F-Droid debe recibir un APK sin firmar"
+            exit 1
+          fi
+
       - name: Renombrar APK
         run: cp neopen/build/outputs/apk/debug/neopen-debug.apk neopen-debug.apk
 

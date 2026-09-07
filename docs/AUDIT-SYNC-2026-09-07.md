@@ -1,10 +1,10 @@
 # Correcciones de la auditoría Android ↔ web — 2026-09-07
 
-> Registro de la verificación local previa a la publicación. Las correcciones
-> se preparan para **v0.23.4**, con snapshot fijado al mismo tag del servidor.
-> Los 33 tests de core citados abajo incluían 15 tests de cambios BLE locales que
-> quedan fuera de esta release; la publicación verifica también una copia limpia
-> del commit seleccionado. Véase `docs/RELEASE-v0.23.4.md`.
+> Registro de la verificación inicial de sincronización. Las correcciones se
+> incluyen en **v0.23.4**, con snapshot fijado al mismo tag del servidor.
+> Posteriormente el usuario autorizó auditar y publicar también los cambios BLE,
+> UI y F-Droid: véase `docs/AUDIT-BLE-2026-09-07.md`. Los recuentos inferiores
+> corresponden a la primera auditoría, antes de ampliar sus regresiones.
 
 ## Alcance
 
@@ -57,8 +57,9 @@ ANDROID_HOME=/home/borja/Android/Sdk ./gradlew checkApiContract \
 
 Actualizar servidor y app conjuntamente para usar la migración nueva. Un servidor
 antiguo devuelve 404 y la app conserva las filas y el outbox, mostrando el error.
-El snapshot OpenAPI está marcado como trabajo no publicado; no hay tag nuevo,
-push ni despliegue. Los rechazos permanentes permanecen pendientes hasta corregir
+El snapshot OpenAPI está fijado al tag coordinado v0.23.4 del servidor. La
+publicación en GitHub se autorizó después de esta auditoría; no incluye despliegue.
+Los rechazos permanentes permanecen pendientes hasta corregir
 su causa; no hay descarte automático ni nueva interfaz de resolución de conflictos.
 
 No se ha ejecutado la instrumentación en dispositivo físico ni verificado BLE con

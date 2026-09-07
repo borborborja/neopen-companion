@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">neopen</string>
     <string name="sync_widget_desc">Muestra el estado del boli, su batería y permite sincronizar o mantener la conexión.</string>
     <string name="notebooks_widget_desc">Muestra tus cuadernos y abre la app en la pestaña Cuadernos.</string>
@@ -126,6 +126,10 @@
     <string name="pen_offline_title">Guardar offline</string>
     <string name="pen_offline_desc">Almacena la escritura sin la app abierta</string>
     <string name="pen_auto_shutdown">Apagado automático</string>
+    <!-- El proyecto mantiene como idiomas vivos es/en/ca; el resto usa el fallback español. -->
+    <string name="pen_setting_rejected" tools:ignore="MissingTranslation">El boli rechazó el cambio de «%1$s». Se conserva el último valor confirmado.</string>
+    <string name="pen_setting_timeout" tools:ignore="MissingTranslation">El boli no confirmó el cambio de «%1$s». Se conserva el último valor confirmado.</string>
+    <string name="pen_setting_protocol_error" tools:ignore="MissingTranslation">El boli devolvió una respuesta inesperada al cambiar «%1$s». Se conserva el último valor confirmado.</string>
     <string name="pen_minutes">%1$d min</string>
     <string name="pen_mac">MAC: %1$s</string>
     <string name="pen_firmware">Firmware: %1$s</string>

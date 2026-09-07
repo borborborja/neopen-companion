@@ -21,6 +21,17 @@ como las versiones anteriores de este repositorio.
 - Confirmaciones transaccionales, protección de ediciones pendientes y 15
   regresiones de sincronización incorporadas a CI.
 
-Se publican las correcciones de auditoría; los cambios locales preexistentes de
-BLE, interfaz y F-Droid no forman parte de esta versión. BLE con bolígrafo físico
-sigue pendiente de verificación. El detalle está en `docs/AUDIT-SYNC-2026-09-07.md`.
+- Auditoría de los cambios BLE/UI antes excluidos: ajustes confirmados por el boli,
+  cola protegida frente a ACKs tardíos y reconexión con estado limpio.
+- Volcado offline iniciado por la respuesta de la lista, sin carreras entre UI,
+  autoimportación y workers. Un timeout no se anuncia como importación correcta.
+- Persistencia FIFO: páginas → contadores → sincronización. No se marca importada
+  una nota cuya escritura en Room haya fallado.
+- Se conservan las páginas pendientes al entrar en escritura en vivo y se mantiene
+  en cola la restauración de grabación offline al salir.
+- Interfaz con confirmaciones/errores en español, catalán e inglés.
+- Receta F-Droid actualizada: solo `:neopen`, sin ML Kit de `:live` y APK sin firma,
+  incluso con variables de firma configuradas. No supone publicación en F-Droid.
+
+BLE con bolígrafo físico sigue pendiente de verificación. Detalles en
+`docs/AUDIT-SYNC-2026-09-07.md` y `docs/AUDIT-BLE-2026-09-07.md`.
