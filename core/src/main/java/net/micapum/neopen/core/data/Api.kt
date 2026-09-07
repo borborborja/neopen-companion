@@ -1,8 +1,7 @@
 package net.micapum.neopen.core.data
 
 import android.os.Build
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.squareup.moshi.Json
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody
@@ -37,7 +36,7 @@ data class StrokeDto(
     val startTime: Long,
     val endTime: Long,
     val dots: List<DotDto>,
-    val color: Int? = null,
+    @ArgbColor val color: Int? = null,
     val width: Float? = null,
 )
 
@@ -167,6 +166,13 @@ data class CapturePatchDto(
     val kind: String? = null,
     val paper: PaperDto? = null,
     val sealed: Boolean? = null,
+    @Json(ignore = true) val paperSpecified: Boolean = false,
+)
+
+/** Migración aditiva por ids estables, sin fusionar revisiones por SOBP. */
+data class MigrationDto(
+    val captures: List<CaptureDto> = emptyList(),
+    val notebooks: List<NotebookDto> = emptyList(),
 )
 
 /** Cuerpo de PUT /api/captures/{id}/transcription (transcripción hecha en el teléfono). */
@@ -306,6 +312,9 @@ data class ServerSettingsDto(
 
 /** Cliente del servidor neopen. La contraseña va en la cabecera por petición. */
 interface NeopenApi {
+    @PUT("api/migration")
+    suspend fun migrate(@Header("X-Auth-Password") password: String, @Body body: MigrationDto): Response<Unit>
+
     /** Healthcheck público (sin auth): comprueba que el servidor responde. */
     @GET("api/health")
     suspend fun health(): HealthDto
@@ -540,7 +549,7 @@ object ApiFactory {
 
     fun create(serverUrl: String, baseClient: OkHttpClient? = null): NeopenApi {
         val base = serverUrl.trim().let { if (it.endsWith("/")) it else "$it/" }
-        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+        val moshi = apiMoshi()
         val client = (baseClient?.newBuilder() ?: OkHttpClient.Builder())
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

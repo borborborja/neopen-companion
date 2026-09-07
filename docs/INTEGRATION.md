@@ -20,6 +20,12 @@ El ecosistema son **dos repos** que evolucionan juntos:
   `./gradlew checkApiContract` comprueba checksum, versiones y que toda anotación
   Retrofit exista en la especificación.
 
+  Durante la corrección de sincronización del 2026-09-07, `sourceState` indica
+  explícitamente un snapshot de trabajo todavía **no publicado**: `serverTag`
+  identifica la versión base, no un tag que contenga estos cambios. El SHA sigue
+  verificando la copia byte a byte del OpenAPI del servidor. Antes de publicar,
+  versionar ambos repos y volver a fijar el manifiesto al tag definitivo.
+
 - **Cliente Android**: `core/src/main/java/net/micapum/neopen/core/data/Api.kt`
   (interfaz Retrofit `NeopenApi` + DTOs Moshi). `ApiFactory.create(baseUrl)` lo
   construye. La contraseña va en la cabecera **`X-Auth-Password`** en cada petición
@@ -42,7 +48,18 @@ así que un desajuste **falla en silencio** (no rompe el build, pero el dato se 
 - **OCR**: `POST /api/captures/:id/transcribe` (modo Servidor).
 - **OCR failover**: `PUT /api/captures/:id/transcription` — sube una transcripción
   hecha en el teléfono. **Añadido en `neopen` v0.21.0.** Si el servidor es anterior,
-  devuelve 404 y la op del outbox se descarta (la transcripción local ya se aplicó).
+  devuelve 404 y la operación se conserva pendiente con error (no se pierde la
+  transcripción local). Actualizar el servidor antes de reintentar.
+- **Vinculación local→servidor**: `PUT /api/migration` recibe como máximo un
+  cuaderno y una captura por petición, con ids estables y metadatos completos.
+  Se encolan primero los cuadernos. Es aditivo e idempotente por id, sin fusión
+  por SOBP ni borrado de Room. Los reintentos vuelven a tomar un snapshot local,
+  incluyendo las ediciones hechas después de un fallo. Requiere la actualización
+  conjunta aún no publicada de esta auditoría; no usa `/api/import`.
+- **Reintentos**: no se elimina ningún rechazo HTTP del outbox. Solo DELETE+404
+  cuenta como éxito idempotente. `Retry-After` queda persistido junto al error;
+  no se realiza pull mientras haya escrituras pendientes. El modo LOCAL no
+  ejecuta push/pull aunque conserve credenciales.
 - **Importar config**: `GET /api/settings` — devuelve la config del servidor **sin
   secretos** (los enmascara como `{configured, locked}`). Lo usa el botón "Importar
   del servidor" para rellenar lo no-secreto.

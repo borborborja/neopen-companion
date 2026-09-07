@@ -31,9 +31,9 @@ jobs:
       - name: Validar contrato, esquemas y permisos
         run: ./gradlew checkApiContract checkFileModes --stacktrace
 
-      # Tests unitarios de :core (lógica pura). Protege regresiones; hoy ya están en verde.
-      - name: Tests unitarios (:core)
-        run: ./gradlew :core:testDebugUnitTest --stacktrace
+      # Incluye regresiones del outbox/delta con Room y HTTP simulado (Robolectric).
+      - name: Tests unitarios (core y sincronización Android)
+        run: ./gradlew :core:testDebugUnitTest :neopen:testDebugUnitTest --stacktrace
 
       # App unificada (completa, con modo "solo puente" integrado).
       - name: Build debug APK (neopen)

@@ -258,6 +258,9 @@ interface OutboxDao {
     @Query("SELECT * FROM outbox ORDER BY localId ASC LIMIT :limit")
     suspend fun peek(limit: Int): List<OutboxEntity>
 
+    @Query("SELECT * FROM outbox WHERE targetId = :targetId ORDER BY localId ASC")
+    suspend fun forTarget(targetId: String): List<OutboxEntity>
+
     @Query("DELETE FROM outbox WHERE localId = :localId")
     suspend fun deleteById(localId: Long)
 
@@ -266,6 +269,9 @@ interface OutboxDao {
 
     @Query("UPDATE outbox SET targetId = :newId WHERE targetId = :oldId")
     suspend fun repointTarget(oldId: String, newId: String)
+
+    @Query("UPDATE outbox SET payloadJson = :payload WHERE localId = :localId")
+    suspend fun updatePayload(localId: Long, payload: String)
 
     @Query("SELECT COUNT(*) FROM outbox")
     fun observeCount(): Flow<Int>

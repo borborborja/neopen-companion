@@ -664,6 +664,37 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/migration:
+    put:
+      tags: [admin]
+      summary: Vincula contenido local sin borrar otros datos ni fusionar revisiones por SOBP
+      description: >-
+        Upsert aditivo por id estable. Reintentar el mismo registro no lo duplica.
+        Enviar primero los cuadernos y después sus capturas. Los ids son obligatorios;
+        una captura con notebookId debe referenciar un cuaderno existente o incluido.
+        Conserva OCR, formato, archivo, posición, sellado, clon y aviso de solapamiento.
+        Un servidor anterior sin esta operación responde 404; el cliente conserva su outbox.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [captures, notebooks]
+              properties:
+                captures:
+                  type: array
+                  maxItems: 1
+                  items: { $ref: "#/components/schemas/MigrationCapture" }
+                notebooks:
+                  type: array
+                  maxItems: 1
+                  items: { $ref: "#/components/schemas/MigrationNotebook" }
+      responses:
+        "204": { description: Registros guardados }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/notebooks/unclassified:
     get:
       tags: [notebooks]
@@ -1461,6 +1492,12 @@ components:
       properties:
         startTime: { type: integer, description: ms epoch del primer dot }
         endTime: { type: integer, description: ms epoch del último dot }
+        color:
+          type: [integer, "null"]
+          minimum: -2147483648
+          maximum: 4294967295
+          description: ARGB de 32 bits. Acepta uint32 del SDK web y devuelve int32 con signo.
+        width: { type: [number, "null"], exclusiveMinimum: 0 }
         dots:
           type: array
           items: { $ref: "#/components/schemas/Dot" }
@@ -1511,6 +1548,42 @@ components:
         targetCaptureId:
           type: string
           description: Captura destino cuando mergeMode = "mergeTarget".
+
+    MigrationCapture:
+      allOf:
+        - $ref: "#/components/schemas/CreateCaptureInput"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string }
+            rev: { type: integer, minimum: 0, description: Ignorada; el servidor asigna su propia revisión. }
+            importedAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+            position: { type: integer, minimum: 0 }
+            kind: { type: [string, "null"] }
+            sealed: { type: boolean }
+            clonedFrom: { type: [string, "null"] }
+            transcription: { oneOf: [{ $ref: "#/components/schemas/OcrResult" }, { type: "null" }] }
+            overlap: { oneOf: [{ $ref: "#/components/schemas/Overlap" }, { type: "null" }] }
+
+    MigrationNotebook:
+      type: object
+      required: [id, name, color]
+      properties:
+        id: { type: string }
+        rev: { type: integer, minimum: 0, description: Ignorada; el servidor asigna su propia revisión. }
+        name: { type: string }
+        color: { type: string }
+        tags: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        paper: { oneOf: [{ $ref: "#/components/schemas/PaperSize" }, { type: "null" }] }
+        paperSource: { type: string }
+        bookKey: { type: [string, "null"] }
+        coverUrl: { type: [string, "null"] }
+        unclassified: { type: boolean }
+        custom: { type: boolean }
+        category: { type: [string, "null"] }
 
     Capture:
       allOf:
@@ -1601,6 +1674,10 @@ components:
     Capabilities:
       type: object
       properties:
+        revision:
+          type: integer
+          minimum: 0
+          description: Revisión global de capturas y cuadernos, incluidos ediciones y borrados desde cualquier cliente.
         connectors:
           type: array
           items:

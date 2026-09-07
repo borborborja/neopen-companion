@@ -2,7 +2,6 @@ package net.micapum.neopen.app.data
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import net.micapum.neopen.core.data.CapturePatchDto
 import net.micapum.neopen.core.data.TranscriptionPushDto
 import net.micapum.neopen.core.data.CreateCaptureInput
@@ -99,7 +98,7 @@ data class PageBackground(
 
 /** Adaptadores Moshi compartidos para (de)serializar los campos JSON de Room. */
 object Json {
-    val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    val moshi: Moshi = net.micapum.neopen.core.data.apiMoshi()
 
     private val stringListType = Types.newParameterizedType(List::class.java, String::class.java)
     private val strokeListType = Types.newParameterizedType(List::class.java, StrokeDto::class.java)
@@ -117,6 +116,7 @@ object Json {
     val reorder = moshi.adapter(ReorderDto::class.java)
     val createCapture = moshi.adapter(CreateCaptureInput::class.java)
     val transcriptionPush = moshi.adapter(TranscriptionPushDto::class.java)
+    val migration = moshi.adapter(net.micapum.neopen.core.data.MigrationDto::class.java)
 
     fun tags(json: String?): List<String> =
         json?.let { runCatching { stringList.fromJson(it) }.getOrNull() }.orEmpty()

@@ -374,9 +374,12 @@ class Graph(app: Application) {
         // Mantén al día el flag de auto-volcado y el modo local desde los ajustes.
         scope.launch {
             settings.flow.collect {
+                val scheduleChanged = lastSettings.appMode != it.appMode || lastSettings.syncMode != it.syncMode || lastSettings.syncIntervalMin != it.syncIntervalMin
                 lastSettings = it
                 pen.autoImportOnConnect = it.importOnConnect
                 localMode = it.appMode == AppMode.LOCAL
+                if (scheduleChanged) applySyncSchedule(it.syncMode, it.syncIntervalMin)
+                if (localMode) workManager.cancelUniqueWork("neopen-sync-now")
                 // El umbral de superposición lo lee la ingesta local (modo local).
                 repo.overlapConfig = OverlapConfig(
                     enabled = it.overlapEnabled,
@@ -404,7 +407,7 @@ class Graph(app: Application) {
 
     /** Programa (o cancela) la sincronización periódica según el modo de sync. */
     fun applySyncSchedule(mode: SyncMode, intervalMin: Int) {
-        if (mode == SyncMode.INTERVAL) {
+        if (mode == SyncMode.INTERVAL && lastSettings.appMode != AppMode.LOCAL) {
             val periodic = PeriodicWorkRequestBuilder<SyncWorker>(
                 intervalMin.coerceAtLeast(15).toLong(), TimeUnit.MINUTES,
             ).setConstraints(netConstraints())
@@ -435,12 +438,13 @@ class Graph(app: Application) {
 
     /** Sincronización inmediata (al abrir la app, recuperar red o editar). */
     fun syncNow() {
+        scheduleConnectorSync()
+        if (localMode) return
         val once = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(netConstraints())
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .build()
-        workManager.enqueueUniqueWork("neopen-sync-now", ExistingWorkPolicy.REPLACE, once)
-        scheduleConnectorSync()
+        workManager.enqueueUniqueWork("neopen-sync-now", ExistingWorkPolicy.APPEND_OR_REPLACE, once)
     }
 
     /**

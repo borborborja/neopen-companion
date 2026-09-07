@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.core.pen.PenStatus
 
@@ -26,7 +28,7 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
             delay(3_000)
         }
         val r = g.sync.sync()
-        if (r.ok) g.syncStatus.markServerSync(System.currentTimeMillis())
+        if (r.ok && g.settings.flow.first().appMode != AppMode.LOCAL) g.syncStatus.markServerSync(System.currentTimeMillis())
         return if (r.ok) Result.success() else Result.retry()
     }
 
