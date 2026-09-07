@@ -20,11 +20,8 @@ El ecosistema son **dos repos** que evolucionan juntos:
   `./gradlew checkApiContract` comprueba checksum, versiones y que toda anotación
   Retrofit exista en la especificación.
 
-  Durante la corrección de sincronización del 2026-09-07, `sourceState` indica
-  explícitamente un snapshot de trabajo todavía **no publicado**: `serverTag`
-  identifica la versión base, no un tag que contenga estos cambios. El SHA sigue
-  verificando la copia byte a byte del OpenAPI del servidor. Antes de publicar,
-  versionar ambos repos y volver a fijar el manifiesto al tag definitivo.
+  La corrección de sincronización se publica conjuntamente en **v0.23.4**:
+  el manifiesto fija el tag de esa versión y el SHA de la copia canónica.
 
 - **Cliente Android**: `core/src/main/java/net/micapum/neopen/core/data/Api.kt`
   (interfaz Retrofit `NeopenApi` + DTOs Moshi). `ApiFactory.create(baseUrl)` lo
@@ -54,8 +51,8 @@ así que un desajuste **falla en silencio** (no rompe el build, pero el dato se 
   cuaderno y una captura por petición, con ids estables y metadatos completos.
   Se encolan primero los cuadernos. Es aditivo e idempotente por id, sin fusión
   por SOBP ni borrado de Room. Los reintentos vuelven a tomar un snapshot local,
-  incluyendo las ediciones hechas después de un fallo. Requiere la actualización
-  conjunta aún no publicada de esta auditoría; no usa `/api/import`.
+  incluyendo las ediciones hechas después de un fallo. Requiere servidor
+  **v0.23.4 o posterior**; no usa `/api/import`.
 - **Reintentos**: no se elimina ningún rechazo HTTP del outbox. Solo DELETE+404
   cuenta como éxito idempotente. `Retry-After` queda persistido junto al error;
   no se realiza pull mientras haya escrituras pendientes. El modo LOCAL no

@@ -1,5 +1,11 @@
 # Correcciones de la auditoría Android ↔ web — 2026-09-07
 
+> Registro de la verificación local previa a la publicación. Las correcciones
+> se preparan para **v0.23.4**, con snapshot fijado al mismo tag del servidor.
+> Los 33 tests de core citados abajo incluían 15 tests de cambios BLE locales que
+> quedan fuera de esta release; la publicación verifica también una copia limpia
+> del commit seleccionado. Véase `docs/RELEASE-v0.23.4.md`.
+
 ## Alcance
 
 Corrección de los ocho defectos confirmados en la auditoría Android/web, sobre

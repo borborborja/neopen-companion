@@ -1,6 +1,5 @@
 {
   "serverRepository": "borborborja/neopen",
-  "serverTag": "v0.23.3",
-  "sourceState": "unreleased-working-tree; serverTag identifies the base version",
-  "sha256": "382f7558f07bd86def152c6532055e25e8413e4ba839542665bc2390cb0f802c"
+  "serverTag": "v0.23.4",
+  "sha256": "11eb4c1bd83ed43e2fbac49e827bdd0f69011562a5f83de4cc3bf8b708c3748b"
 }
