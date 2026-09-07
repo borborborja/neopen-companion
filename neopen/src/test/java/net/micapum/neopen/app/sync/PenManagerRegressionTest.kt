@@ -1,6 +1,8 @@
 package net.micapum.neopen.app.sync
 
 import android.app.Application
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import java.time.Duration
@@ -108,6 +110,18 @@ class PenManagerRegressionTest {
         assertEquals(false, pen.state.value.settings.beep)
         assertFalse(pen.state.value.connected)
         assertTrue(pen.state.value.pendingSettings.contains(PenSettingKey.BEEP))
+    }
+
+    @Test fun switchingPensDiscardsRecoveryIntentForThePreviousDevice() {
+        pen.setBeep(true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
+        pen.setBeep(false)
+        assertTrue(pen.state.value.pendingSettings.isNotEmpty())
+        val next = BluetoothAdapter.getDefaultAdapter().getRemoteDevice("AA:BB:CC:DD:EE:FF")
+        PenManager::class.java.getDeclaredMethod("connect", BluetoothDevice::class.java)
+            .apply { isAccessible = true }.invoke(pen, next)
+        assertTrue(pen.state.value.pendingSettings.isEmpty())
+        assertNull(pen.state.value.settings.beep)
     }
 
     @Test fun rejectsFailedAndTruncatedSettingInfoWithoutAuthorizing() {

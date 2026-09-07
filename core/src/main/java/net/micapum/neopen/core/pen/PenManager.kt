@@ -280,10 +280,20 @@ class PenManager(
     }
 
     private fun connect(device: BluetoothDevice) {
+        if (target?.address != device.address) {
+            // Las intenciones de recuperación pertenecen al boli anterior, no al
+            // siguiente dispositivo que aparezca durante un escaneo manual.
+            resetSettingChanges()
+            offlineDataBeforeLive = null
+            update { it.copy(settings = PenSettings(), pendingSettings = emptySet(), settingIssue = null) }
+        }
+        gatt?.close()
+        gatt = null
+        resetOfflineState()
+        update { it.copy(status = PenStatus.CONNECTING, offlinePhase = OfflinePhase.IDLE, notes = null) }
         target = device
         connectAttempts = 0
         autoUnlockTried = false
-        reassembler = Protocol.FrameReassembler(::onFrame)
         openGatt(device)
     }
 
