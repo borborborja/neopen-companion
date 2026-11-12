@@ -1,0 +1,1 @@
+Actualiza el contrato del servidor neopen 0.24.0 y prepara la compilación F-Droid. Android conserva sus cuadernos locales, la captura del boli y la sincronización, sin migración de Room. El acceso MCP opcional se activa en los ajustes web del servidor y ofrece solo las notas sincronizadas con él.

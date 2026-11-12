@@ -16,8 +16,8 @@ Normal GitHub releases keep using tags such as `v0.21.6`.
 F-Droid should only follow explicit tags:
 
 ```bash
-git tag fdroid-v0.22.0
-git push origin fdroid-v0.22.0
+git tag -a fdroid-v0.24.0 -m "F-Droid candidate 0.24.0 (39)"
+git push origin fdroid-v0.24.0
 ```
 
 Use an `fdroid-vX.Y.Z` tag only for versions that are mature enough for F-Droid.
@@ -26,9 +26,9 @@ matching `versionName` and a new `versionCode`.
 
 ## fdroiddata metadata template
 
-The root `.fdroid.yml` is the build recipe. Its current candidate points to the
-GitHub tag `v0.23.5`; automated updates still follow only explicit `fdroid-v*`
-tags. This does not submit the app to F-Droid or create an F-Droid release.
+The root `.fdroid.yml` is the build recipe. Its current candidate is
+**0.24.0 (version code 39)**, selected by `fdroid-v0.24.0`; automated updates
+follow only explicit `fdroid-v*` tags. This does not submit the app to F-Droid or create an F-Droid release.
 The repository must be publicly accessible before any F-Droid submission;
 publishing these files does not change its visibility.
 
@@ -36,51 +36,42 @@ publishing these files does not change its visibility.
 [F-Droid metadata reference](https://f-droid.org/en/docs/Build_Metadata_Reference/).
 `-Pfdroid` excludes `:live` and ignores all release-signing environment variables,
 so the result is unsigned even on a machine configured for Play uploads.
+The recipe removes the retired `companion` module, `live` and the shared debug
+keystore directory with `rm` before scanning and building the source.
 
-Copy the template below to `fdroiddata/metadata/net.micapum.neopen.yml` and review
-the candidate when submitting the app.
+The ready-to-submit recipe is
+[`docs/fdroid/net.micapum.neopen.yml`](fdroid/net.micapum.neopen.yml), identical to
+[`.fdroid.yml`](../.fdroid.yml). Copy it to
+`fdroiddata/metadata/net.micapum.neopen.yml` when proposing inclusion. Descriptions,
+screenshots, icon and version changelogs are in `fastlane/metadata/android`.
 
-```yaml
-Categories:
-  - Writing
-License: GPL-3.0-only
-AuthorName: neopen contributors
-SourceCode: https://github.com/borborborja/neopen-companion
-IssueTracker: https://github.com/borborborja/neopen-companion/issues
-Changelog: https://github.com/borborborja/neopen-companion/releases
+Submit the metadata through a merge request to
+[fdroiddata](https://gitlab.com/fdroid/fdroiddata), or request packaging through
+[Requests for Packaging](https://gitlab.com/fdroid/rfp). Submission does not mean
+acceptance: maintainers review licensing, dependencies, metadata and the build.
+See the [submission guide](https://f-droid.org/docs/Submitting_to_F-Droid_Quick_Start_Guide/).
 
-AutoName: neopen
-Summary: Capture Neo smartpen handwriting locally or on a neopen server
-Description: |-
-  neopen is an Android companion for Neo smartpens.
+The F-Droid APK is built from source and signed by F-Droid, independently of the
+GitHub debug APK. Its signing key can differ, so switching distribution channels
+may require uninstalling the existing package; export notebooks first.
 
-  It captures handwriting over Bluetooth LE, imports the pen's offline memory,
-  and stores pages either locally on the phone or on a self-hosted neopen server.
+## Dependencies and network features
 
-  This is an independent community project and is not affiliated with NeoLAB
-  Convergence Inc.
+The build uses JDK 17 and Gradle 8.9. Runtime dependencies come from Google Maven
+and Maven Central: AndroidX/Compose/Room/WorkManager/Glance, Kotlin coroutines,
+Retrofit/Moshi/OkHttp, Coil, Commons Net and JSch. The F-Droid variant contains no
+ML Kit, Firebase SDK, Google Play Services SDK, advertising SDK or analytics SDK.
 
-RepoType: git
-Repo: https://github.com/borborborja/neopen-companion.git
+The recipe discloses the following network features in `MaintainerNotes`:
 
-Builds:
-  - versionName: 0.23.5
-    versionCode: 38
-    commit: v0.23.5
-    subdir: neopen
-    gradle:
-      - yes
-    gradleprops:
-      - fdroid
-    scandelete:
-      - companion
-      - live
-      - neopen/signing
-    output: build/outputs/apk/release/neopen-release-unsigned.apk
+- `core/.../pen/PaperLookup.kt` requests notebook geometry XML from NeoLAB's public
+  Firebase Storage bucket through ordinary HTTPS/OkHttp. It sends paper
+  identifiers, not handwritten strokes. Capture works with fallback geometry
+  when that service is unavailable.
+- OCR, LanguageTool, server synchronization and storage connectors are optional
+  and use endpoints configured by the user. Local capture and notebooks require
+  no account or server.
 
-AutoUpdateMode: Version
-UpdateCheckMode: Tags ^fdroid-v[0-9]+\.[0-9]+\.[0-9]+$
-UpdateCheckData: neopen/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
-CurrentVersion: 0.23.5
-CurrentVersionCode: 38
-```
+These disclosures let the F-Droid reviewers decide the appropriate AntiFeatures.
+A compatible Neo smartpen and Ncode paper are needed to capture handwriting; this
+is an independent implementation, not an official NeoLAB application.

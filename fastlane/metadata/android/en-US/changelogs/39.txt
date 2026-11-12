@@ -1,0 +1,1 @@
+Updates the server API contract for neopen 0.24.0 and prepares the F-Droid build. Android keeps its existing local notebooks, pen capture and synchronization, without a Room database migration. Optional MCP access is enabled in the server's web settings and exposes only notes synchronized with that server.
