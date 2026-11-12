@@ -21,6 +21,7 @@ data class Stroke(
     val dots: List<Dot>,
     val color: Int? = null,
     val width: Float? = null,
+    val penId: String? = null,
 )
 
 /** Estilo de trazo (color ARGB + grueso) configurable por boli. Defaults = render actual. */

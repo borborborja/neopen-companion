@@ -64,6 +64,16 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.25.0** — Libros de Ncode Studio por secciones con asignaciones por
+  bolígrafo, previsualización, contador de códigos, operaciones por outbox y
+  resolución explícita de conflictos hacia instancias actuales o históricas.
+  Identidad de origen por trazo y asignación congelada por lote offline.
+  Copias ZIP por streaming y migración Room 9→10 aditiva, conservando los datos.
+  Studio permanece oculto hasta confirmar su activación en el servidor; apagarlo
+  conserva libros, operaciones pendientes y diseños históricos. Las funciones
+  nuevas requieren servidor v0.25.0; `versionCode=40`. La comprobación física de
+  libretas impresas con el M1+ permanece pendiente y no se anuncia como validada.
+
 - **v0.23.5** — Conserva la tinta al desconectar o cambiar de boli y durante la
   vinculación con el servidor; protege los datos y operaciones pendientes al
   cambiar de URL. Reimportaciones explícitas, contadores offline reiniciados al

@@ -17,6 +17,10 @@ import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.db.PenPageUserActionEntity
 import net.micapum.neopen.app.db.SyncMetaEntity
 import net.micapum.neopen.core.data.AnchorDto
+import net.micapum.neopen.core.data.paper
+import net.micapum.neopen.core.data.StudioBookDto
+import net.micapum.neopen.core.data.canonicalPenId
+import net.micapum.neopen.core.data.normalizePenIdentifier
 import net.micapum.neopen.core.data.CapturePatchDto
 import net.micapum.neopen.core.data.CaptureDto
 import net.micapum.neopen.core.data.ChangesResponseDto
@@ -76,6 +80,7 @@ object PenPageAction {
  * (Fase 3) se encolan en el outbox.
  */
 class NeopenRepository(private val db: NeopenDb) {
+    val studio = StudioBooksRepository(db)
     private val penIngestion = Mutex()
     var onLocalCleared: () -> Unit = {}
 
@@ -86,10 +91,12 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun persistPenPage(
         page: StrokePage,
         policy: OfflineReimportPolicy,
+        binding: StudioBookDto? = null,
+        bindingFrozen: Boolean = false,
         isLocal: suspend () -> Boolean,
     ): Boolean = penIngestion.withLock {
         val local = isLocal()
-        if (local) ingestPenPageLocalUnlocked(page, policy) else ingestPenPageUnlocked(page, policy)
+        if (local) ingestPenPageLocalUnlocked(page, policy, binding, bindingFrozen) else ingestPenPageUnlocked(page, policy, binding, bindingFrozen)
         local
     }
 
@@ -137,7 +144,7 @@ class NeopenRepository(private val db: NeopenDb) {
 
     /** Aplica un lote de cambios del servidor a Room y avanza el cursor. */
     suspend fun applyChanges(resp: ChangesResponseDto, now: Long) = db.withTransaction {
-        check(db.outbox().peek(1).isEmpty()) { "Hay cambios locales pendientes" }
+        check(db.outbox().peek(Int.MAX_VALUE).all { StudioOutbox.requiresStudio(it.kind) }) { "Hay cambios locales pendientes" }
         if (resp.reset) {
             db.captures().clear()
             db.notebooks().clear()
@@ -162,6 +169,8 @@ class NeopenRepository(private val db: NeopenDb) {
             db.notebooks().clear()
             db.outbox().clear()
             db.backgrounds().clear()
+            db.studio().clearBooks()
+            db.studio().clearMetadata()
             db.penPageUserActions().clear()
             db.offlineImportWarnings().clear()
             db.offlineNoteState().clear()
@@ -172,7 +181,7 @@ class NeopenRepository(private val db: NeopenDb) {
     }
 
     suspend fun hasLibraryOrPendingChanges(): Boolean =
-        db.captures().getAll().isNotEmpty() || db.notebooks().getAll().isNotEmpty() || db.outbox().peek(1).isNotEmpty()
+        db.captures().getAll().isNotEmpty() || db.notebooks().getAll().isNotEmpty() || db.studio().books().isNotEmpty() || db.outbox().peek(1).isNotEmpty()
 
     // --- Fondos (plantilla detrás de los trazos) -------------------------------
 
@@ -188,8 +197,9 @@ class NeopenRepository(private val db: NeopenDb) {
         db.backgrounds().observeForBook(bookKey).map { rows -> rows.firstOrNull { it.scope == "book" }?.toDomain() }
 
     /** Fondo que aplica a una hoja (página > cuaderno), reactivo a cambios en Room. */
-    fun observeSheetBackground(bookKey: String, page: Int): Flow<PageBackground?> =
-        db.backgrounds().observeForBook(bookKey).map { rows ->
+    fun observeSheetBackground(bookKey: String, page: Int, bookInstanceId: String? = null): Flow<PageBackground?> =
+        db.backgrounds().observeForBook(bookKey).map { allRows ->
+            val rows = allRows.filter { it.bookInstanceId == bookInstanceId }
             (rows.firstOrNull { it.scope == "page" && it.page == page } ?: rows.firstOrNull { it.scope == "book" })?.toDomain()
         }
 
@@ -279,12 +289,14 @@ class NeopenRepository(private val db: NeopenDb) {
 
     /** Sella/reabre una hoja (modo completo): optimista + outbox PATCH. */
     suspend fun setCaptureSealed(id: String, sealed: Boolean) = db.withTransaction {
+        if (!sealed && db.captures().getById(id)?.bookInstanceId?.let { instance -> studio.cachedBooks().flatMap { it.instances }.any { it.id == instance && it.closedAt != null } } == true) return@withTransaction
         db.captures().setSealed(id, sealed, nowIso())
         enqueue(OutboxKind.PATCH_CAPTURE, id, Json.capturePatch.toJson(CapturePatchDto(sealed = sealed)))
     }
 
     /** Sella/reabre una hoja (modo local, sin servidor). */
     suspend fun setCaptureSealedLocal(id: String, sealed: Boolean) {
+        if (!sealed && db.captures().getById(id)?.bookInstanceId?.let { instance -> studio.cachedBooks().flatMap { it.instances }.any { it.id == instance && it.closedAt != null } } == true) return
         db.captures().setSealed(id, sealed, nowIso())
     }
 
@@ -397,7 +409,8 @@ class NeopenRepository(private val db: NeopenDb) {
                     position = 0,
                     paperJson = e.paperJson,
                     kind = e.kind,
-                    sealed = false,
+                    sealed = e.sealed,
+                    penId = e.penId, bookInstanceId = e.bookInstanceId, assignmentId = e.assignmentId, assignmentRevision = e.assignmentRevision,
                 ),
             )
         }
@@ -499,18 +512,25 @@ class NeopenRepository(private val db: NeopenDb) {
         reimportPolicy: OfflineReimportPolicy = OfflineReimportPolicy.ASK,
     ) = penIngestion.withLock { ingestPenPageUnlocked(page, reimportPolicy) }
 
-    private suspend fun ingestPenPageUnlocked(page: StrokePage, reimportPolicy: OfflineReimportPolicy) {
+    private suspend fun ingestPenPageUnlocked(page: StrokePage, reimportPolicy: OfflineReimportPolicy, binding: StudioBookDto? = null, bindingFrozen: Boolean = false) {
         val s = page.sobp
+        page.penId?.let { studio.registerPen(it) }
+        val knownPens = studio.cachedPens()
+        val origin = canonicalPenId(page.penId, knownPens) ?: page.penId?.let(::normalizePenIdentifier)
+        val assigned = if (bindingFrozen) binding else studio.resolve(s.section, s.owner, s.book, page.penId)
         val strokes = page.strokes.map { st ->
-            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
+            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width, canonicalPenId(st.penId, knownPens) ?: st.penId?.let(::normalizePenIdentifier) ?: origin)
         }
         val name = "Nota ${s.section}.${s.owner}.${s.book}.${s.page}"
         // Detección del formato real (NeoLAB) para sembrar el del cuaderno nuevo:
         // así las hojas salen con las proporciones correctas sin intervención.
-        val paper = PaperLookup.lookup(s.section, s.owner, s.book, s.page)
+        val paper = assigned?.paper() ?: if (studio.hasCode(s.section, s.owner, s.book)) null else PaperLookup.lookup(s.section, s.owner, s.book, s.page)
         val input = CreateCaptureInput(
             sobp = SobpDto(s.section, s.owner, s.book, s.page),
             source = page.source,
+            penId = origin,
+            bookInstanceId = assigned?.instanceId,
+            assignmentId = assigned?.assignmentId, assignmentRevision = assigned?.assignmentRevision,
             capturedAt = page.capturedAt,
             name = name,
             strokes = strokes,
@@ -536,6 +556,7 @@ class NeopenRepository(private val db: NeopenDb) {
             strokesJson = Json.strokesJson(strokes),
             paperJson = Json.paperJson(paper),
             destination = "inbox",
+            penId = origin, bookInstanceId = assigned?.instanceId, assignmentId = assigned?.assignmentId, assignmentRevision = assigned?.assignmentRevision,
         )
         enqueueCreateCapture(input, entity)
     }
@@ -551,7 +572,9 @@ class NeopenRepository(private val db: NeopenDb) {
         syncRemote: Boolean,
     ): Boolean {
         val s = page.sobp
-        val action = db.penPageUserActions().getBySobpKey(sobpKey(s.section, s.owner, s.book, s.page)) ?: return false
+        if (input.bookInstanceId == null && studio.hasCode(s.section, s.owner, s.book)) return false
+        val actionKey = input.bookInstanceId?.let { "$it:${s.page}" } ?: sobpKey(s.section, s.owner, s.book, s.page)
+        val action = db.penPageUserActions().getBySobpKey(actionKey) ?: return false
         if (action.action != PenPageAction.DELETED && action.action != PenPageAction.MOVED) return false
         val warningId = offlineWarningId(s.section, s.owner, s.book, s.page, strokes)
         if (db.offlineImportWarnings().getResolved(warningId) != null) return true
@@ -597,6 +620,7 @@ class NeopenRepository(private val db: NeopenDb) {
             sobp = SobpDto(warning.section, warning.owner, warning.book, warning.page),
             source = page.source,
             capturedAt = warning.capturedAt,
+            penId = strokes.mapNotNull { it.penId }.distinct().singleOrNull(),
             name = warning.name,
             strokes = strokes,
             paper = paper,
@@ -616,6 +640,7 @@ class NeopenRepository(private val db: NeopenDb) {
             sobp = SobpDto(warning.section, warning.owner, warning.book, warning.page),
             source = warning.source,
             capturedAt = warning.capturedAt,
+            penId = strokes.mapNotNull { it.penId }.distinct().singleOrNull(),
             name = warning.name,
             strokes = strokes,
             paper = Json.paperOf(warning.paperJson),
@@ -640,18 +665,25 @@ class NeopenRepository(private val db: NeopenDb) {
         reimportPolicy: OfflineReimportPolicy = OfflineReimportPolicy.ASK,
     ) = penIngestion.withLock { ingestPenPageLocalUnlocked(page, reimportPolicy) }
 
-    private suspend fun ingestPenPageLocalUnlocked(page: StrokePage, reimportPolicy: OfflineReimportPolicy) {
+    private suspend fun ingestPenPageLocalUnlocked(page: StrokePage, reimportPolicy: OfflineReimportPolicy, binding: StudioBookDto? = null, bindingFrozen: Boolean = false) {
         val s = page.sobp
-        val bookKey = "${s.section}.${s.owner}.${s.book}"
-        val detected = PaperLookup.lookup(s.section, s.owner, s.book, s.page)
+        val knownPens = studio.cachedPens()
+        val origin = canonicalPenId(page.penId, knownPens) ?: page.penId?.let(::normalizePenIdentifier)
+        val assigned = if (bindingFrozen) binding else studio.resolve(s.section, s.owner, s.book, page.penId)
+        val staleBinding = assigned != null && bindingFrozen && studio.cachedBooks().none { it.instanceId == assigned.instanceId && it.assignmentId == assigned.assignmentId && it.status == "ready" }
+        val studioCode = studio.hasCode(s.section, s.owner, s.book)
+        val bookKey = assigned?.instanceId?.let { "instance:$it" } ?: "${s.section}.${s.owner}.${s.book}"
+        val detected = assigned?.paper() ?: if (studioCode) null else PaperLookup.lookup(s.section, s.owner, s.book, s.page)
         val incoming = page.strokes.map { st ->
-            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
+            StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width, canonicalPenId(st.penId, knownPens) ?: st.penId?.let(::normalizePenIdentifier) ?: origin)
         }
         val now = nowIso()
         val name = "Nota ${s.section}.${s.owner}.${s.book}.${s.page}"
         val input = CreateCaptureInput(
             sobp = SobpDto(s.section, s.owner, s.book, s.page),
             source = page.source,
+            penId = origin, bookInstanceId = assigned?.instanceId,
+            assignmentId = assigned?.assignmentId, assignmentRevision = assigned?.assignmentRevision,
             capturedAt = page.capturedAt,
             name = name,
             strokes = incoming,
@@ -661,7 +693,8 @@ class NeopenRepository(private val db: NeopenDb) {
             return
         }
         val nb = db.notebooks().findByBookKey(bookKey) ?: createLocalNotebook(bookKey, detected)
-        val existing = db.captures().findBySobp(s.section, s.owner, s.book, s.page)
+        val existing = if (staleBinding) null else assigned?.instanceId?.let { db.captures().findByInstance(it, s.page) }
+            ?: if (!studioCode) db.captures().findBySobp(s.section, s.owner, s.book, s.page) else null
         if (existing != null) {
             val cur = Json.strokes(existing.strokesJson)
             val fresh = freshReimportStrokes(cur, incoming)
@@ -686,7 +719,9 @@ class NeopenRepository(private val db: NeopenDb) {
                     updatedAt = now,
                     name = name,
                     strokesJson = Json.strokesJson(incoming),
-                    destination = "notebook",
+                    penId = origin, bookInstanceId = assigned?.instanceId, assignmentId = assigned?.assignmentId, assignmentRevision = assigned?.assignmentRevision,
+                    destination = if (staleBinding || (studioCode && assigned == null)) "inbox" else "notebook",
+                    sealed = staleBinding,
                     notebookId = nb.id,
                     paperJson = nb.paperJson ?: Json.paperJson(detected),
                 ),
@@ -764,7 +799,7 @@ class NeopenRepository(private val db: NeopenDb) {
             ?: capture.notebook
         db.penPageUserActions().upsert(
             PenPageUserActionEntity(
-                sobpKey = sobpKey(capture.section, capture.owner, capture.book, capture.page),
+                sobpKey = capture.bookInstanceId?.let { "$it:${capture.page}" } ?: sobpKey(capture.section, capture.owner, capture.book, capture.page),
                 section = capture.section,
                 owner = capture.owner,
                 book = capture.book,
@@ -805,6 +840,7 @@ class NeopenRepository(private val db: NeopenDb) {
             name = name,
             strokesJson = Json.strokesJson(strokes),
             paperJson = Json.paperJson(paper),
+            penId = input.penId, bookInstanceId = input.bookInstanceId, assignmentId = input.assignmentId, assignmentRevision = input.assignmentRevision,
             destination = "inbox",
         )
         if (syncRemote) enqueueCreateCapture(input.copy(mergeMode = "forceNew"), entity) else db.captures().upsertOne(entity)
@@ -883,7 +919,7 @@ class NeopenRepository(private val db: NeopenDb) {
         val raw = buildString {
             append(sobpKey(section, owner, book, page))
             strokes.sortedBy { it.startTime }.forEach { st ->
-                append('|').append(st.startTime).append(':').append(st.endTime).append(':').append(st.dots.size)
+                append('|').append(st.penId).append(':').append(st.startTime).append(':').append(st.endTime).append(':').append(st.dots.size)
             }
         }
         return "offline-" + sha1(raw)
@@ -895,6 +931,19 @@ class NeopenRepository(private val db: NeopenDb) {
     }
 
     // --- Drenaje del outbox (lo usa SyncEngine.push) ---------------------------
+
+    /** La resolución explícita confirma primero el destino antes de retirar la captura pendiente. */
+    suspend fun confirmStudioConflict(result: net.micapum.neopen.core.data.StudioConflictResolutionDto) = db.withTransaction {
+        val pending = db.outbox().peek(Int.MAX_VALUE).filter { it.kind == OutboxKind.CREATE_CAPTURE && it.lastError?.contains(result.conflict.id) == true }
+        for (op in pending) {
+            if (result.capture != null) acknowledge(op, capture = result.capture)
+            else {
+                op.targetId?.let { db.captures().setSealed(it, true, nowIso()) }
+                db.outbox().deleteById(op.localId)
+            }
+        }
+        result.capture?.let { applyServerCapture(it) }
+    }
 
     suspend fun outboxPeek(limit: Int): List<OutboxEntity> = db.outbox().peek(limit)
     suspend fun outboxDelete(localId: Long) = db.outbox().deleteById(localId)

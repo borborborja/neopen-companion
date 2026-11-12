@@ -1,14 +1,15 @@
 openapi: 3.1.0
 info:
   title: neopen API
-  version: "0.24.0"
+  version: "0.25.0"
   description: |
     Contrato de la API del servidor neopen, pensado como **fuente de verdad para
     clientes nativos** (companion Android/iOS) además del frontend web.
 
     El cometido de un companion es: conectar por BLE al Neo smartpen M1+, captar
     los trazos (live u offline) y **subirlos en crudo** a `POST /api/captures`.
-    El **servidor archiva** automáticamente cada hoja en su cuaderno (por SOBP):
+    El **servidor archiva** cada hoja por bolígrafo, SOBP y asignación vigente;
+    los libros compartidos fusionan después por instancia y página:
     el cliente NO necesita conocer la lógica de cuadernos ni de formato.
 
     Mantén esta versión en sync con `packages/shared/src/index.ts` y los esquemas
@@ -652,18 +653,26 @@ paths:
   /api/export:
     get:
       tags: [admin]
-      summary: Exporta una copia completa de capturas, cuadernos y portadas
+      summary: Exporta copia completa; ZIP v2 incluye libros, bolígrafos y recursos privados
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [zip] } }
       responses:
-        "200": { description: Copia JSON completa }
+        "200":
+          description: JSON heredado o ZIP v2 con PDF, recetas y diseños
+          content:
+            application/json: { schema: { type: object } }
+            application/zip: { schema: { type: string, format: binary } }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
   /api/import:
     post:
       tags: [admin]
-      summary: Restaura una copia completa reemplazando el contenido actual
+      summary: Restaura JSON antiguo o ZIP v2 sin reactivar asignaciones cerradas posteriormente
       requestBody:
         required: true
         content:
+          application/zip:
+            schema: { type: string, format: binary }
           application/json:
             schema: { type: object }
       responses:
@@ -1081,6 +1090,7 @@ paths:
     put:
       tags: [studio]
       summary: Crea o reemplaza un anclaje
+      description: Los fondos básicos permanecen disponibles; autoría mediante el campo studio requiere STUDIO_ENABLED=true.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1089,6 +1099,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "200": { description: Anclaje guardado }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1134,6 +1145,7 @@ paths:
       tags: [studio]
       summary: Lista generaciones recientes
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "200": { description: Generaciones recientes }
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
@@ -1145,6 +1157,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "201": { description: Generación guardada }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1156,6 +1169,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "204": { description: Eliminada }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
@@ -1164,6 +1178,7 @@ paths:
       tags: [studio]
       summary: Lista presets de Studio
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "200": { description: Presets }
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
@@ -1175,6 +1190,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "201": { description: Preset guardado }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1186,6 +1202,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "204": { description: Eliminado }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
@@ -1194,6 +1211,7 @@ paths:
       tags: [studio]
       summary: Lista calendarios importados
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "200": { description: Calendarios }
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
@@ -1205,6 +1223,7 @@ paths:
           multipart/form-data:
             schema: { type: object }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "201": { description: Calendario importado }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1219,6 +1238,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "201": { description: Calendario añadido }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1235,6 +1255,7 @@ paths:
           application/json:
             schema: { type: object }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "200": { description: Calendario actualizado }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -1244,6 +1265,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "204": { description: Eliminado }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
@@ -1254,6 +1276,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "200": { description: Calendario refrescado }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1268,6 +1291,7 @@ paths:
           multipart/form-data:
             schema: { type: object }
       responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
         "200": { description: PDF y asignación SOBP }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -2047,6 +2071,644 @@ paths:
         "405":
           description: Método no permitido
 
+  /api/studio/profiles:
+    get:
+      tags:
+      - studio
+      summary: Perfiles y límites contrastados
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudioNcodeProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+  /api/studio/books:
+    get:
+      tags:
+      - studio
+      summary: Lista libros y asignaciones (metadatos; PDF bajo demanda)
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudioBook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: includeArchived
+        in: query
+        schema:
+          type: boolean
+      - name: includeDeleted
+        in: query
+        schema:
+          type: boolean
+    post:
+      tags:
+      - studio
+      summary: Reserva un libro, una instancia y su ámbito atómicamente
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioBook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudioBookCreateInput'
+  /api/studio/books/{id}:
+    get:
+      tags:
+      - studio
+      summary: Consulta libro, secciones, instancias y asignación vigente
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioBook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags:
+      - studio
+      summary: Renombra, archiva o cambia un ámbito con revisión
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioBook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudioBookPatchInput'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags:
+      - studio
+      summary: Retira este libro y sus asignaciones; conserva manuscritos e histórico
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '204':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: rev
+        in: query
+        required: true
+        schema:
+          type: integer
+  /api/studio/books/{id}/transfer:
+    post:
+      tags:
+      - studio
+      summary: Retira bolígrafos del origen y los asigna al destino en una transacción
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioBook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudioBookTransferInput'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/books/{id}/artifacts:
+    post:
+      tags:
+      - studio
+      summary: Congela los archivos generados si sigue vigente la reserva
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioBook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudioBookArtifactsInput'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/books/{id}/recipe:
+    get:
+      tags:
+      - studio
+      summary: Descarga receta congelada
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioBookRecipeExport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/books/{id}/pdf:
+    get:
+      tags:
+      - studio
+      summary: Descarga bytes guardados del PDF de impresión
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/books/{id}/design:
+    get:
+      tags:
+      - studio
+      summary: Descarga bytes guardados del PDF lógico de diseño sin micropuntos
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/instances/{id}:
+    get:
+      tags:
+      - studio
+      summary: Recupera la plantilla histórica por instancia
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioBookInstance'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/assets/uploads:
+    post:
+      tags:
+      - studio
+      summary: Inicia carga privada reanudable por partes de 8 MiB
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioAssetUpload'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudioAssetUploadInput'
+  /api/studio/assets/uploads/{id}:
+    get:
+      tags:
+      - studio
+      summary: Consulta partes recibidas para reanudar
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioAssetUpload'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/assets/uploads/{id}/parts/{index}:
+    put:
+      tags:
+      - studio
+      summary: Guarda idempotentemente una parte binaria
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '204':
+          description: OK
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              maxLength: 8388608
+  /api/studio/assets/uploads/{id}/complete:
+    post:
+      tags:
+      - studio
+      summary: Verifica tamaño, hash y PDF antes de guardar el recurso
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioAsset'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/assets/{id}:
+    get:
+      tags:
+      - studio
+      summary: Lee un recurso privado autenticado e inmutable
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/pens/{id}/aliases:
+    post:
+      tags:
+      - studio
+      summary: Vincula explícitamente otro identificador del mismo bolígrafo sin fusionar por nombre
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PenInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - identifier
+              properties:
+                identifier:
+                  type: string
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+  /api/studio/capture-conflicts:
+    get:
+      tags:
+      - studio
+      summary: Lecturas conservadas pendientes de resolución explícita
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudioCaptureConflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+  /api/studio/capture-conflicts/{id}/resolve:
+    post:
+      tags:
+      - studio
+      summary: Incorpora al destino actual o histórico elegido, o descarta un lote pendiente
+      responses:
+        "403": { $ref: "#/components/responses/StudioDisabled" }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - conflict
+                properties:
+                  capture:
+                    $ref: '#/components/schemas/Capture'
+                  conflict:
+                    $ref: '#/components/schemas/StudioCaptureConflict'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Revisión atrasada, solapamiento o asignación ambigua. No se activa ni mezcla silenciosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioApiError'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - action
+              properties:
+                action:
+                  type: string
+                  enum:
+                  - assign
+                  - discard
+                penId:
+                  type: string
+                  format: uuid
+                bookInstanceId:
+                  type: string
+                  format: uuid
+                  description: Destino histórico explícito; una instancia cerrada recibe capturas selladas.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+
+
+  /api/captures/{id}/design:
+    get:
+      tags: [captures]
+      summary: Lee el PDF de diseño original vinculado a una captura
+      description: >-
+        Lectura ordinaria autenticada. Devuelve el diseño lógico histórico sin micropuntos
+        y sin generar nada ni activar Studio; disponible también con STUDIO_ENABLED=false.
+        La página lógica se obtiene de capture.sobp.page. Una captura sin diseño responde 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: PDF original de diseño de la instancia de esta captura
+          content:
+            application/pdf: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     WebSession:
@@ -2084,6 +2746,16 @@ components:
       description: Contraseña única del servidor (env `APP_PASSWORD`). Alternativa heredada a la sesión web en `/api/*`, salvo health público y endpoints que requieren cookie explícitamente. Nunca se acepta como token MCP.
 
   responses:
+    StudioDisabled:
+      description: Studio no está activado en el servidor; las operaciones y sus datos permanecen conservados.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, code]
+            properties:
+              error: { type: string }
+              code: { const: STUDIO_DISABLED }
     Unauthorized:
       description: Falta autenticación válida; la contraseña es incorrecta o la sesión web ha caducado
       content:
@@ -2349,6 +3021,9 @@ components:
       description: Trazo continuo (PEN_DOWN, N×PEN_MOVE, PEN_UP).
       required: [startTime, endTime, dots]
       properties:
+        penId:
+          type: string
+          description: UUID canónico del bolígrafo que produjo este trazo.
         startTime: { type: integer, description: ms epoch del primer dot }
         endTime: { type: integer, description: ms epoch del último dot }
         color:
@@ -2376,6 +3051,16 @@ components:
       type: object
       required: [sobp, source, capturedAt, name, strokes]
       properties:
+        penId:
+          type: string
+        bookInstanceId:
+          type: string
+          format: uuid
+        assignmentId:
+          type: string
+          format: uuid
+        assignmentRevision:
+          type: integer
         sobp: { $ref: "#/components/schemas/Sobp" }
         notebook:
           type: string
@@ -2491,6 +3176,13 @@ components:
       type: object
       required: [mac, firstSeen, lastSeen]
       properties:
+        id:
+          type: string
+          format: uuid
+        identifiers:
+          type: array
+          items:
+            type: string
         mac: { type: string }
         alias: { type: string }
         name: { type: string }
@@ -2533,6 +3225,15 @@ components:
     Capabilities:
       type: object
       properties:
+        studio:
+          type: object
+          required: [enabled]
+          description: Activación explícita del servidor. Ausente o enabled=false mantiene Studio oculto en clientes.
+          properties:
+            enabled: { type: boolean, default: false }
+            mode: { type: string, enum: [sample, genuine] }
+            anchoring: { type: boolean, default: false }
+            sampleUniquePages: { type: integer, minimum: 0 }
         revision:
           type: integer
           minimum: 0
@@ -2605,3 +3306,635 @@ components:
         targetCaptureId: { type: [string, "null"] }
         status: { type: string, enum: [pending, discarded, newCapture, merged] }
         resolvedAt: { type: [string, "null"], format: date-time }
+
+    StudioPenScope:
+      oneOf:
+      - type: object
+        required:
+        - mode
+        - excludedPenIds
+        properties:
+          mode:
+            const: all
+          excludedPenIds:
+            type: array
+            items:
+              type: string
+              format: uuid
+      - type: object
+        required:
+        - mode
+        - penIds
+        properties:
+          mode:
+            const: selected
+          penIds:
+            type: array
+            items:
+              type: string
+              format: uuid
+      description: 'Todos incluye bolígrafos futuros. No hay prioridades: los ámbitos del mismo código deben ser disjuntos.'
+    StudioNcodeProfile:
+      type: object
+      required:
+      - id
+      - version
+      - validation
+      - section
+      - owner
+      - bookMin
+      - bookMax
+      - pageMin
+      - pageMax
+      - patternValidated
+      - penValidated
+      - sources
+      properties:
+        id:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        validation:
+          type: string
+          enum:
+          - corpus
+          - pen
+        label:
+          type: string
+        section:
+          type: integer
+          minimum: 0
+        owner:
+          type: integer
+          minimum: 0
+        bookMin:
+          type: integer
+          minimum: 0
+        bookMax:
+          type: integer
+          minimum: 0
+        pageMin:
+          type: integer
+          minimum: 0
+        pageMax:
+          type: integer
+          minimum: 0
+        coordinateMax:
+          type: integer
+          minimum: 0
+        dpi:
+          type: integer
+          minimum: 0
+        patternValidated:
+          type: boolean
+        penValidated:
+          type: boolean
+        sources:
+          type: array
+          items:
+            type: string
+            format: uri
+    StudioBookSection:
+      oneOf:
+      - type: object
+        required:
+        - id
+        - label
+        - kind
+        - config
+        properties:
+          id:
+            type: string
+          label:
+            type: string
+          kind:
+            const: template
+          config:
+            type: object
+            description: StudioConfig completo, con fechas o cantidad, idioma, márgenes y estilo. Se congela al reservar.
+      - type: object
+        required:
+        - id
+        - label
+        - kind
+        - assetId
+        - fromPage
+        - toPage
+        properties:
+          id:
+            type: string
+          label:
+            type: string
+          kind:
+            const: pdf
+          assetId:
+            type: string
+            format: uuid
+          fromPage:
+            type: integer
+            minimum: 1
+          toPage:
+            type: integer
+            minimum: 1
+      - type: object
+        required:
+        - id
+        - label
+        - kind
+        - pageCount
+        properties:
+          id:
+            type: string
+          label:
+            type: string
+          kind:
+            const: blank
+          pageCount:
+            type: integer
+            minimum: 1
+            maximum: 512
+    StudioBookRecipe:
+      type: object
+      required:
+      - version
+      - format
+      - sections
+      - numbering
+      - print
+      - borderSeed
+      properties:
+        version:
+          const: 1
+        format:
+          type: string
+          enum:
+          - a4
+          - a5
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudioBookSection'
+        cover:
+          type: object
+          required:
+          - title
+          properties:
+            title:
+              type: string
+            subtitle:
+              type: string
+        numbering:
+          type: object
+          required:
+          - enabled
+          - start
+          properties:
+            enabled:
+              type: boolean
+            start:
+              type: integer
+              minimum: 1
+        print:
+          type: object
+          required:
+          - mode
+          - signaturePages
+          properties:
+            mode:
+              type: string
+              enum:
+              - simplex
+              - duplex
+              - booklet
+            signaturePages:
+              type: integer
+              minimum: 4
+              maximum: 64
+              multipleOf: 4
+              default: 32
+        eventsByDay:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: object
+        borderSeed:
+          type: integer
+          minimum: 0
+          maximum: 4294967295
+      description: Orden lógico inmutable. Portada, blancos y rellenos cuentan dentro de 512. El cuadernillo requiere
+        A5; SOBP.page es posición menos uno. Los eventos utilizados quedan congelados.
+    StudioBookInstance:
+      type: object
+      required:
+      - id
+      - bookId
+      - notebookId
+      - createdAt
+      - recipe
+      - profileId
+      - name
+      - section
+      - owner
+      - book
+      - format
+      properties:
+        profileSnapshot:
+          $ref: "#/components/schemas/StudioNcodeProfile"
+        id:
+          type: string
+          format: uuid
+        bookId:
+          type: string
+          format: uuid
+        notebookId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+        recipe:
+          $ref: '#/components/schemas/StudioBookRecipe'
+        profileId:
+          type: string
+        name:
+          type: string
+        section:
+          type: integer
+        owner:
+          type: integer
+        book:
+          type: integer
+        format:
+          type: string
+          enum:
+          - a4
+          - a5
+        designAssetId:
+          type: string
+          format: uuid
+        pdfAssetId:
+          type: string
+          format: uuid
+      description: Instantánea histórica. Una instancia cerrada nunca se reabre; los fondos se resuelven por esta referencia.
+    StudioBook:
+      type: object
+      required:
+      - id
+      - rev
+      - requestId
+      - name
+      - profileId
+      - section
+      - owner
+      - book
+      - format
+      - recipe
+      - pageCount
+      - status
+      - archived
+      - penScope
+      - createdAt
+      - updatedAt
+      properties:
+        profileSnapshot:
+          $ref: "#/components/schemas/StudioNcodeProfile"
+        id:
+          type: string
+          format: uuid
+        rev:
+          type: integer
+          minimum: 1
+        requestId:
+          type: string
+        name:
+          type: string
+        profileId:
+          type: string
+        section:
+          type: integer
+        owner:
+          type: integer
+        book:
+          type: integer
+        format:
+          type: string
+          enum:
+          - a4
+          - a5
+        recipe:
+          $ref: '#/components/schemas/StudioBookRecipe'
+        pageCount:
+          type: integer
+          minimum: 1
+          maximum: 512
+        status:
+          type: string
+          enum:
+          - generating
+          - ready
+          - failed
+          - deleted
+        archived:
+          type: boolean
+        penScope:
+          $ref: '#/components/schemas/StudioPenScope'
+        instanceId:
+          type: string
+          format: uuid
+        notebookId:
+          type: string
+          format: uuid
+        assignmentId:
+          type: string
+          format: uuid
+        assignmentRevision:
+          type: integer
+        pdfAssetId:
+          type: string
+          format: uuid
+        designAssetId:
+          type: string
+          format: uuid
+        previewAssetId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        deletedAt:
+          type: string
+          format: date-time
+        instances:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudioBookInstance'
+    StudioBookCreateInput:
+      type: object
+      required:
+      - requestId
+      - name
+      - profileId
+      - recipe
+      properties:
+        requestId:
+          type: string
+        name:
+          type: string
+        profileId:
+          type: string
+        recipe:
+          $ref: '#/components/schemas/StudioBookRecipe'
+        penScope:
+          $ref: '#/components/schemas/StudioPenScope'
+        book:
+          type: integer
+      description: Sin book se reserva automáticamente un código libre para el ámbito en una transacción. Sin penScope
+        se usa todos. requestId hace idempotente el reintento del mismo borrador.
+    StudioBookPatchInput:
+      type: object
+      required:
+      - rev
+      properties:
+        rev:
+          type: integer
+          minimum: 0
+        name:
+          type: string
+        archived:
+          type: boolean
+        penScope:
+          $ref: '#/components/schemas/StudioPenScope'
+    StudioBookTransferInput:
+      type: object
+      required:
+      - expectedRev
+      - fromBookId
+      - fromRev
+      - penIds
+      properties:
+        expectedRev:
+          type: integer
+        fromBookId:
+          type: string
+          format: uuid
+        fromRev:
+          type: integer
+        penIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    StudioAssignmentConflict:
+      type: object
+      required:
+      - bookId
+      - name
+      - penIds
+      - sobp
+      properties:
+        bookId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        penIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        sobp:
+          type: object
+          required:
+          - section
+          - owner
+          - book
+          properties:
+            section:
+              type: integer
+            owner:
+              type: integer
+            book:
+              type: integer
+    StudioApiError:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        conflictId:
+          type: string
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudioAssignmentConflict'
+        details: {}
+    StudioAsset:
+      type: object
+      required:
+      - id
+      - kind
+      - name
+      - mime
+      - size
+      - sha256
+      - createdAt
+      properties:
+        bookId:
+          type: string
+          format: uuid
+          description: Propietario obligatorio en artefactos generados; los originales importados se pueden compartir.
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - source-pdf
+          - print-pdf
+          - design-pdf
+          - preview
+        name:
+          type: string
+        mime:
+          type: string
+        size:
+          type: integer
+        sha256:
+          type: string
+        pageCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    StudioAssetUploadInput:
+      type: object
+      required:
+      - kind
+      - name
+      - mime
+      - size
+      properties:
+        kind:
+          type: string
+          enum:
+          - source-pdf
+          - print-pdf
+          - design-pdf
+          - preview
+        name:
+          type: string
+        mime:
+          type: string
+          enum:
+          - application/pdf
+          - image/png
+          - image/jpeg
+          - image/webp
+        size:
+          type: integer
+          minimum: 1
+          maximum: 268435456
+        sha256:
+          type: string
+          pattern: ^[a-fA-F0-9]{64}$
+        bookId:
+          type: string
+          format: uuid
+    StudioAssetUpload:
+      type: object
+      required:
+      - id
+      - partSize
+      - receivedParts
+      properties:
+        id:
+          type: string
+          format: uuid
+        partSize:
+          type: integer
+          enum:
+          - 8388608
+        receivedParts:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+    StudioBookArtifactsInput:
+      type: object
+      required:
+      - expectedRev
+      - pdfAssetId
+      - designAssetId
+      properties:
+        expectedRev:
+          type: integer
+        pdfAssetId:
+          type: string
+          format: uuid
+        designAssetId:
+          type: string
+          format: uuid
+        previewAssetId:
+          type: string
+          format: uuid
+    StudioCaptureConflict:
+      type: object
+      required:
+      - id
+      - code
+      - createdAt
+      - input
+      - status
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        input:
+          $ref: '#/components/schemas/CreateCaptureInput'
+        status:
+          type: string
+          enum:
+          - pending
+          - assigned
+          - discarded
+        captureId:
+          type: string
+          format: uuid
+
+    StudioBookRecipeExport:
+      type: object
+      required: [version, bookId, recipe, pages]
+      properties:
+        version: { const: 1 }
+        bookId: { type: string, format: uuid }
+        profile: { $ref: "#/components/schemas/StudioNcodeProfile" }
+        recipe: { $ref: "#/components/schemas/StudioBookRecipe" }
+        pages:
+          type: array
+          items:
+            type: object
+            required: [logicalIndex, kind, sobp]
+            properties:
+              logicalIndex: { type: integer, minimum: 0, maximum: 511 }
+              kind: { type: string, enum: [cover, template, pdf, blank] }
+              sectionId: { type: string }
+              sectionPageIndex: { type: integer }
+              sourcePdfPageIndex: { type: integer }
+              dates: { type: array, items: { type: string, format: date } }
+              printedNumber: { type: integer }
+              sobp: { $ref: "#/components/schemas/Sobp" }

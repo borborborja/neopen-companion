@@ -16,4 +16,4 @@ fun resolveOfflineReimport(policy: OfflineReimportPolicy, mergeTargetAvailable: 
     }
 
 fun freshReimportStrokes(existing: List<StrokeDto>, incoming: List<StrokeDto>): List<StrokeDto> =
-    incoming.filter { n -> existing.none { it.startTime == n.startTime && it.dots.size == n.dots.size } }
+    incoming.filter { n -> existing.none { it.penId == n.penId && it.startTime == n.startTime && it.dots.size == n.dots.size } }

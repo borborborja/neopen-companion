@@ -205,6 +205,7 @@ private fun penDotColor(status: PenStatus): Color = when (status) {
 private enum class HomeTab(@StringRes val titleRes: Int, val icon: ImageVector) {
     INBOX(R.string.tab_inbox, Icons.Filled.Inbox),
     NOTEBOOKS(R.string.tab_notebooks, Icons.Filled.Book),
+    BOOKS(R.string.studio_books, Icons.Filled.Collections),
     PEN(R.string.tab_pen, Icons.Filled.Draw),
     SETTINGS(R.string.tab_settings, Icons.Filled.Settings),
 }
@@ -216,6 +217,7 @@ fun AppRoot(
     initialNotebookId: String? = null,
 ) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val studioEnabled by vm.studioEnabled.collectAsStateWithLifecycle()
     if (!settings.setupComplete) {
         SetupWizard(vm)
         return
@@ -230,10 +232,11 @@ fun AppRoot(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         vm.startForegroundPenReconnect()
+        vm.startStudioChecks()
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> vm.startForegroundPenReconnect()
-                Lifecycle.Event.ON_STOP -> vm.stopForegroundPenReconnect()
+                Lifecycle.Event.ON_START -> { vm.startForegroundPenReconnect(); vm.startStudioChecks() }
+                Lifecycle.Event.ON_STOP -> { vm.stopForegroundPenReconnect(); vm.stopStudioChecks() }
                 else -> Unit
             }
         }
@@ -241,6 +244,7 @@ fun AppRoot(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             vm.stopForegroundPenReconnect()
+            vm.stopStudioChecks()
         }
     }
     LaunchedEffect(settings.knownPens, settings.lockedPenMac, settings.forgottenPens) {
@@ -257,13 +261,16 @@ fun AppRoot(
     val tabs = if (settings.appMode == AppMode.BRIDGE) {
         listOf(HomeTab.PEN, HomeTab.SETTINGS)
     } else {
-        listOf(HomeTab.INBOX, HomeTab.NOTEBOOKS, HomeTab.PEN, HomeTab.SETTINGS)
+        buildList { add(HomeTab.INBOX); add(HomeTab.NOTEBOOKS); if (studioEnabled) add(HomeTab.BOOKS); add(HomeTab.PEN); add(HomeTab.SETTINGS) }
     }
     var current by rememberSaveable(settings.appMode) {
         mutableStateOf(
             if (initialTab == TAB_NOTEBOOKS && HomeTab.NOTEBOOKS in tabs) HomeTab.NOTEBOOKS else tabs.first(),
         )
     }
+
+    val activeTab = if (current in tabs) current else tabs.first()
+    LaunchedEffect(tabs) { if (current !in tabs) current = tabs.first() }
 
     // Pantallas a pantalla completa (solo en modo completo).
     val pageId = openPageId
@@ -285,9 +292,9 @@ fun AppRoot(
     val penState by vm.penState.collectAsStateWithLifecycle()
 
     Scaffold(
-        topBar = { HomeBar(stringResource(current.titleRes), syncing, pending, status != null, onSync = vm::syncNow) },
+        topBar = { HomeBar(stringResource(activeTab.titleRes), syncing, pending, status != null, onSync = vm::syncNow) },
         floatingActionButton = {
-            if (current == HomeTab.NOTEBOOKS) {
+            if (activeTab == HomeTab.NOTEBOOKS) {
                 FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, stringResource(R.string.notebook_new)) }
             }
         },
@@ -295,7 +302,7 @@ fun AppRoot(
             NavigationBar {
                 tabs.forEach { t ->
                     NavigationBarItem(
-                        selected = current == t,
+                        selected = activeTab == t,
                         onClick = { current = t },
                         icon = {
                             if (t == HomeTab.PEN) {
@@ -321,10 +328,11 @@ fun AppRoot(
         },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            when (current) {
+            when (activeTab) {
                 HomeTab.INBOX -> InboxScreen(vm, notebooks, onOpenPage = { openPageId = it })
                 HomeTab.NOTEBOOKS -> NotebooksScreen(vm, notebooks, onOpen = { openNotebookId = it }, onOpenPage = { openPageId = it }, onEdit = { editingId = it })
                 HomeTab.PEN -> PenTabContent(vm)
+                HomeTab.BOOKS -> StudioBooksScreen(vm)
                 HomeTab.SETTINGS -> SettingsScreen(vm)
             }
         }
@@ -976,10 +984,12 @@ private fun PageLargeCard(vm: MainViewModel, page: Capture, notebooks: List<Note
 private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Notebook>, onBack: () -> Unit) {
     val capture by vm.captureFlow(captureId).collectAsStateWithLifecycle(initialValue = null)
     val c = capture
+    val books by vm.studioBooks.collectAsStateWithLifecycle()
+    val studioEnabled by vm.studioEnabled.collectAsStateWithLifecycle()
     var bgOpen by remember { mutableStateOf(false) }
     val bk = c?.let { "${it.section}.${it.owner}.${it.book}" }
-    val sheetBg by remember(bk, c?.page) {
-        if (bk != null && c != null) vm.observeSheetBackground(bk, c.page) else flowOf(null)
+    val sheetBg by remember(bk, c?.page, c?.bookInstanceId) {
+        if (bk != null && c != null) vm.observeSheetBackground(bk, c.page, c.bookInstanceId) else flowOf(null)
     }.collectAsStateWithLifecycle(initialValue = null)
     val pageScopeBg = sheetBg?.takeIf { it.scope == "page" }
     Scaffold(
@@ -988,7 +998,7 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
                 title = { Text(c?.name ?: stringResource(R.string.sheet_fallback_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back)) } },
                 actions = {
-                    if (c != null) TextButton(onClick = { bgOpen = true }) { Text(stringResource(R.string.action_background)) }
+                    if (c != null && c.bookInstanceId == null) TextButton(onClick = { bgOpen = true }) { Text(stringResource(R.string.action_background)) }
                 },
             )
         },
@@ -998,6 +1008,9 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
             return@Scaffold
         }
         Column(Modifier.padding(padding).fillMaxSize()) {
+            if (studioEnabled && c.bookInstanceId == null && books.any { it.book.section == c.section && it.book.owner == c.owner && it.book.book == c.book }) {
+                Text(stringResource(R.string.studio_capture_no_destination), Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error)
+            }
             // Proporción real de la hoja (papel o, sin papel, bbox de los trazos).
             val aspect = remember(c.id, c.updatedAt) {
                 val m = buildModel(c.strokes, c.paper)
@@ -1211,7 +1224,8 @@ private fun CaptureActions(
     var exporting by remember { mutableStateOf<ExportMode?>(null) }
     // Bloqueada: sellada y ya hay otra hoja con el mismo SOBP → no se puede reabrir.
     val superseded by vm.supersededSobps.collectAsStateWithLifecycle()
-    val reopenLocked = c.sealed && superseded.contains(c.sobpLabel)
+    val closedInstances by vm.closedStudioInstances.collectAsStateWithLifecycle()
+    val reopenLocked = c.sealed && (superseded.contains(c.writingPageKey) || c.bookInstanceId in closedInstances)
 
     fun doExport(fmt: ExportFormat, modeSel: ExportMode) {
         scope.launch {
@@ -2085,21 +2099,17 @@ private fun SettingsScreen(vm: MainViewModel) {
     LaunchedEffect(Unit) { vm.refreshFinishMode(); vm.refreshOverlapConfig() }
 
     val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
+        ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri: Uri? ->
         if (uri != null) scope.launch {
-            val bytes = vm.exportBackup()
-            backupMsg = if (bytes != null && runCatching {
-                    context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                }.isSuccess) context.getString(R.string.backup_exported) else context.getString(R.string.backup_export_failed)
+            backupMsg = if (vm.exportBackup(uri)) context.getString(R.string.backup_exported) else context.getString(R.string.backup_export_failed)
         }
     }
     val restoreLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri != null) scope.launch {
-            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            backupMsg = if (bytes != null && vm.restoreBackup(bytes)) context.getString(R.string.backup_restored) else context.getString(R.string.backup_restore_failed)
+            backupMsg = if (vm.restoreBackup(uri)) context.getString(R.string.backup_restored) else context.getString(R.string.backup_restore_failed)
         }
     }
 
@@ -2307,8 +2317,8 @@ private fun SettingsScreen(vm: MainViewModel) {
                     Text(stringResource(R.string.settings_backup_desc),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { backupMsg = null; exportLauncher.launch("neopen-backup.json") }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_export)) }
-                        OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_restore)) }
+                        OutlinedButton(onClick = { backupMsg = null; exportLauncher.launch("neopen-backup.zip") }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_export)) }
+                        OutlinedButton(onClick = { backupMsg = null; restoreLauncher.launch(arrayOf("application/json", "application/zip", "application/x-zip-compressed", "application/octet-stream")) }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.action_restore)) }
                     }
                     backupMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 

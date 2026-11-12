@@ -49,7 +49,7 @@ class SyncEngineRegressionTest {
         client = OkHttpClient.Builder().sslSocketFactory(clientCert.sslSocketFactory(), clientCert.trustManager).build()
         server = MockWebServer().apply { useHttps(serverCert.sslSocketFactory(), false); start() }
         settings.update(AppSettings(serverUrl = server.url("/").toString(), password = "audit", setupComplete = true))
-        engine = SyncEngine(repo, settings) { ApiFactory.create(it, client) }
+        engine = SyncEngine(repo, settings) { enabledApi(it) }
     }
 
     @After fun teardown() = runBlocking {
@@ -57,6 +57,10 @@ class SyncEngineRegressionTest {
         server.shutdown()
         context.dataStore.edit { it.clear() }
         Unit
+    }
+
+    private fun enabledApi(url: String): NeopenApi = object : NeopenApi by ApiFactory.create(url, client) {
+        override suspend fun capabilitiesInfo(password: String) = CapabilitiesDto(StudioCapDto(true))
     }
 
     private fun json(body: String, status: Int = 200) = MockResponse().setResponseCode(status).setHeader("Content-Type", "application/json").setBody(body)
@@ -122,7 +126,7 @@ class SyncEngineRegressionTest {
         assertEquals(1, server.requestCount) // no pull sobre el cambio pendiente
         assertEquals(1, repo.outboxPeek(20).size)
         assertEquals(1, repo.outboxPeek(20).single().attempts)
-        val restarted = SyncEngine(repo, settings) { ApiFactory.create(it, client) }
+        val restarted = SyncEngine(repo, settings) { enabledApi(it) }
         assertFalse(restarted.push().ok)
         assertEquals(1, server.requestCount)
         assertEquals("Offline edit", repo.capture("server-cap")!!.name)
@@ -262,11 +266,34 @@ class SyncEngineRegressionTest {
         server.enqueue(json("""{"cursor":7,"captures":[${capture(color = "4294901760")}]}"""))
         server.enqueue(json(notebook()))
         server.enqueue(json("[]"))
+        server.enqueue(json("[]")) // libros
+        server.enqueue(json("{\"pens\":[]}"))
+        server.enqueue(json("[]")) // perfiles
+        server.enqueue(json("[]")) // lotes pendientes
         server.enqueue(json("{}"))
         val result = engine.pull()
         assertTrue(result.toString(), result.ok)
         assertEquals(7L, repo.cursor())
         assertEquals(-65536, repo.capture("server-cap")!!.strokes.single().color)
+    }
+
+    @Test fun explicitConflictResolutionRunsBeforeBlockedCreateAndKeepsDataUntilAcknowledged() = runBlocking {
+        repo.enqueueCreateCapture(input(), entity("local-conflict"))
+        val create = repo.outboxPeek(1).single()
+        repo.outboxMarkFailed(create.localId, "HTTP 409: {\"conflictId\":\"conflict-1\"}")
+        repo.studio.resolveConflict("conflict-1", "pen-a")
+        val originalInput = Json.createCapture.toJson(input())
+        server.enqueue(json("""{"capture":${capture()},"conflict":{"id":"conflict-1","code":"PEN_ID_REQUIRED","createdAt":"$now","input":$originalInput,"status":"assigned","captureId":"server-cap"}}"""))
+        server.enqueue(json("[]"))
+        server.enqueue(json("{\"pens\":[]}"))
+        server.enqueue(json("[]"))
+        server.enqueue(json("[]"))
+        val result = engine.push()
+        assertTrue(result.toString(), result.ok)
+        assertEquals("/api/studio/capture-conflicts/conflict-1/resolve", server.takeRequest().path)
+        assertTrue(repo.outboxPeek(20).isEmpty())
+        assertNull(repo.capture("local-conflict"))
+        assertNotNull(repo.capture("server-cap"))
     }
 
     @Test fun remoteResetCannotEraseAnEditQueuedDuringPull() = runBlocking {

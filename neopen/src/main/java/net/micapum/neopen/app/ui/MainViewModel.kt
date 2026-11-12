@@ -4,9 +4,21 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
+import java.io.File
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import net.micapum.neopen.core.data.StudioBookDto
+import net.micapum.neopen.core.data.StudioPenScopeDto
+import net.micapum.neopen.core.data.normalizedServerUrl
+import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -58,6 +70,98 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = app.graph
+    val studioEnabled = graph.sync.studioEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    private fun canUseStudio() = graph.sync.studioAccess.allowedFor(settings.value)
+    private fun invalidateStudioOnRejection(error: Throwable) {
+        if (error is retrofit2.HttpException && error.code() == 403 && error.response()?.errorBody()?.string()?.contains("STUDIO_DISABLED") == true) graph.sync.studioAccess.invalidate()
+    }
+    val studioAvailability = graph.repo.studio.availability().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val studioBooks = graph.repo.studio.books().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val studioConflicts = graph.repo.studio.conflicts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val studioPendingConflicts = graph.repo.studio.pendingConflictIds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+    fun resolveStudioConflict(id: String, penId: String?, bookInstanceId: String? = null) { if (!canUseStudio()) return; viewModelScope.launch { runCatching { graph.repo.studio.resolveConflict(id, penId, bookInstanceId) }.onFailure { _status.value = it.message }; syncNow() } }
+    val closedStudioInstances = graph.repo.studio.books().map { rows -> rows.flatMap { it.book.instances }.filter { it.closedAt != null }.map { it.id }.toSet() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+    val studioPens = graph.repo.studio.pens().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun patchStudioBook(book: StudioBookDto, name: String? = null, archived: Boolean? = null, penScope: StudioPenScopeDto? = null) {
+        if (!canUseStudio()) return
+        viewModelScope.launch { runCatching { graph.repo.studio.patch(book, name, archived, penScope) }.onFailure { _status.value = it.message }; syncNow() }
+    }
+    fun deleteStudioBook(book: StudioBookDto) { if (!canUseStudio()) return; viewModelScope.launch { graph.repo.studio.delete(book); syncNow() } }
+    fun transferStudioPens(to: StudioBookDto, from: StudioBookDto, ids: List<String>) { if (!canUseStudio()) return; viewModelScope.launch { graph.repo.studio.transfer(to, from, ids); syncNow() } }
+    fun cancelStudioChange(id: String) { viewModelScope.launch { graph.repo.studio.cancelPending(id); syncNow() } }
+    fun linkStudioPen(id: String, identifier: String) { if (!canUseStudio()) return; viewModelScope.launch { graph.repo.studio.linkAlias(id, identifier); syncNow() } }
+
+    /** Assets privados en almacenamiento de la aplicación, nunca URLs públicas con contraseña. */
+    private suspend fun studioAssetFile(id: String): File = withContext(Dispatchers.IO) {
+        check(canUseStudio())
+        val dir = File(getApplication<Application>().filesDir, "studio-assets").apply { mkdirs() }
+        // Nombre hash para impedir segmentos de ruta del servidor en el sistema de archivos.
+        val file = File(dir, java.security.MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) })
+        if (!file.exists()) {
+            val s = settings.value
+            val temp = File.createTempFile("asset", ".part", dir)
+            try {
+                ApiFactory.create(s.serverUrl).studioAsset(s.password, id).use { body -> body.byteStream().use { input -> temp.outputStream().use { input.copyTo(it) } } }
+                check(temp.renameTo(file))
+            } finally { temp.delete() }
+        }
+        file
+    }
+    suspend fun studioPreview(book: StudioBookDto, page: Int = 0): Bitmap? =
+        if (!canUseStudio()) null else book.designAssetId?.let { renderStudioAsset(it, page) }
+
+    /** Histórico ordinario: usa el recurso de captura aun cuando Studio esté apagado. */
+    suspend fun capturePreview(capture: Capture): Bitmap? = withContext(Dispatchers.IO) {
+        if (capture.bookInstanceId == null) return@withContext null
+        runCatching {
+            val dir = File(getApplication<Application>().filesDir, "studio-assets").apply { mkdirs() }
+            // Reutiliza también recursos históricos descargados por versiones anteriores.
+            val cachedAsset = graph.repo.studio.designAsset(capture.bookInstanceId)?.let { id ->
+                val hash = java.security.MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) }
+                File(dir, hash).takeIf { it.exists() }
+            }
+            if (cachedAsset != null) return@runCatching renderPdfFile(cachedAsset, capture.page)
+            val key = "capture-design:${capture.bookInstanceId}"
+            val name = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
+            val file = File(dir, name)
+            if (!file.exists()) {
+                val s = settings.value
+                if (!hasServer() || (s.syncServerUrl.isNotBlank() && normalizedServerUrl(s.syncServerUrl) != normalizedServerUrl(s.serverUrl))) return@runCatching null
+                val temp = File.createTempFile("capture", ".part", dir)
+                try {
+                    ApiFactory.create(s.serverUrl).captureDesign(s.password, capture.id).use { body -> body.byteStream().use { input -> temp.outputStream().use { input.copyTo(it) } } }
+                    check(temp.renameTo(file))
+                } finally { temp.delete() }
+            }
+            renderPdfFile(file, capture.page)
+        }.getOrNull()
+    }
+    private suspend fun renderStudioAsset(id: String, index: Int): Bitmap? = withContext(Dispatchers.IO) {
+        runCatching { renderPdfFile(studioAssetFile(id), index) }.onFailure(::invalidateStudioOnRejection).getOrNull()
+    }
+    private fun renderPdfFile(file: File, index: Int): Bitmap? =
+        PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
+            if (index !in 0 until renderer.pageCount) return@use null
+            renderer.openPage(index).use { page ->
+                val width = 1000
+                Bitmap.createBitmap(width, (width * page.height.toFloat() / page.width).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also { bitmap ->
+                    bitmap.eraseColor(android.graphics.Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                }
+            }
+        }
+    suspend fun downloadStudioBook(book: StudioBookDto, recipe: Boolean = false): File? = withContext(Dispatchers.IO) {
+        if (!canUseStudio()) return@withContext null
+        runCatching {
+            val s = settings.value
+            val dir = File(getApplication<Application>().cacheDir, "exports").apply { mkdirs() }
+            val file = File(dir, "book-${book.id.filter { it.isLetterOrDigit() || it == '-' }}.${if (recipe) "json" else "pdf"}")
+            val body = if (recipe) ApiFactory.create(s.serverUrl).studioBookRecipe(s.password, book.id) else ApiFactory.create(s.serverUrl).studioBookPdf(s.password, book.id)
+            body.use { it.byteStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } } }
+            file
+        }.onFailure { invalidateStudioOnRejection(it); _status.value = it.message }.getOrNull()
+    }
+
 
     val settings: StateFlow<AppSettings> =
         graph.settings.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppSettings())
@@ -81,7 +185,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         graph.repo.recent()
             .map { caps ->
                 caps.filter { it.clonedFrom == null }
-                    .groupingBy { it.sobpLabel }
+                    .groupingBy { it.writingPageKey }
                     .eachCount()
                     .filterValues { it > 1 }
                     .keys
@@ -125,8 +229,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun syncError(error: String?): String? =
-        if (error == SyncEngine.SERVER_CHANGE_BLOCKED) getApplication<Application>().getString(R.string.vm_server_change_blocked) else error
+    private fun syncError(error: String?): String? = when (error) {
+        SyncEngine.SERVER_CHANGE_BLOCKED -> getApplication<Application>().getString(R.string.vm_server_change_blocked)
+        SyncEngine.STUDIO_SUSPENDED -> getApplication<Application>().getString(R.string.studio_server_suspended)
+        else -> error
+    }
 
     /**
      * Prueba la conexión (sin guardar): comprueba que el servidor responde
@@ -277,21 +384,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Backup (copia completa del servidor) ---
 
-    /** Descarga la copia completa del servidor (JSON) como bytes. */
-    suspend fun exportBackup(): ByteArray? = runCatching {
-        val s = settings.value
-        withContext(Dispatchers.IO) { ApiFactory.create(s.serverUrl).exportData(s.password).bytes() }
-    }.getOrNull()
-
-    /** Restaura una copia (REEMPLAZA el contenido del servidor) y resincroniza. */
-    suspend fun restoreBackup(bytes: ByteArray): Boolean {
-        val s = settings.value
-        val ok = runCatching {
-            val body = bytes.toRequestBody("application/json".toMediaType())
-            withContext(Dispatchers.IO) { ApiFactory.create(s.serverUrl).importData(s.password, body).isSuccessful }
-        }.getOrDefault(false)
-        if (ok) syncNow()
-        return ok
+    /** Copia ZIP transmitida directamente a DocumentProvider sin cargarla en RAM. */
+    suspend fun exportBackup(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val s = settings.value
+            ApiFactory.create(s.serverUrl).exportData(s.password).use { body ->
+                body.byteStream().use { input -> getApplication<Application>().contentResolver.openOutputStream(uri)?.use { input.copyTo(it) } ?: error("Sin destino") }
+            }
+        }.isSuccess
+    }
+    /** Mantiene la importación JSON antigua y detecta ZIP por su firma, no por extensión. */
+    suspend fun restoreBackup(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        val dir = getApplication<Application>().cacheDir
+        val file = File.createTempFile("restore", ".backup", dir)
+        try {
+            getApplication<Application>().contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return@withContext false
+            val zip = file.inputStream().use { it.read() == 0x50 && it.read() == 0x4b }
+            val s = settings.value
+            val ok = ApiFactory.create(s.serverUrl).importData(s.password, file.asRequestBody((if (zip) "application/zip" else "application/json").toMediaType())).isSuccessful
+            if (ok) syncNow()
+            ok
+        } catch (_: Exception) { false } finally { file.delete() }
     }
 
     fun logout() {
@@ -504,8 +617,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // --- Fondos (plantilla detrás de los trazos) ------------------------------
 
-    private val _studioEnabled = MutableStateFlow(false)
-    val studioEnabled: StateFlow<Boolean> = _studioEnabled.asStateFlow()
 
     private val _recents = MutableStateFlow<List<StudioItemDto>>(emptyList())
     val recents: StateFlow<List<StudioItemDto>> = _recents.asStateFlow()
@@ -517,28 +628,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun hasServer(): Boolean =
         settings.value.appMode != AppMode.LOCAL && settings.value.serverUrl.isNotBlank()
 
-    /** Refresca si Studio está activo (→ recientes/presets) al abrir el selector. */
-    fun refreshStudio() {
-        val s = settings.value
-        if (!hasServer()) {
-            _studioEnabled.value = false
-            _recents.value = emptyList(); _presets.value = emptyList()
-            return
+    private var studioChecks: Job? = null
+    fun startStudioChecks() {
+        if (studioChecks?.isActive == true) return
+        graph.sync.studioAccess.invalidate()
+        studioChecks = viewModelScope.launch {
+            while (isActive) { graph.sync.refreshCapabilities(); delay(30_000) }
         }
+    }
+    fun stopStudioChecks() {
+        studioChecks?.cancel(); studioChecks = null
+        graph.sync.studioAccess.invalidate()
+    }
+    init {
+        viewModelScope.launch { studioEnabled.collect { enabled ->
+            if (!enabled) { _recents.value = emptyList(); _presets.value = emptyList() }
+        } }
+    }
+    /** La respuesta del servidor actual es la única fuente de habilitación. */
+    fun refreshStudio() {
         viewModelScope.launch {
+            graph.sync.refreshCapabilities()
+            if (!canUseStudio()) return@launch
+            val s = settings.value
             val api = ApiFactory.create(s.serverUrl)
-            val enabled = runCatching { api.capabilitiesInfo(s.password).studio?.enabled == true }.getOrDefault(false)
-            _studioEnabled.value = enabled
-            if (enabled) {
-                _recents.value = runCatching { api.listRecents(s.password) }.getOrDefault(emptyList())
-                _presets.value = runCatching { api.listPresets(s.password) }.getOrDefault(emptyList())
-            } else {
-                _recents.value = emptyList(); _presets.value = emptyList()
-            }
+            try {
+                val recents = api.listRecents(s.password)
+                if (!canUseStudio()) return@launch
+                val presets = api.listPresets(s.password)
+                if (canUseStudio() && s.serverUrl == settings.value.serverUrl) {
+                    _recents.value = recents; _presets.value = presets
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { graph.sync.studioAccess.invalidate() }
         }
     }
 
-    fun observeSheetBackground(bookKey: String, page: Int) = graph.repo.observeSheetBackground(bookKey, page)
+    fun observeSheetBackground(bookKey: String, page: Int, bookInstanceId: String? = null) = graph.repo.observeSheetBackground(bookKey, page, bookInstanceId)
 
     fun observeBookBackground(bookKey: String) = graph.repo.observeBookBackground(bookKey)
 
@@ -567,6 +692,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * servidor (compartido con la web); en local, solo en Room (+ archivo si es PNG).
      */
     fun setBackground(scope: String, bookKey: String, page: Int?, choice: ResolvedBg) {
+        if (choice is ResolvedBg.ServerUrl && !canUseStudio()) return
         viewModelScope.launch {
             val s = settings.value
             val existing = if (scope == "book") graph.repo.bookBackground(bookKey)
@@ -747,7 +873,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val local = !hasServer()
             if (c.sealed) {
                 // No reabrir si ya hay otra hoja con el mismo SOBP (finalizada permanente).
-                if (supersededSobps.value.contains(c.sobpLabel)) return@launch
+                if (supersededSobps.value.contains(c.writingPageKey) || c.bookInstanceId in closedStudioInstances.value) return@launch
                 if (local) graph.repo.setCaptureSealedLocal(c.id, false)
                 else { graph.repo.setCaptureSealed(c.id, false); graph.syncNow() }
                 return@launch

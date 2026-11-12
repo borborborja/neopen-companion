@@ -735,7 +735,7 @@ class PenManager(
         if (strokeDots.isEmpty()) return
         // Sella el estilo del boli en el trazo (congelado al capturar).
         val s = currentStyle()
-        val stroke = Stroke(strokeStart, strokeDots.last().t, strokeDots.toList(), s.color, s.width)
+        val stroke = Stroke(strokeStart, strokeDots.last().t, strokeDots.toList(), s.color, s.width, _state.value.mac)
         // Modo escritura en vivo: entrega el trazo de inmediato y NO acumula/sube páginas.
         if (liveMode) {
             strokeDots.clear()
@@ -1207,7 +1207,7 @@ class PenManager(
             // Híbrido: sella en los trazos volcados el estilo ACTUAL del boli al volcar.
             val s = currentStyle()
             parsed.forEach { (sobp, stroke) ->
-                offlineBuffer.getOrPut(sobp) { ArrayList() }.add(stroke.copy(color = s.color, width = s.width))
+                offlineBuffer.getOrPut(sobp) { ArrayList() }.add(stroke.copy(color = s.color, width = s.width, penId = _state.value.mac))
             }
             // Acusa para recibir el siguiente (el último no se acusa, como el SDK).
             if (chunk.transPosition != 2) write(Protocol.resOfflinePacket(chunk.packetId))

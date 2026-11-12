@@ -37,6 +37,9 @@ jobs:
       - name: Tests unitarios (core y sincronización Android)
         run: ./gradlew :core:testDebugUnitTest :neopen:testDebugUnitTest --stacktrace
 
+      - name: Compilar cliente live con el contrato core actualizado
+        run: ./gradlew :live:compileDebugKotlin --stacktrace
+
       # App unificada (completa, con modo "solo puente" integrado).
       - name: Build debug APK (neopen)
         run: ./gradlew :neopen:assembleDebug --stacktrace

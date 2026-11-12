@@ -42,6 +42,10 @@ data class CaptureEntity(
     val overlapJson: String? = null,
     /** Id de la hoja origen si es un clon; las hojas clon no reciben fusiones por SOBP. */
     val clonedFrom: String? = null,
+    val penId: String? = null,
+    val bookInstanceId: String? = null,
+    val assignmentId: String? = null,
+    val assignmentRevision: Long? = null,
 )
 
 @Entity(tableName = "notebooks")
@@ -100,6 +104,8 @@ data class PageBackgroundEntity(
     val source: String = "custom",
     val remote: Boolean = false,
     val createdAt: String,
+    val bookInstanceId: String? = null,
+    val assignmentId: String? = null,
 )
 
 /**
@@ -167,6 +173,24 @@ data class OfflineImportWarningEntity(
     val resolvedAt: String? = null,
 )
 
+/** Snapshot confirmado: una edición pendiente nunca activa asignaciones localmente. */
+@Entity(tableName = "studio_books")
+data class StudioBookEntity(@PrimaryKey val id: String, val rev: Long, val json: String)
+@Entity(tableName = "studio_metadata")
+data class StudioMetadataEntity(@PrimaryKey val id: String, val json: String)
+@Dao
+interface StudioDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(books: List<StudioBookEntity>)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun metadata(row: StudioMetadataEntity)
+    @Query("SELECT * FROM studio_books") fun observeBooks(): Flow<List<StudioBookEntity>>
+    @Query("SELECT * FROM studio_books") suspend fun books(): List<StudioBookEntity>
+    @Query("SELECT * FROM studio_books WHERE id = :id") suspend fun book(id: String): StudioBookEntity?
+    @Query("SELECT * FROM studio_metadata WHERE id = :id") fun observeMetadata(id: String): Flow<StudioMetadataEntity?>
+    @Query("SELECT * FROM studio_metadata WHERE id = :id") suspend fun metadata(id: String): StudioMetadataEntity?
+    @Query("DELETE FROM studio_books") suspend fun clearBooks()
+    @Query("DELETE FROM studio_metadata") suspend fun clearMetadata()
+}
+
 // --- DAOs --------------------------------------------------------------------
 
 @Dao
@@ -198,8 +222,14 @@ interface CaptureDao {
     @Query("SELECT * FROM captures WHERE notebookId = :notebookId")
     suspend fun getByNotebook(notebookId: String): List<CaptureEntity>
 
-    @Query("SELECT * FROM captures WHERE section = :s AND owner = :o AND book = :b AND page = :p AND clonedFrom IS NULL AND sealed = 0 ORDER BY importedAt DESC LIMIT 1")
+    @Query("SELECT * FROM captures WHERE section = :s AND owner = :o AND book = :b AND page = :p AND bookInstanceId IS NULL AND clonedFrom IS NULL AND sealed = 0 ORDER BY importedAt DESC LIMIT 1")
     suspend fun findBySobp(s: Int, o: Int, b: Int, p: Int): CaptureEntity?
+
+    @Query("SELECT * FROM captures WHERE bookInstanceId = :instanceId AND page = :page AND clonedFrom IS NULL AND sealed = 0 ORDER BY importedAt DESC LIMIT 1")
+    suspend fun findByInstance(instanceId: String, page: Int): CaptureEntity?
+
+    @Query("UPDATE captures SET sealed = 1 WHERE bookInstanceId = :instanceId")
+    suspend fun sealInstance(instanceId: String)
 
     @Query("UPDATE captures SET sealed = :sealed, updatedAt = :now WHERE id = :id")
     suspend fun setSealed(id: String, sealed: Boolean, now: String)
@@ -260,6 +290,9 @@ interface OutboxDao {
 
     @Query("SELECT * FROM outbox WHERE targetId = :targetId ORDER BY localId ASC")
     suspend fun forTarget(targetId: String): List<OutboxEntity>
+
+    @Query("SELECT * FROM outbox ORDER BY localId ASC")
+    fun observeAll(): Flow<List<OutboxEntity>>
 
     @Query("DELETE FROM outbox WHERE localId = :localId")
     suspend fun deleteById(localId: Long)
@@ -399,12 +432,13 @@ interface OfflineNoteStateDao {
         CaptureEntity::class, NotebookEntity::class, OutboxEntity::class,
         SyncMetaEntity::class, PageBackgroundEntity::class, ConnectorSyncStateEntity::class,
         PenPageUserActionEntity::class, OfflineImportWarningEntity::class,
-        OfflineNoteStateEntity::class,
+        OfflineNoteStateEntity::class, StudioBookEntity::class, StudioMetadataEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class NeopenDb : RoomDatabase() {
+    abstract fun studio(): StudioDao
     abstract fun captures(): CaptureDao
     abstract fun notebooks(): NotebookDao
     abstract fun outbox(): OutboxDao

@@ -38,6 +38,7 @@ data class StrokeDto(
     val dots: List<DotDto>,
     @ArgbColor val color: Int? = null,
     val width: Float? = null,
+    val penId: String? = null,
 )
 
 data class CreateCaptureInput(
@@ -57,11 +58,17 @@ data class CreateCaptureInput(
     val destination: String? = null,
     val mergeMode: String? = null,
     val targetCaptureId: String? = null,
+    val penId: String? = null,
+    val bookInstanceId: String? = null,
+    val assignmentId: String? = null,
+    val assignmentRevision: Long? = null,
 )
 
 data class RegisterPenInput(val mac: String, val name: String? = null, val firmware: String? = null)
 
-data class PenInfoDto(val mac: String, val alias: String? = null)
+data class PenInfoDto(val mac: String, val alias: String? = null, val id: String? = null, @Json(name = "identifiers") val aliases: List<String> = emptyList())
+data class PensResponseDto(val pens: List<PenInfoDto> = emptyList())
+data class PenAliasInput(val identifier: String)
 
 /** Ajustes de render del servidor (presión→grosor). Espejo de RenderSettings (packages/shared). */
 data class RenderSettingsDto(val pressureWidthEnabled: Boolean = false, val pressureWidthContrast: Float = 2f)
@@ -114,6 +121,10 @@ data class CaptureDto(
     val overlap: OverlapDto? = null,
     // Hoja clon (copia en un cuaderno personalizado): nunca recibe fusiones por SOBP.
     val clonedFrom: String? = null,
+    val penId: String? = null,
+    val bookInstanceId: String? = null,
+    val assignmentId: String? = null,
+    val assignmentRevision: Long? = null,
 )
 
 /** Aviso de trazos superpuestos detectado en la última fusión (espejo de OverlapInfo). */
@@ -257,6 +268,8 @@ data class AnchorDto(
     val bgPreset: String? = null,
     val pageBySobp: Map<String, Int>? = null,
     val source: String = "custom",
+    val bookInstanceId: String? = null,
+    val assignmentId: String? = null,
     val createdAt: String,
 )
 
@@ -366,6 +379,51 @@ interface NeopenApi {
 
     @GET("api/studio/presets")
     suspend fun listPresets(@Header("X-Auth-Password") password: String): List<StudioItemDto>
+
+    @Streaming @GET("api/captures/{id}/design")
+    suspend fun captureDesign(@Header("X-Auth-Password") password: String, @Path("id") id: String): ResponseBody
+
+    @GET("api/studio/profiles")
+    suspend fun studioProfiles(@Header("X-Auth-Password") password: String): List<StudioProfileDto>
+
+    @GET("api/studio/books")
+    suspend fun studioBooks(@Header("X-Auth-Password") password: String, @Query("includeArchived") archived: Boolean = true, @Query("includeDeleted") deleted: Boolean = true): List<StudioBookDto>
+
+    @GET("api/studio/books/{id}")
+    suspend fun studioBook(@Header("X-Auth-Password") password: String, @Path("id") id: String): StudioBookDto
+
+    @GET("api/studio/capture-conflicts")
+    suspend fun studioCaptureConflicts(@Header("X-Auth-Password") password: String): List<StudioCaptureConflictDto>
+
+    @POST("api/studio/capture-conflicts/{id}/resolve")
+    suspend fun resolveStudioConflict(@Header("X-Auth-Password") password: String, @Path("id") id: String, @Body body: StudioConflictResolveDto): StudioConflictResolutionDto
+
+    @GET("api/studio/instances/{id}")
+    suspend fun studioInstance(@Header("X-Auth-Password") password: String, @Path("id") id: String): StudioInstanceDto
+
+    @PATCH("api/studio/books/{id}")
+    suspend fun patchStudioBook(@Header("X-Auth-Password") password: String, @Path("id") id: String, @Body body: StudioBookPatchDto): StudioBookDto
+
+    @DELETE("api/studio/books/{id}")
+    suspend fun deleteStudioBook(@Header("X-Auth-Password") password: String, @Path("id") id: String, @Query("rev") rev: Long): Response<Unit>
+
+    @POST("api/studio/books/{id}/transfer")
+    suspend fun transferStudioBook(@Header("X-Auth-Password") password: String, @Path("id") id: String, @Body body: StudioTransferDto): StudioBookDto
+
+    @Streaming @GET("api/studio/books/{id}/pdf")
+    suspend fun studioBookPdf(@Header("X-Auth-Password") password: String, @Path("id") id: String): ResponseBody
+
+    @Streaming @GET("api/studio/books/{id}/recipe")
+    suspend fun studioBookRecipe(@Header("X-Auth-Password") password: String, @Path("id") id: String): ResponseBody
+
+    @Streaming @GET("api/studio/assets/{id}")
+    suspend fun studioAsset(@Header("X-Auth-Password") password: String, @Path("id") id: String): ResponseBody
+
+    @GET("api/pens")
+    suspend fun pens(@Header("X-Auth-Password") password: String): PensResponseDto
+
+    @POST("api/pens/{id}/aliases")
+    suspend fun linkPenAlias(@Header("X-Auth-Password") password: String, @Path("id") id: String, @Body body: PenAliasInput): PenInfoDto
 
     // --- Lectura / sincronización ---
 
@@ -526,7 +584,7 @@ interface NeopenApi {
     /** Descarga toda la copia (captures + notebooks + covers) como JSON. */
     @Streaming
     @GET("api/export")
-    suspend fun exportData(@Header("X-Auth-Password") password: String): ResponseBody
+    suspend fun exportData(@Header("X-Auth-Password") password: String, @Query("format") format: String = "zip"): ResponseBody
 
     /** Restaura una copia: REEMPLAZA todo el contenido del servidor. */
     @POST("api/import")

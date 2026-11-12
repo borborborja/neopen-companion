@@ -34,6 +34,7 @@ fun CaptureDto.toEntity(): CaptureEntity = CaptureEntity(
     sealed = sealed,
     overlapJson = Json.overlapJson(overlap),
     clonedFrom = clonedFrom,
+    penId = penId, bookInstanceId = bookInstanceId, assignmentId = assignmentId, assignmentRevision = assignmentRevision,
 )
 
 fun NotebookDto.toEntity(): NotebookEntity = NotebookEntity(
@@ -63,6 +64,7 @@ fun CaptureEntity.toDto() = CaptureDto(
     transcription = Json.ocrOf(transcriptionJson), destination = destination, notebookId = notebookId,
     position = position, paper = Json.paperOf(paperJson), kind = kind, sealed = sealed,
     overlap = Json.overlapOf(overlapJson), clonedFrom = clonedFrom,
+    penId = penId, bookInstanceId = bookInstanceId, assignmentId = assignmentId, assignmentRevision = assignmentRevision,
 )
 
 fun NotebookEntity.toDto() = NotebookDto(
@@ -94,6 +96,7 @@ fun CaptureEntity.toDomain(): Capture = Capture(
     sealed = sealed,
     overlap = Json.overlapOf(overlapJson),
     clonedFrom = clonedFrom,
+    penId = penId, bookInstanceId = bookInstanceId, assignmentId = assignmentId, assignmentRevision = assignmentRevision,
 )
 
 fun OfflineImportWarningEntity.toDomain(): OfflineImportWarning = OfflineImportWarning(
@@ -124,6 +127,7 @@ fun PageBackgroundEntity.toDomain(): PageBackground = PageBackground(
     label = label,
     source = source,
     remote = remote,
+    bookInstanceId = bookInstanceId, assignmentId = assignmentId,
 )
 
 /** DesignAnchor del servidor → fila local (remote=true). El ámbito "page" deduce
@@ -142,6 +146,7 @@ fun AnchorDto.toBackgroundEntity(): PageBackgroundEntity {
         source = source,
         remote = true,
         createdAt = createdAt,
+        bookInstanceId = bookInstanceId, assignmentId = assignmentId,
     )
 }
 
