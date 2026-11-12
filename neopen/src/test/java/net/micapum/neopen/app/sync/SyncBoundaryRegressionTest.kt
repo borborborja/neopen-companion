@@ -62,7 +62,9 @@ class SyncBoundaryRegressionTest {
         val client = OkHttpClient.Builder().sslSocketFactory(clientCert.sslSocketFactory(), clientCert.trustManager).build()
         server = MockWebServer().apply { useHttps(serverCert.sslSocketFactory(), false); start() }
         settings.update(AppSettings(serverUrl = server.url("/").toString(), password = "audit", setupComplete = true))
-        engine = SyncEngine(repo, settings) { ApiFactory.create(it, client) }
+        engine = SyncEngine(repo, settings) { url -> object : NeopenApi by ApiFactory.create(url, client) {
+            override suspend fun capabilitiesInfo(password: String) = CapabilitiesDto(StudioCapDto(true))
+        } }
     }
 
     @After fun teardown() = runBlocking {

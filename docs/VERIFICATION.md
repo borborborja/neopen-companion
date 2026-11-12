@@ -16,7 +16,7 @@ arriba es la que está verificada que funciona con Gradle.)
 ./gradlew :neopen:assembleDebug                                 # APK completo (incluye Room/KSP, dex, recursos)
 ./gradlew :core:testDebugUnitTest                               # tests unitarios de lógica pura (:core)
 ./gradlew :neopen:testDebugUnitTest                             # regresiones de app con Room/HTTP y Robolectric
-./gradlew checkApiContract checkFileModes                      # OpenAPI/Retrofit, Room 2..9 y permisos Git
+./gradlew checkApiContract checkFileModes                      # OpenAPI/Retrofit, Room 2..10 y permisos Git
 ./gradlew :neopen:connectedDebugAndroidTest                     # migraciones + outbox/delta en emulador API 34
 ./gradlew :live:compileDebugKotlin                              # :live también depende de :core
 ```

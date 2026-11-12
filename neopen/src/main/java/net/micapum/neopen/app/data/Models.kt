@@ -38,8 +38,13 @@ data class Capture(
     val overlap: OverlapDto? = null,
     /** Id de la hoja origen si es un clon; no compite por el enrutado del boli. */
     val clonedFrom: String? = null,
+    val penId: String? = null,
+    val bookInstanceId: String? = null,
+    val assignmentId: String? = null,
+    val assignmentRevision: Long? = null,
 ) {
     val sobpLabel get() = "$section.$owner.$book.$page"
+    val writingPageKey get() = bookInstanceId?.let { "$it:$page" } ?: sobpLabel
 }
 
 /** Aviso de trazos reimportados desde la memoria del boli que requieren decisión. */
@@ -94,6 +99,8 @@ data class PageBackground(
     val label: String,
     val source: String,
     val remote: Boolean,
+    val bookInstanceId: String? = null,
+    val assignmentId: String? = null,
 )
 
 /** Adaptadores Moshi compartidos para (de)serializar los campos JSON de Room. */

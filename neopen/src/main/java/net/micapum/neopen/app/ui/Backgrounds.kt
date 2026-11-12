@@ -114,9 +114,12 @@ private fun rememberBgImage(vm: MainViewModel, bg: PageBackground?): ImageBitmap
 fun PageCanvas(vm: MainViewModel, page: Capture, modifier: Modifier = Modifier) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val bk = bookKeyOf(page)
-    val bg by remember(bk, page.page) { vm.observeSheetBackground(bk, page.page) }
+    val bg by remember(bk, page.page, page.bookInstanceId) { vm.observeSheetBackground(bk, page.page, page.bookInstanceId) }
         .collectAsStateWithLifecycle(initialValue = null)
-    val bgImage = rememberBgImage(vm, bg)
+    val historical by produceState<ImageBitmap?>(null, page.bookInstanceId, page.page) {
+        value = page.bookInstanceId?.let { vm.capturePreview(page)?.asImageBitmap() }
+    }
+    val bgImage = historical ?: rememberBgImage(vm, bg)
     InkCanvas(
         strokes = page.strokes,
         paper = page.paper,

@@ -41,6 +41,9 @@ import net.micapum.neopen.app.sync.SyncWorker
 import net.micapum.neopen.app.sync.PenPersistenceQueue
 import net.micapum.neopen.core.data.AppMode
 import net.micapum.neopen.core.data.AppSettings
+import net.micapum.neopen.core.data.StudioBookDto
+import net.micapum.neopen.core.data.PenInfoDto
+import net.micapum.neopen.core.data.canonicalPenId
 import net.micapum.neopen.core.pen.KnownPen
 import net.micapum.neopen.core.data.OverlapConfig
 import net.micapum.neopen.core.data.SettingsStore
@@ -216,10 +219,24 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
     }
 }
 
+/** v9→v10: libros offline y procedencia estable; conserva capturas y fondos previos. */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE captures ADD COLUMN penId TEXT")
+        db.execSQL("ALTER TABLE captures ADD COLUMN bookInstanceId TEXT")
+        db.execSQL("ALTER TABLE captures ADD COLUMN assignmentId TEXT")
+        db.execSQL("ALTER TABLE captures ADD COLUMN assignmentRevision INTEGER")
+        db.execSQL("ALTER TABLE page_backgrounds ADD COLUMN bookInstanceId TEXT")
+        db.execSQL("ALTER TABLE page_backgrounds ADD COLUMN assignmentId TEXT")
+        db.execSQL("CREATE TABLE IF NOT EXISTS studio_books (id TEXT NOT NULL, rev INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(id))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS studio_metadata (id TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY(id))")
+    }
+}
+
 /** Grafo de dependencias mínimo (service locator) compartido por la app. */
 class Graph(app: Application) {
     val db: NeopenDb = Room.databaseBuilder(app, NeopenDb::class.java, "neopen.db")
-        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
         // Solo permite recrear la BD desde la v1 efímera (dev, nunca publicada; el
         // esquema arrancó en v2). De v2 en adelante SIEMPRE hay migración explícita,
         // así que jamás se borran datos del usuario en una actualización.
@@ -237,6 +254,9 @@ class Graph(app: Application) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val penPersistence = PenPersistenceQueue(scope)
     @Volatile private var libraryGeneration = 0L
+    private data class BindingsSnapshot(val books: List<StudioBookDto> = emptyList(), val pens: List<PenInfoDto> = emptyList())
+    @Volatile private var currentBindings = BindingsSnapshot()
+    @Volatile private var offlineBindings: BindingsSnapshot? = null
 
     /** Incluye páginas y contadores del último volcado antes de iniciar push→pull. */
     suspend fun awaitPenPersistence(): Boolean = penPersistence.completion().await()
@@ -262,12 +282,16 @@ class Graph(app: Application) {
 
     /** Conexión BLE al boli (una sola, compartida). Cada página → Room (+ sync si hay servidor). */
     val pen = PenManager(app) { page ->
+        // Congelar al recibir el lote, antes de esperar la cola o una sincronización.
+        val snapshot = if (page.source == "offline") offlineBindings ?: currentBindings else currentBindings
+        val penId = canonicalPenId(page.penId, snapshot.pens)
+        val binding = snapshot.books.filter { book -> book.status == "ready" && book.section == page.sobp.section && book.owner == page.sobp.owner && book.book == page.sobp.book && penId?.let(book.penScope::contains) == true }.singleOrNull()
         penPersistence.enqueue(requiresPreviousSuccess = false) {
             // En volcado offline llegan muchas páginas en ráfaga: NO sincronizamos ni
             // refrescamos widgets por página (lo hace una sola vez `onOfflineImportComplete`).
             // En tiempo real (una página cada vez) sí se sube/refresca al momento.
             val offline = page.source == "offline"
-            val persistedLocally = repo.persistPenPage(page, lastSettings.offlineReimportPolicy) {
+            val persistedLocally = repo.persistPenPage(page, lastSettings.offlineReimportPolicy, binding, bindingFrozen = true) {
                 settings.flow.first().appMode == AppMode.LOCAL
             }
             if (!offline) syncStatus.markPenSync(System.currentTimeMillis())
@@ -292,9 +316,16 @@ class Graph(app: Application) {
     val currentSettings: AppSettings get() = lastSettings
 
     init {
+        scope.launch {
+            repo.studio.books().combine(repo.studio.pens()) { books, pens -> BindingsSnapshot(books.map { it.book }, pens) }
+                .collect { currentBindings = it }
+        }
         repo.onLocalCleared = {
             libraryGeneration++
+            currentBindings = BindingsSnapshot()
+            offlineBindings = null
             pen.knownOfflineCounts = emptyMap()
+            java.io.File(app.filesDir, "studio-assets").deleteRecursively()
         }
         // El estilo de trazo a sellar depende del boli (MAC) y de los ajustes actuales.
         pen.styleProvider = { mac -> lastSettings.styleFor(mac) }
@@ -309,6 +340,12 @@ class Graph(app: Application) {
         }
         // Registra un boli recién visto en el historial de bolis emparejados (si es nuevo).
         pen.onPenSeen = { mac, name ->
+            scope.launch {
+                if (settings.flow.first().appMode != AppMode.LOCAL) {
+                    repo.studio.registerPen(mac, name)
+                    syncNow()
+                }
+            }
             val cur = lastSettings
             val alias = name?.takeIf { it.isNotBlank() } ?: mac
             val knownPens = if (cur.knownPens.none { it.mac == mac }) {
@@ -363,8 +400,9 @@ class Graph(app: Application) {
                 }
             }
         }
-        pen.onOfflineImportStarted = { penPersistence.beginBatch() }
+        pen.onOfflineImportStarted = { offlineBindings = currentBindings; penPersistence.beginBatch() }
         pen.onOfflineImportComplete = {
+            offlineBindings = null
             val persisted = penPersistence.completion()
             scope.launch {
                 if (!persisted.await()) {

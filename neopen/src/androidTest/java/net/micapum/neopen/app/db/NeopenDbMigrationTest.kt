@@ -11,8 +11,10 @@ import net.micapum.neopen.app.MIGRATION_5_6
 import net.micapum.neopen.app.MIGRATION_6_7
 import net.micapum.neopen.app.MIGRATION_7_8
 import net.micapum.neopen.app.MIGRATION_8_9
+import net.micapum.neopen.app.MIGRATION_9_10
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,6 +37,7 @@ class NeopenDbMigrationTest {
         MIGRATION_6_7,
         MIGRATION_7_8,
         MIGRATION_8_9,
+        MIGRATION_9_10,
     )
 
     @Test
@@ -48,8 +51,8 @@ class NeopenDbMigrationTest {
     }
 
     @Test
-    fun migrationFromV2ToV9PreservesUserData() {
-        val databaseName = "migration-2-9"
+    fun migrationFromV2ToV10PreservesUserData() {
+        val databaseName = "migration-2-10"
         helper.createDatabase(databaseName, 2).apply {
             execSQL(
                 """
@@ -68,9 +71,9 @@ class NeopenDbMigrationTest {
             close()
         }
 
-        val migrated = helper.runMigrationsAndValidate(databaseName, 9, true, *migrations)
+        val migrated = helper.runMigrationsAndValidate(databaseName, 10, true, *migrations)
         val cursor = migrated.query(
-            "SELECT name, rev, sealed, overlapJson, clonedFrom FROM captures WHERE id = 'capture-legacy'",
+            "SELECT name, rev, sealed, overlapJson, clonedFrom, penId, bookInstanceId, assignmentId, assignmentRevision FROM captures WHERE id = 'capture-legacy'",
         )
         cursor.use {
             it.moveToFirst()
@@ -79,6 +82,10 @@ class NeopenDbMigrationTest {
             assertEquals(0, it.getInt(2))
             assertNull(it.getString(3))
             assertNull(it.getString(4))
+            assertNull(it.getString(5))
+            assertNull(it.getString(6))
+            assertNull(it.getString(7))
+            assertTrue(it.isNull(8))
         }
         migrated.close()
     }

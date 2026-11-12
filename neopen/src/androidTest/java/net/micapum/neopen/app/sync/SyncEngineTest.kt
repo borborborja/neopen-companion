@@ -113,6 +113,7 @@ class SyncEngineTest {
                 name = "Pending page",
             ),
         )
+        server.enqueue(jsonResponse("""{"studio":{"enabled":false}}"""))
         server.enqueue(jsonResponse(captureJson("server-capture", 1)))
 
         val engine = SyncEngine(repository, settings) { ApiFactory.create(it, testClient) }
@@ -121,8 +122,10 @@ class SyncEngineTest {
         assertTrue(push.error, push.ok)
         assertEquals(1, push.pushed)
         assertTrue(repository.outboxPeek(20).isEmpty())
+        assertEquals("/api/capabilities", server.takeRequest().path)
         assertEquals("/api/captures", server.takeRequest().path)
 
+        server.enqueue(jsonResponse("""{"studio":{"enabled":false}}"""))
         server.enqueue(
             jsonResponse(
                 """
@@ -139,6 +142,7 @@ class SyncEngineTest {
         )
         server.enqueue(jsonResponse(notebookJson()))
         server.enqueue(jsonResponse("[]"))
+        server.enqueue(jsonResponse("""{"pens":[]}"""))
         server.enqueue(jsonResponse("""{"pressureWidthEnabled":true,"pressureWidthContrast":2.5}"""))
 
         val pull = engine.pull()
@@ -146,6 +150,7 @@ class SyncEngineTest {
         assertTrue(pull.error, pull.ok)
         assertEquals(1, pull.pulled)
         assertEquals(5, repository.cursor())
+        assertEquals("/api/capabilities", server.takeRequest().path)
         val changesRequest = server.takeRequest()
         assertTrue(changesRequest.path.orEmpty().startsWith("/api/changes?since=0"))
         assertEquals("secret", changesRequest.getHeader("X-Auth-Password"))

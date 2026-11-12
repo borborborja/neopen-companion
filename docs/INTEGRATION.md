@@ -15,8 +15,10 @@ El ecosistema son **dos repos** que evolucionan juntos:
 ## Dónde vive el contrato
 
 - **Fuente canónica**: `neopen/docs/openapi.yaml` (OpenAPI 3.1, exhaustivo).
-- **Snapshot vendorizado aquí**: `docs/openapi.yaml`, byte a byte idéntico al tag
-  indicado en `docs/openapi.snapshot.json`. El manifiesto fija también su SHA-256.
+- **Snapshot vendorizado aquí**: `docs/openapi.yaml`, byte a byte idéntico al
+  contrato canónico indicado en `docs/openapi.snapshot.json`. El manifiesto fija
+  su SHA-256; `sourceState: working-tree` identifica cambios conjuntos aún sin
+  publicar sobre la versión base indicada por `serverTag`.
   `./gradlew checkApiContract` comprueba checksum, versiones y que toda anotación
   Retrofit exista en la especificación.
 

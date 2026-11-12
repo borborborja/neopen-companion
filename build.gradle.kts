@@ -70,10 +70,10 @@ tasks.register("checkApiContract") {
         }
 
         val schemaDir = file("neopen/schemas/net.micapum.neopen.app.db.NeopenDb")
-        val missingSchemas = (2..9).filterNot { schemaDir.resolve("$it.json").isFile }
+        val missingSchemas = (2..10).filterNot { schemaDir.resolve("$it.json").isFile }
         check(missingSchemas.isEmpty()) { "Faltan esquemas Room: $missingSchemas" }
         logger.lifecycle(
-            "Contrato válido: ${retrofitOperations.size} operaciones Retrofit, snapshot $actualSha, Room 2..9.",
+            "Contrato válido: ${retrofitOperations.size} operaciones Retrofit, snapshot $actualSha, Room 2..10.",
         )
     }
 }
