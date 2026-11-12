@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: neopen API
-  version: "0.23.5"
+  version: "0.24.0"
   description: |
     Contrato de la API del servidor neopen, pensado como **fuente de verdad para
     clientes nativos** (companion Android/iOS) además del frontend web.
@@ -20,7 +20,14 @@ servers:
     description: Instancia autoalojada
 security:
   - PenPassword: []
+  - WebSession: []
 tags:
+  - name: auth
+    description: Sesión web compartida y autenticación heredada
+  - name: mcp
+    description: MCP opcional para herramientas y recursos de biblioteca
+  - name: oauth
+    description: Autorización OAuth 2.1 con PKCE para clientes MCP
   - name: captures
     description: Subida de la escritura del boli (lo esencial para un companion)
   - name: pens
@@ -58,7 +65,7 @@ paths:
                 required: [ok, version]
                 properties:
                   ok: { type: boolean, const: true }
-                  version: { type: string, example: 0.23.5 }
+                  version: { type: string, example: 0.24.0 }
 
   /api/capabilities:
     get:
@@ -1312,17 +1319,773 @@ paths:
         "200": { description: Imagen de fondo }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/auth/session:
+    get:
+      tags:
+        - auth
+      summary: Restaura la sesión del navegador y obtiene su token CSRF
+      security: &a5
+        - WebSession: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSessionInfo"
+        "401":
+          description: La cookie de sesión no existe o ha caducado
+    post:
+      tags:
+        - auth
+      summary: Inicia sesión con APP_PASSWORD y crea la cookie HttpOnly
+      security:
+        - PenPassword: []
+      description: Requiere X-Auth-Password incluso si ya existe cookie. Renueva la sesión y descarta la anterior.
+        Cookie neopen_session, SameSite=Lax, duración máxima de ocho horas, Secure bajo HTTPS. Nunca devuelve
+        la contraseña.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebSessionInfo"
+          headers:
+            Set-Cookie:
+              description: Cookie opaca de sesión HttpOnly
+              schema: &a4
+                type: string
+        "401":
+          description: Contraseña incorrecta o ausente
+        "429":
+          description: Demasiados intentos
+    delete:
+      tags:
+        - auth
+      summary: Revoca la sesión actual y elimina su cookie
+      security: &a1
+        - PenPassword: []
+        - WebSession: []
+          CsrfToken: []
+      responses:
+        "204":
+          description: Sesión cerrada
+        "401":
+          description: Sesión no válida
+        "403":
+          description: Token CSRF incorrecto o ausente
+  /api/mcp/settings:
+    get:
+      tags:
+        - mcp
+      summary: Estado persistente y URL de conexión MCP
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpSettings"
+        "401":
+          description: No autorizado
+    put:
+      tags:
+        - mcp
+      summary: Activa o desactiva MCP para toda la instancia
+      security: *a1
+      description: Desactivado por defecto. Activar exige un origen HTTPS puro; HTTP solo se admite en localhost. El
+        origen se fija desde la web autenticada, nunca desde Host o X-Forwarded-*. Desactivar o cambiar origen
+        revoca las autorizaciones OAuth.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - enabled
+              properties:
+                enabled:
+                  type: boolean
+                origin:
+                  type: string
+                  format: uri
+                  description: Origen de la web, sin ruta, usuario, query ni fragmento
+              additionalProperties: false
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpSettings"
+        "400":
+          description: Origen o configuración inválidos
+        "401":
+          description: No autorizado
+        "403":
+          description: CSRF inválido
+  /.well-known/oauth-protected-resource/mcp:
+    get:
+      tags:
+        - mcp
+      summary: Descubrimiento RFC 9728 del recurso MCP
+      security: &a2 []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - resource
+                  - authorization_servers
+                  - scopes_supported
+                  - bearer_methods_supported
+                properties:
+                  resource:
+                    type: string
+                    format: uri
+                  authorization_servers:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                  scopes_supported:
+                    type: array
+                    items:
+                      type: string
+                      enum:
+                        - notes:read
+                        - notes:write
+                  bearer_methods_supported:
+                    type: array
+                    items:
+                      type: string
+                      const: header
+                additionalProperties: false
+        "404": &a3
+          description: MCP desactivado
+  /.well-known/oauth-authorization-server/oauth:
+    get:
+      tags:
+        - oauth
+      summary: Metadatos públicos del servidor de autorización
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthMetadata"
+        "404":
+          description: MCP desactivado
+  /.well-known/oauth-authorization-server:
+    get:
+      tags:
+        - oauth
+      summary: Metadatos públicos del servidor de autorización
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthMetadata"
+        "404":
+          description: MCP desactivado
+  /oauth/.well-known/openid-configuration:
+    get:
+      tags:
+        - oauth
+      summary: Metadatos públicos del servidor de autorización
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthMetadata"
+        "404":
+          description: MCP desactivado
+    options:
+      tags:
+        - oauth
+      summary: Preflight CORS del protocolo OAuth
+      security: *a2
+      responses:
+        "200":
+          description: CORS permitido
+        "204":
+          description: CORS permitido
+        "404": *a3
+  /oauth/.well-known/oauth-authorization-server:
+    get:
+      tags:
+        - oauth
+      summary: Metadatos públicos del servidor de autorización
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthMetadata"
+        "404":
+          description: MCP desactivado
+    options:
+      tags:
+        - oauth
+      summary: Preflight CORS del protocolo OAuth
+      security: *a2
+      responses:
+        "200":
+          description: CORS permitido
+        "204":
+          description: CORS permitido
+        "404": *a3
+  /oauth/authorize:
+    get:
+      tags:
+        - oauth
+      summary: Inicia Authorization Code con PKCE S256
+      security: *a2
+      description: Emite una interacción que reutiliza el login web y requiere consentimiento. No acepta password
+        grant ni client_credentials. El issuer es el origen canónico más /oauth.
+      parameters:
+        - name: client_id
+          in: query
+          required: true
+          schema: *a4
+        - name: redirect_uri
+          in: query
+          required: false
+          schema: *a4
+        - name: response_type
+          in: query
+          required: true
+          schema:
+            type: string
+            const: code
+        - name: scope
+          in: query
+          required: false
+          schema: *a4
+        - name: code_challenge
+          in: query
+          required: true
+          schema: *a4
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema:
+            type: string
+            const: S256
+        - name: state
+          in: query
+          required: false
+          schema: *a4
+        - name: resource
+          in: query
+          required: false
+          schema: *a4
+      responses:
+        "302":
+          description: Redirección OAuth
+        "303":
+          description: Interacción de login/consentimiento o callback del cliente
+          headers:
+            Location:
+              schema: *a4
+        "400":
+          description: Solicitud, redirección, recurso o PKCE inválidos
+        "404": *a3
+  /oauth/authorize/{uid}:
+    get:
+      tags:
+        - oauth
+      summary: Reanuda una autorización tras el consentimiento
+      security: *a2
+      parameters:
+        - &a6
+          name: uid
+          in: path
+          required: true
+          schema: *a4
+      responses:
+        "302":
+          description: Callback OAuth
+        "303":
+          description: Callback con code, state e iss, o error=access_denied
+        "400":
+          description: Interacción caducada o no válida
+        "404": *a3
+  /oauth/interaction/{uid}/details:
+    get:
+      tags:
+        - oauth
+      summary: Cliente y permisos de la solicitud de consentimiento
+      security: *a5
+      parameters:
+        - *a6
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthInteractionDetails"
+        "400":
+          description: Interacción no válida o caducada
+        "401":
+          description: Falta sesión de neopen
+        "404": *a3
+  /oauth/interaction/{uid}/confirm:
+    post:
+      tags:
+        - oauth
+      summary: Autoriza o deniega la conexión desde la sesión web
+      security:
+        - WebSession: []
+          CsrfToken: []
+      parameters:
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - approve
+              properties:
+                approve:
+                  type: boolean
+              additionalProperties: false
+      responses:
+        "200":
+          description: URL para reanudar el protocolo OAuth
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - redirectTo
+                properties:
+                  redirectTo:
+                    type: string
+                    format: uri-reference
+                additionalProperties: false
+        "400":
+          description: Interacción o decisión inválidas
+        "401":
+          description: Falta sesión de neopen
+        "403":
+          description: CSRF inválido
+        "404": *a3
+  /oauth/token:
+    post:
+      tags:
+        - oauth
+      summary: Canjea un código PKCE o renueva un token de acceso
+      security: *a2
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - grant_type
+                - client_id
+              properties:
+                grant_type:
+                  type: string
+                  enum:
+                    - authorization_code
+                    - refresh_token
+                client_id: *a4
+                code: *a4
+                code_verifier: *a4
+                redirect_uri:
+                  type: string
+                  format: uri
+                refresh_token: *a4
+                resource:
+                  type: string
+                  format: uri
+                scope: *a4
+              additionalProperties: false
+      responses:
+        "200":
+          description: Token opaco para la audiencia MCP; el refresco rota al utilizarse
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - access_token
+                  - token_type
+                  - expires_in
+                properties:
+                  access_token: *a4
+                  token_type:
+                    type: string
+                    const: Bearer
+                  expires_in:
+                    type: integer
+                    maximum: 3600
+                  refresh_token: *a4
+                  scope: *a4
+                additionalProperties: false
+        "400":
+          description: Código, PKCE, cliente o refresco no válidos; el reuso revoca la cadena
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "404": *a3
+    options:
+      tags:
+        - oauth
+      summary: Preflight CORS del protocolo OAuth
+      security: *a2
+      responses:
+        "200":
+          description: CORS permitido
+        "204":
+          description: CORS permitido
+        "404": *a3
+  /oauth/register:
+    post:
+      tags:
+        - oauth
+      summary: Registro dinámico DCR de un cliente OAuth público
+      security: *a2
+      description: Alternativa a CIMD para clientes compatibles. No concede acceso hasta el consentimiento del
+        propietario. Límite de 20 registros por minuto e IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - redirect_uris
+              properties:
+                redirect_uris:
+                  type: array
+                  items:
+                    type: string
+                    format: uri
+                client_name: *a4
+                token_endpoint_auth_method:
+                  type: string
+                  const: none
+                response_types:
+                  type: array
+                  items:
+                    type: string
+                    const: code
+                grant_types:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - authorization_code
+                      - refresh_token
+                application_type:
+                  type: string
+                  enum:
+                    - web
+                    - native
+      responses:
+        "201":
+          description: Cliente registrado
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - client_id
+                properties:
+                  client_id: *a4
+                  redirect_uris:
+                    type: array
+                    items: *a4
+                  client_name: *a4
+        "400":
+          description: Metadatos de cliente inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "404": *a3
+        "429":
+          description: Demasiados registros
+  /oauth/register/{clientId}:
+    get:
+      tags:
+        - oauth
+      summary: Lectura de metadatos de registro del proveedor OAuth
+      security:
+        - OAuthRegistrationToken: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema: *a4
+      description: Endpoint estándar del proveedor. La administración dinámica está desactivada y las conexiones MCP
+        usan CIMD o el client_id devuelto al registrar.
+      responses:
+        "200":
+          description: Metadatos de registro
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Token de registro no válido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "404": *a3
+  /oauth/revoke:
+    post:
+      tags:
+        - oauth
+      summary: Revoca un token y su concesión OAuth
+      security: *a2
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - token
+                - client_id
+              properties:
+                token: *a4
+                client_id: *a4
+                token_type_hint:
+                  type: string
+                  enum:
+                    - access_token
+                    - refresh_token
+              additionalProperties: false
+      responses:
+        "200":
+          description: Revocación procesada; no revela si existía el token
+        "400":
+          description: Petición inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "404": *a3
+    options:
+      tags:
+        - oauth
+      summary: Preflight CORS del protocolo OAuth
+      security: *a2
+      responses:
+        "200":
+          description: CORS permitido
+        "204":
+          description: CORS permitido
+        "404": *a3
+  /oauth/jwks:
+    get:
+      tags:
+        - oauth
+      summary: Claves públicas del proveedor OAuth
+      security: *a2
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - keys
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                additionalProperties: false
+        "404": *a3
+    options:
+      tags:
+        - oauth
+      summary: Preflight CORS del protocolo OAuth
+      security: *a2
+      responses:
+        "200":
+          description: CORS permitido
+        "204":
+          description: CORS permitido
+        "404": *a3
+  /mcp:
+    post:
+      tags:
+        - mcp
+      summary: Endpoint Streamable HTTP para herramientas y recursos MCP
+      security: &a7
+        - McpOAuth:
+            - notes:read
+      description: Acepta MCP moderno y clientes anteriores mediante el SDK oficial. Los tokens solo sirven para
+        este recurso. Cada herramienta comprueba notes:read o notes:write; todas las escrituras requieren
+        expectedLibraryRevision. La biblioteca incluye no-sync. No acepta APP_PASSWORD ni la cookie web como
+        credenciales MCP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - jsonrpc
+                - method
+              properties:
+                jsonrpc:
+                  type: string
+                  const: "2.0"
+                id:
+                  type:
+                    - string
+                    - number
+                    - "null"
+                method: *a4
+                params:
+                  type: object
+      responses:
+        "200":
+          description: Respuesta JSON-RPC, resultado de herramienta/recurso o error MCP
+          content:
+            application/json:
+              schema:
+                type: object
+            text/event-stream:
+              schema: *a4
+        "202":
+          description: Notificación aceptada
+        "400":
+          description: Solicitud o versión MCP inválidas
+        "401":
+          description: Token ausente, caducado o revocado
+          headers:
+            WWW-Authenticate:
+              schema: *a4
+              description: Bearer resource_metadata=<URL RFC 9728>, scope=notes:read notes:write
+        "403":
+          description: Origen o permisos insuficientes
+        "404": *a3
+    options:
+      tags:
+        - mcp
+      summary: Preflight CORS MCP desde el origen de neopen
+      security: *a2
+      responses:
+        "204":
+          description: Preflight permitido
+        "403":
+          description: Origen no permitido
+        "404": *a3
+    get:
+      tags:
+        - mcp
+      summary: Método sin sesión de protocolo MCP
+      security: *a7
+      description: "El transporte es sin estado: no mantiene streams GET ni sesiones que terminar con DELETE. Con
+        credenciales válidas responde 405; las solicitudes sin token inician descubrimiento OAuth."
+      responses:
+        "401":
+          description: Token ausente o inválido
+        "403":
+          description: Origen no permitido
+        "404": *a3
+        "405":
+          description: Método no permitido
+    delete:
+      tags:
+        - mcp
+      summary: Método sin sesión de protocolo MCP
+      security: *a7
+      description: "El transporte es sin estado: no mantiene streams GET ni sesiones que terminar con DELETE. Con
+        credenciales válidas responde 405; las solicitudes sin token inician descubrimiento OAuth."
+      responses:
+        "401":
+          description: Token ausente o inválido
+        "403":
+          description: Origen no permitido
+        "404": *a3
+        "405":
+          description: Método no permitido
+    head:
+      tags:
+        - mcp
+      summary: Método sin sesión de protocolo MCP
+      security: *a7
+      description: "El transporte es sin estado: no mantiene streams GET ni sesiones que terminar con DELETE. Con
+        credenciales válidas responde 405; las solicitudes sin token inician descubrimiento OAuth."
+      responses:
+        "401":
+          description: Token ausente o inválido
+        "403":
+          description: Origen no permitido
+        "404": *a3
+        "405":
+          description: Método no permitido
+
 components:
   securitySchemes:
+    WebSession:
+      type: apiKey
+      in: cookie
+      name: neopen_session
+      description: Sesión web HttpOnly de ocho horas. Las escrituras requieren además X-CSRF-Token. Si existe
+        X-Auth-Password, se valida expresamente y tiene prioridad.
+    CsrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Token ligado a la sesión web; obtenerlo mediante GET /api/auth/session. Obligatorio en escrituras
+        autenticadas por cookie.
+    McpOAuth:
+      type: oauth2
+      description: Tokens opacos para el recurso /mcp. Descubrimiento RFC 9728 y RFC 8414; registro CIMD o DCR.
+      flows:
+        authorizationCode:
+          authorizationUrl: /oauth/authorize
+          tokenUrl: /oauth/token
+          refreshUrl: /oauth/token
+          scopes:
+            notes:read: Consultar notas, cuadernos y originales
+            notes:write: Gestionar notas y cuadernos existentes
+            offline_access: Renovar el acceso con refresh token
+    OAuthRegistrationToken:
+      type: http
+      scheme: bearer
+      description: Token de acceso de registro del proveedor OAuth, distinto del acceso al recurso MCP.
     PenPassword:
       type: apiKey
       in: header
       name: X-Auth-Password
-      description: Contraseña única del servidor (env `APP_PASSWORD`). Exigida en todo `/api/*` salvo `/api/health`.
+      description: Contraseña única del servidor (env `APP_PASSWORD`). Alternativa heredada a la sesión web en `/api/*`, salvo health público y endpoints que requieren cookie explícitamente. Nunca se acepta como token MCP.
 
   responses:
     Unauthorized:
-      description: Falta o es incorrecta la cabecera X-Auth-Password
+      description: Falta autenticación válida; la contraseña es incorrecta o la sesión web ha caducado
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -1338,6 +2101,102 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
+    WebSessionInfo:
+      type: object
+      required:
+        - csrfToken
+      properties:
+        csrfToken:
+          type: string
+          description: CSRF ligado a la cookie HttpOnly; no es un token MCP
+      additionalProperties: false
+    McpSettings:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        origin:
+          type: string
+          format: uri
+        url:
+          type: string
+          format: uri
+          description: URL canónica que debe introducirse en el cliente MCP
+      additionalProperties: false
+    OAuthInteractionDetails:
+      type: object
+      required:
+        - uid
+        - clientName
+        - scopes
+      properties:
+        uid: &a1
+          type: string
+        clientName: *a1
+        scopes:
+          type: array
+          items:
+            type: string
+            enum:
+              - notes:read
+              - notes:write
+              - offline_access
+      additionalProperties: false
+    OAuthMetadata:
+      type: object
+      required:
+        - issuer
+        - authorization_endpoint
+        - token_endpoint
+        - scopes_supported
+        - code_challenge_methods_supported
+      properties:
+        issuer:
+          type: string
+          format: uri
+        authorization_endpoint:
+          type: string
+          format: uri
+        token_endpoint:
+          type: string
+          format: uri
+        registration_endpoint:
+          type: string
+          format: uri
+        revocation_endpoint:
+          type: string
+          format: uri
+        jwks_uri:
+          type: string
+          format: uri
+        scopes_supported:
+          type: array
+          items: *a1
+        code_challenge_methods_supported:
+          type: array
+          items:
+            type: string
+            const: S256
+        client_id_metadata_document_supported:
+          type: boolean
+          const: true
+        authorization_response_iss_parameter_supported:
+          type: boolean
+          const: true
+    OAuthError:
+      type: object
+      required:
+        - error
+      properties:
+        error: *a1
+        error_description: *a1
+        error_uri:
+          type: string
+          format: uri
+      additionalProperties: true
     Error:
       type: object
       properties:
