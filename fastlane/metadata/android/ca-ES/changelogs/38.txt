@@ -1,0 +1,1 @@
+Corregida la pèrdua de traços en desconnectar o canviar de bolígraf i durant la vinculació amb el servidor. Els canvis de servidor protegeixen les dades pendents. Les reimportacions respecten l’opció triada i les exportacions ja no sobreescriuen altres fulls. Canviar el paper o la destinació de sincronització actualitza els fitxers. Inclou 22 proves de regressió noves.

@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.micapum.neopen.app.db.CaptureEntity
 import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.db.NotebookEntity
@@ -33,6 +35,7 @@ import net.micapum.neopen.core.data.detectOverlap
 import net.micapum.neopen.core.data.freshReimportStrokes
 import net.micapum.neopen.core.data.ReorderDto
 import net.micapum.neopen.core.data.resolveOfflineReimport
+import net.micapum.neopen.core.data.normalizedServerUrl
 import net.micapum.neopen.core.data.SobpDto
 import net.micapum.neopen.core.data.StrokeDto
 import net.micapum.neopen.core.pen.PaperLookup
@@ -73,6 +76,22 @@ object PenPageAction {
  * (Fase 3) se encolan en el outbox.
  */
 class NeopenRepository(private val db: NeopenDb) {
+    private val penIngestion = Mutex()
+    var onLocalCleared: () -> Unit = {}
+
+    /** La vinculación y el cambio de biblioteca no pueden adelantar una escritura BLE. */
+    suspend fun <T> withPenIngestionPaused(action: suspend () -> T): T = penIngestion.withLock { action() }
+
+    /** Evalúa el modo después de esperar cualquier transición, nunca antes. */
+    suspend fun persistPenPage(
+        page: StrokePage,
+        policy: OfflineReimportPolicy,
+        isLocal: suspend () -> Boolean,
+    ): Boolean = penIngestion.withLock {
+        val local = isLocal()
+        if (local) ingestPenPageLocalUnlocked(page, policy) else ingestPenPageUnlocked(page, policy)
+        local
+    }
 
     /** Umbral de detección de superposición (lo refresca el Graph desde los ajustes). */
     @Volatile
@@ -138,14 +157,22 @@ class NeopenRepository(private val db: NeopenDb) {
 
     /** Borra todo el contenido local (cambio de servidor / cierre de sesión). */
     suspend fun clearLocal() {
-        db.captures().clear()
-        db.notebooks().clear()
-        db.outbox().clear()
-        db.backgrounds().clear()
-        db.penPageUserActions().clear()
-        db.offlineImportWarnings().clear()
-        db.syncMeta().upsert(SyncMetaEntity())
+        db.withTransaction {
+            db.captures().clear()
+            db.notebooks().clear()
+            db.outbox().clear()
+            db.backgrounds().clear()
+            db.penPageUserActions().clear()
+            db.offlineImportWarnings().clear()
+            db.offlineNoteState().clear()
+            db.connectorSyncState().clear()
+            db.syncMeta().upsert(SyncMetaEntity())
+        }
+        onLocalCleared()
     }
+
+    suspend fun hasLibraryOrPendingChanges(): Boolean =
+        db.captures().getAll().isNotEmpty() || db.notebooks().getAll().isNotEmpty() || db.outbox().peek(1).isNotEmpty()
 
     // --- Fondos (plantilla detrás de los trazos) -------------------------------
 
@@ -470,7 +497,9 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun ingestPenPage(
         page: StrokePage,
         reimportPolicy: OfflineReimportPolicy = OfflineReimportPolicy.ASK,
-    ) {
+    ) = penIngestion.withLock { ingestPenPageUnlocked(page, reimportPolicy) }
+
+    private suspend fun ingestPenPageUnlocked(page: StrokePage, reimportPolicy: OfflineReimportPolicy) {
         val s = page.sobp
         val strokes = page.strokes.map { st ->
             StrokeDto(st.startTime, st.endTime, st.dots.map { DotDto(it.x, it.y, it.f, it.t) }, st.color, st.width)
@@ -609,7 +638,9 @@ class NeopenRepository(private val db: NeopenDb) {
     suspend fun ingestPenPageLocal(
         page: StrokePage,
         reimportPolicy: OfflineReimportPolicy = OfflineReimportPolicy.ASK,
-    ) {
+    ) = penIngestion.withLock { ingestPenPageLocalUnlocked(page, reimportPolicy) }
+
+    private suspend fun ingestPenPageLocalUnlocked(page: StrokePage, reimportPolicy: OfflineReimportPolicy) {
         val s = page.sobp
         val bookKey = "${s.section}.${s.owner}.${s.book}"
         val detected = PaperLookup.lookup(s.section, s.owner, s.book, s.page)
@@ -689,7 +720,7 @@ class NeopenRepository(private val db: NeopenDb) {
         val pending = db.outbox().peek(Int.MAX_VALUE)
         val migration = pending.filter { it.kind == OutboxKind.MIGRATE }
         if (migration.isNotEmpty()) {
-            check(migration.all { it.targetId?.trimEnd('/') == serverUrl.trimEnd('/') }) {
+            check(migration.all { it.targetId?.let(::normalizedServerUrl) == normalizedServerUrl(serverUrl) }) {
                 "Hay una migración pendiente hacia otro servidor"
             }
         }
@@ -776,7 +807,7 @@ class NeopenRepository(private val db: NeopenDb) {
             paperJson = Json.paperJson(paper),
             destination = "inbox",
         )
-        if (syncRemote) enqueueCreateCapture(input, entity) else db.captures().upsertOne(entity)
+        if (syncRemote) enqueueCreateCapture(input.copy(mergeMode = "forceNew"), entity) else db.captures().upsertOne(entity)
     }
 
     private suspend fun mergeReimportIntoCapture(
@@ -801,7 +832,8 @@ class NeopenRepository(private val db: NeopenDb) {
                 ),
             )
         }
-        if (syncRemote) enqueue(OutboxKind.CREATE_CAPTURE, target.id, Json.createCapture.toJson(input))
+        if (syncRemote) enqueue(OutboxKind.CREATE_CAPTURE, target.id,
+            Json.createCapture.toJson(input.copy(mergeMode = "mergeTarget", targetCaptureId = target.id)))
     }
 
     private fun warningEntity(
@@ -872,7 +904,10 @@ class NeopenRepository(private val db: NeopenDb) {
         for (op in db.outbox().peek(Int.MAX_VALUE)) {
             val payload = when (op.kind) {
                 OutboxKind.CREATE_CAPTURE -> Json.createCapture.fromJson(op.payloadJson)?.let {
-                    Json.createCapture.toJson(it.copy(notebookId = if (it.notebookId == oldId) newId else it.notebookId))
+                    Json.createCapture.toJson(it.copy(
+                        notebookId = if (it.notebookId == oldId) newId else it.notebookId,
+                        targetCaptureId = if (it.targetCaptureId == oldId) newId else it.targetCaptureId,
+                    ))
                 }
                 OutboxKind.PATCH_CAPTURE -> Json.capturePatch.fromJson(op.payloadJson)?.let {
                     Json.capturePatch.toJson(it.copy(notebookId = if (it.notebookId == oldId) newId else it.notebookId))

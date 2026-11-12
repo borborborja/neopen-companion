@@ -1,0 +1,1 @@
+Fixed lost strokes when disconnecting or switching pens and while linking a server. Server changes protect pending data. Reimports respect the chosen action, and exports no longer overwrite other sheets. Changing paper size or the sync destination now updates exported files. Includes 22 new regression tests.

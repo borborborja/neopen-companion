@@ -26,6 +26,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -235,6 +236,7 @@ class Graph(app: Application) {
     private val workManager = WorkManager.getInstance(app)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val penPersistence = PenPersistenceQueue(scope)
+    @Volatile private var libraryGeneration = 0L
 
     /** Incluye páginas y contadores del último volcado antes de iniciar push→pull. */
     suspend fun awaitPenPersistence(): Boolean = penPersistence.completion().await()
@@ -265,14 +267,11 @@ class Graph(app: Application) {
             // refrescamos widgets por página (lo hace una sola vez `onOfflineImportComplete`).
             // En tiempo real (una página cada vez) sí se sube/refresca al momento.
             val offline = page.source == "offline"
-            if (localMode) {
-                repo.ingestPenPageLocal(page, lastSettings.offlineReimportPolicy)
-                if (!offline) syncStatus.markPenSync(System.currentTimeMillis())
-            } else {
-                repo.ingestPenPage(page, lastSettings.offlineReimportPolicy)
-                if (!offline) syncStatus.markPenSync(System.currentTimeMillis())
-                if (!offline) syncNow()
+            val persistedLocally = repo.persistPenPage(page, lastSettings.offlineReimportPolicy) {
+                settings.flow.first().appMode == AppMode.LOCAL
             }
+            if (!offline) syncStatus.markPenSync(System.currentTimeMillis())
+            if (!persistedLocally && !offline) syncNow()
             if (!offline) {
                 scheduleConnectorSync()
                 net.micapum.neopen.app.widget.NotebooksWidget.refresh(app)
@@ -293,6 +292,10 @@ class Graph(app: Application) {
     val currentSettings: AppSettings get() = lastSettings
 
     init {
+        repo.onLocalCleared = {
+            libraryGeneration++
+            pen.knownOfflineCounts = emptyMap()
+        }
         // El estilo de trazo a sellar depende del boli (MAC) y de los ajustes actuales.
         pen.styleProvider = { mac -> lastSettings.styleFor(mac) }
         pen.connectionAllowed = { mac, manual ->
@@ -340,18 +343,23 @@ class Graph(app: Application) {
         // nota y, al terminar todo el volcado, sincroniza una sola vez.
         pen.onOfflineNoteImported = { note, total ->
             val mac = pen.state.value.mac
+            val generation = libraryGeneration
             if (mac != null) {
                 penPersistence.enqueue {
-                    db.offlineNoteState().upsert(
-                        OfflineNoteStateEntity(
-                            mac = mac,
-                            section = note.section,
-                            owner = note.owner,
-                            note = note.note,
-                            strokeCount = total,
-                            importedAt = System.currentTimeMillis(),
-                        ),
-                    )
+                    repo.withPenIngestionPaused {
+                        if (generation == libraryGeneration) {
+                            db.offlineNoteState().upsert(
+                                OfflineNoteStateEntity(
+                                    mac = mac,
+                                    section = note.section,
+                                    owner = note.owner,
+                                    note = note.note,
+                                    strokeCount = total,
+                                    importedAt = System.currentTimeMillis(),
+                                ),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -374,13 +382,13 @@ class Graph(app: Application) {
         // (por MAC) para que el gate pueda omitir las notas sin cambios al re-volcar.
         scope.launch {
             pen.state
-                .map { it.mac to it.notes }
+                .map { it.mac }
                 .distinctUntilChanged()
-                .collect { (mac, notes) ->
-                    if (mac != null && notes != null) {
-                        pen.knownOfflineCounts = db.offlineNoteState().forPen(mac)
-                            .associate { "${it.section}.${it.owner}.${it.note}" to it.strokeCount }
-                    }
+                .combine(db.offlineNoteState().observeAll()) { mac, rows ->
+                    rows.filter { it.mac == mac }.associate { "${it.section}.${it.owner}.${it.note}" to it.strokeCount }
+                }
+                .collect { counts ->
+                    pen.knownOfflineCounts = counts
                 }
         }
         // Mantén al día el flag de auto-volcado y el modo local desde los ajustes.
@@ -451,12 +459,15 @@ class Graph(app: Application) {
     /** Sincronización inmediata (al abrir la app, recuperar red o editar). */
     fun syncNow() {
         scheduleConnectorSync()
-        if (localMode) return
-        val once = OneTimeWorkRequestBuilder<SyncWorker>()
-            .setConstraints(netConstraints())
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .build()
-        workManager.enqueueUniqueWork("neopen-sync-now", ExistingWorkPolicy.APPEND_OR_REPLACE, once)
+        scope.launch {
+            // El collector de localMode puede ir detrás de la transición de vinculación.
+            if (settings.flow.first().appMode == AppMode.LOCAL) return@launch
+            val once = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(netConstraints())
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .build()
+            workManager.enqueueUniqueWork("neopen-sync-now", ExistingWorkPolicy.APPEND_OR_REPLACE, once)
+        }
     }
 
     /**

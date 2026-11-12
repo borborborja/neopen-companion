@@ -25,6 +25,7 @@ import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.app.render.ExportFormat
 import net.micapum.neopen.app.sync.PenService
+import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.capability.OcrOutcome
 import net.micapum.neopen.app.render.rasterizePng
 import net.micapum.neopen.app.render.renderNotebookPdf
@@ -120,9 +121,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _syncing.value = true
             val r = graph.sync.sync()
             _syncing.value = false
-            _status.value = if (r.ok) null else r.error
+            _status.value = if (r.ok) null else syncError(r.error)
         }
     }
+
+    private fun syncError(error: String?): String? =
+        if (error == SyncEngine.SERVER_CHANGE_BLOCKED) getApplication<Application>().getString(R.string.vm_server_change_blocked) else error
 
     /**
      * Prueba la conexión (sin guardar): comprueba que el servidor responde
@@ -205,7 +209,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onResult(false, getApplication<Application>().getString(R.string.vm_migration_failed, migrated.exceptionOrNull()?.message ?: ""))
                 return@launch
             }
-            graph.settings.update(settings.value.copy(serverUrl = clean, password = password, appMode = AppMode.FULL))
             graph.syncNow()
             onResult(true, null)
         }
@@ -224,7 +227,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Guarda los ajustes, aplica el calendario de sync y arranca/para el servicio BLE. */
     fun saveSettings(s: AppSettings) {
         viewModelScope.launch {
-            graph.settings.update(s)
+            val result = graph.sync.updateSettings(s)
+            if (!result.ok) {
+                _status.value = syncError(result.error)
+                return@launch
+            }
             graph.applySyncSchedule(s.syncMode, s.syncIntervalMin)
             val ctx = getApplication<Application>()
             // El servicio en primer plano se necesita para el segundo plano O para mostrar la
@@ -289,8 +296,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() {
         viewModelScope.launch {
-            graph.repo.clearLocal()
-            graph.settings.update(AppSettings())
+            graph.sync.logout()
         }
     }
 

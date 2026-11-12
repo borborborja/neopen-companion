@@ -228,6 +228,7 @@
     <!-- == ViewModel (vm_*) == -->
     <string name="vm_missing_server_url">Falta la URL del servidor</string>
     <string name="vm_invalid_url">URL no válida</string>
+    <string name="vm_server_change_blocked">No se ha cambiado el servidor: esta biblioteca tiene datos o cambios pendientes. Sincroniza o exporta tus datos y cierra sesión antes de usar otro servidor.</string>
     <string name="vm_no_response">Sin respuesta</string>
     <string name="vm_http_error">HTTP %1$d</string>
     <string name="vm_network_error">Error de red</string>

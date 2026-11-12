@@ -10,8 +10,10 @@ import net.micapum.neopen.app.data.OutboxKind
 import net.micapum.neopen.app.db.OutboxEntity
 import net.micapum.neopen.core.data.ApiFactory
 import net.micapum.neopen.core.data.AppMode
+import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.NeopenApi
 import net.micapum.neopen.core.data.SettingsStore
+import net.micapum.neopen.core.data.normalizedServerUrl
 import retrofit2.HttpException
 import retrofit2.Response
 import java.time.ZonedDateTime
@@ -26,6 +28,36 @@ class SyncEngine(
     private val mutex = Mutex()
     data class Result(val ok: Boolean, val pulled: Int = 0, val pushed: Int = 0, val error: String? = null)
 
+    companion object {
+        const val SERVER_CHANGE_BLOCKED = "server-change-blocked"
+    }
+
+    /** Con datos existentes, cambiar de servidor requiere cerrar la biblioteca explícitamente. */
+    suspend fun updateSettings(next: AppSettings): Result = mutex.withLock {
+        repo.withPenIngestionPaused {
+            val old = settings.flow.first()
+            val previous = normalizedServerUrl(old.syncServerUrl.ifBlank { old.serverUrl })
+            val target = normalizedServerUrl(next.serverUrl)
+            val changing = next.appMode != AppMode.LOCAL && previous.isNotBlank() && previous != target
+            if (changing) {
+                if (repo.hasLibraryOrPendingChanges()) return@withPenIngestionPaused Result(false, error = SERVER_CHANGE_BLOCKED)
+                repo.clearLocal()
+            }
+            // Vincular primero: una interrupción nunca permite usar el cursor antiguo en otro servidor.
+            if (next.appMode != AppMode.LOCAL && target.isNotBlank()) settings.bindSyncServer(target)
+            settings.update(if (changing) next.copy(serverPressureWidthEnabled = null, serverPressureWidthContrast = null) else next)
+            Result(true)
+        }
+    }
+
+    suspend fun logout() = mutex.withLock {
+        repo.withPenIngestionPaused {
+            repo.clearLocal()
+            settings.update(AppSettings())
+            settings.bindSyncServer("")
+        }
+    }
+
     suspend fun sync(): Result = mutex.withLock {
         val p = pushUnlocked()
         // Bajar sobre una escritura pendiente podría borrar la edición optimista.
@@ -38,16 +70,41 @@ class SyncEngine(
 
     /** Única excepción explícita al modo LOCAL: la vinculación pedida por el usuario. */
     suspend fun linkAndMerge(serverUrl: String, password: String): Result = mutex.withLock {
-        repo.prepareLinkMigration(serverUrl)
-        val result = drain(apiFactory(serverUrl), password, serverUrl, linking = true)
-        if (result.ok) repo.resetCursor()
-        result
+        repo.withPenIngestionPaused {
+            repo.prepareLinkMigration(serverUrl)
+            val result = drain(apiFactory(serverUrl), password, serverUrl, linking = true)
+            if (result.ok) {
+                repo.resetCursor()
+                settings.bindSyncServer(serverUrl)
+                // La ingesta pendiente relee este modo al liberar el gate y usa el outbox.
+                settings.update(settings.flow.first().copy(serverUrl = serverUrl, password = password, appMode = AppMode.FULL))
+            }
+            result
+        }
+    }
+
+    /** También protege contra cambios de URL hechos fuera del formulario de Ajustes. */
+    private suspend fun ensureServer(s: AppSettings): Boolean {
+        val target = normalizedServerUrl(s.serverUrl)
+        val bound = normalizedServerUrl(s.syncServerUrl)
+        if (bound.isNotBlank() && bound != target) {
+            if (repo.hasLibraryOrPendingChanges()) return false
+            return repo.withPenIngestionPaused {
+                if (repo.hasLibraryOrPendingChanges()) return@withPenIngestionPaused false
+                repo.clearLocal()
+                settings.bindSyncServer(target)
+                settings.update(settings.flow.first().copy(serverPressureWidthEnabled = null, serverPressureWidthContrast = null))
+                true
+            }
+        } else if (bound.isBlank()) settings.bindSyncServer(target)
+        return true
     }
 
     private suspend fun pullUnlocked(): Result {
         val s = settings.flow.first()
         if (s.appMode == AppMode.LOCAL) return Result(true)
         if (!s.configured) return Result(false, error = "Sin servidor configurado")
+        if (!ensureServer(s)) return Result(false, error = SERVER_CHANGE_BLOCKED)
         if (repo.outboxPeek(1).isNotEmpty()) return Result(false, error = "Hay cambios pendientes de subir")
         val api = apiFactory(s.serverUrl)
         var pulled = 0
@@ -56,6 +113,9 @@ class SyncEngine(
                 if (settings.flow.first().appMode == AppMode.LOCAL) return Result(true, pulled = pulled)
                 val cursor = repo.cursor()
                 val resp = api.changes(s.password, since = cursor, limit = 200)
+                if (normalizedServerUrl(settings.flow.first().serverUrl) != normalizedServerUrl(s.serverUrl)) {
+                    return Result(false, pulled = pulled, error = SERVER_CHANGE_BLOCKED)
+                }
                 repo.applyChanges(resp, System.currentTimeMillis())
                 pulled += resp.captures.size + resp.notebooks.size
                 if (!resp.hasMore) break
@@ -85,6 +145,7 @@ class SyncEngine(
         val s = settings.flow.first()
         if (s.appMode == AppMode.LOCAL) return Result(true)
         if (!s.configured) return Result(false, error = "Sin servidor configurado")
+        if (!ensureServer(s)) return Result(false, error = SERVER_CHANGE_BLOCKED)
         return drain(apiFactory(s.serverUrl), s.password, s.serverUrl)
     }
 
@@ -92,6 +153,9 @@ class SyncEngine(
         var pushed = 0
         while (true) {
             if (!linking && settings.flow.first().appMode == AppMode.LOCAL) return Result(true, pushed = pushed)
+            if (!linking && normalizedServerUrl(settings.flow.first().serverUrl) != normalizedServerUrl(serverUrl)) {
+                return Result(false, pushed = pushed, error = SERVER_CHANGE_BLOCKED)
+            }
             // Releer tras CADA respuesta: el CREATE anterior puede repuntar ids y payloads.
             val op = repo.outboxPeek(1).firstOrNull() ?: break
             val retryAt = op.lastError?.substringAfter("; retryAt=", "")?.toLongOrNull()
@@ -127,7 +191,7 @@ class SyncEngine(
             OutboxKind.DELETE_NOTEBOOK -> { checkResponse(api.deleteNotebook(pw, requireNotNull(op.targetId)), deleting = true); repo.acknowledge(op) }
             OutboxKind.REORDER_NOTEBOOK -> { checkResponse(api.reorderNotebook(pw, requireNotNull(op.targetId), requireNotNull(Json.reorder.fromJson(op.payloadJson)))); repo.acknowledge(op) }
             OutboxKind.MIGRATE -> {
-                check(op.targetId?.trimEnd('/') == serverUrl.trimEnd('/')) { "La migración pendiente pertenece a otro servidor" }
+                check(op.targetId?.let(::normalizedServerUrl) == normalizedServerUrl(serverUrl)) { "La migración pendiente pertenece a otro servidor" }
                 checkResponse(api.migrate(pw, requireNotNull(Json.migration.fromJson(op.payloadJson))))
                 repo.acknowledge(op)
             }

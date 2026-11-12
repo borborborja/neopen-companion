@@ -55,6 +55,8 @@ data class CreateCaptureInput(
     // el servidor archiva por SOBP.
     val notebookId: String? = null,
     val destination: String? = null,
+    val mergeMode: String? = null,
+    val targetCaptureId: String? = null,
 )
 
 data class RegisterPenInput(val mac: String, val name: String? = null, val firmware: String? = null)

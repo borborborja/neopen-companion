@@ -26,8 +26,8 @@ matching `versionName` and a new `versionCode`.
 
 ## fdroiddata metadata template
 
-The root `.fdroid.yml` is the build recipe. Its initial candidate points to the
-GitHub tag `v0.23.4`; automated updates still follow only explicit `fdroid-v*`
+The root `.fdroid.yml` is the build recipe. Its current candidate points to the
+GitHub tag `v0.23.5`; automated updates still follow only explicit `fdroid-v*`
 tags. This does not submit the app to F-Droid or create an F-Droid release.
 The repository must be publicly accessible before any F-Droid submission;
 publishing these files does not change its visibility.
@@ -64,9 +64,9 @@ RepoType: git
 Repo: https://github.com/borborborja/neopen-companion.git
 
 Builds:
-  - versionName: 0.23.4
-    versionCode: 37
-    commit: v0.23.4
+  - versionName: 0.23.5
+    versionCode: 38
+    commit: v0.23.5
     subdir: neopen
     gradle:
       - yes
@@ -81,6 +81,6 @@ Builds:
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^fdroid-v[0-9]+\.[0-9]+\.[0-9]+$
 UpdateCheckData: neopen/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
-CurrentVersion: 0.23.4
-CurrentVersionCode: 37
+CurrentVersion: 0.23.5
+CurrentVersionCode: 38
 ```

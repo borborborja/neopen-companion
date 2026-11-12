@@ -387,6 +387,9 @@ interface OfflineNoteStateDao {
     @Query("SELECT * FROM offline_note_state WHERE mac = :mac")
     suspend fun forPen(mac: String): List<OfflineNoteStateEntity>
 
+    @Query("SELECT * FROM offline_note_state")
+    fun observeAll(): Flow<List<OfflineNoteStateEntity>>
+
     @Query("DELETE FROM offline_note_state")
     suspend fun clear()
 }

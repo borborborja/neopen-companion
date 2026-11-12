@@ -1,0 +1,1 @@
+Corregida la pérdida de trazos al desconectar o cambiar de boli y durante la vinculación con el servidor. Los cambios de servidor protegen los datos pendientes. Las reimportaciones respetan la opción elegida y las exportaciones ya no sobrescriben otras hojas. Cambiar el papel o el destino de sincronización actualiza los archivos. Incluye 22 nuevas pruebas de regresión.
