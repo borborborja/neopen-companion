@@ -64,6 +64,11 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.26.0** — Reconoce la plantilla «Hoja en blanco» de Ncode Studio y muestra
+  su nombre traducido en las secciones sincronizadas. La creación y generación
+  A4/A5 se realizan en Studio web con servidor v0.26.0. Sin migraciones de datos;
+  `versionCode=41`.
+
 - **v0.25.0** — Libros de Ncode Studio por secciones con asignaciones por
   bolígrafo, previsualización, contador de códigos, operaciones por outbox y
   resolución explícita de conflictos hacia instancias actuales o históricas.

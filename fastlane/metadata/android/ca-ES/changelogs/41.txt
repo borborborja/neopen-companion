@@ -1,0 +1,1 @@
+Reconeix «Full en blanc» a les seccions dels llibres sincronitzats i en mostra el nom traduït. La plantilla es crea a Studio web amb servidor 0.26.0: A4/A5, quantitat configurable i sense línies ni numeració. Conserva els micropunts en generar amb Ncode. Sense migracions de dades.
