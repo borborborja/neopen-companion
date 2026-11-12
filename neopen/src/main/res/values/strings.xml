@@ -465,4 +465,5 @@
     <string name="studio_created_books">Libros creados: %1$d (incluidos los archivados)</string>
     <string name="studio_capacity_help">Varios libros pueden compartir código en bolígrafos distintos. Archivar conserva el código ocupado.</string>
     <string name="studio_server_suspended">Algunas operaciones pendientes necesitan una función que el servidor no tiene habilitada. Tus datos se conservan y las demás notas siguen sincronizándose.</string>
+    <string name="studio_blank_sheet">Hoja en blanco</string>
 </resources>

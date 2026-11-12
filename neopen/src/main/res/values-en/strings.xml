@@ -431,4 +431,5 @@
     <string name="studio_created_books">Books created: %1$d (including archived)</string>
     <string name="studio_capacity_help">Multiple books can share a code on different pens. Archiving keeps the code occupied.</string>
     <string name="studio_server_suspended">Some pending operations need a feature the server has not enabled. Your data is preserved and other notes continue syncing.</string>
+    <string name="studio_blank_sheet">Blank sheet</string>
 </resources>
