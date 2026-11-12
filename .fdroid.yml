@@ -7,26 +7,46 @@ IssueTracker: https://github.com/borborborja/neopen-companion/issues
 Changelog: https://github.com/borborborja/neopen-companion/releases
 
 AutoName: neopen
+Summary: Capture Neo smartpen handwriting locally or on your neopen server
+Description: |-
+  neopen captures handwriting from Neo smartpens over Bluetooth LE, including pages
+  stored in the pen's offline memory. Keep notebooks locally on the phone or
+  optionally synchronize with a neopen server.
+
+  This independent community project is not affiliated with NeoLAB Convergence Inc.
+
 RepoType: git
 Repo: https://github.com/borborborja/neopen-companion.git
 
 Builds:
-  - versionName: 0.23.5
-    versionCode: 38
-    commit: v0.23.5
+  - versionName: 0.24.0
+    versionCode: 39
+    commit: fdroid-v0.24.0
     subdir: neopen
     gradle:
       - yes
-    gradleprops:
-      - fdroid
-    scandelete:
+    output: build/outputs/apk/release/neopen-release-unsigned.apk
+    rm:
       - companion
       - live
       - neopen/signing
-    output: build/outputs/apk/release/neopen-release-unsigned.apk
+    gradleprops:
+      - fdroid
+
+MaintainerNotes: |-
+  Build only :neopen with -Pfdroid. This excludes :live, the separate keyboard app
+  with Google ML Kit, and disables upstream release signing. No Firebase or Google
+  Play Services SDK is included in the F-Droid variant.
+
+  core/PaperLookup requests notebook geometry XML from NeoLAB's public Firebase
+  Storage bucket using OkHttp. The request contains the paper section/owner/book
+  identifiers, not handwriting, and local capture still works if it fails.
+  OCR, LanguageTool, server sync and storage connectors are optional services
+  configured by the user; they are not required for local capture or notebooks.
+  These network features should be considered during the AntiFeatures review.
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^fdroid-v[0-9]+\.[0-9]+\.[0-9]+$
 UpdateCheckData: neopen/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
-CurrentVersion: 0.23.5
-CurrentVersionCode: 38
+CurrentVersion: 0.24.0
+CurrentVersionCode: 39
