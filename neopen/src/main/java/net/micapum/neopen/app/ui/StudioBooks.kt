@@ -166,7 +166,10 @@ private fun StudioBookDialog(vm: MainViewModel, row: CachedStudioBook, rows: Lis
                 Text(stringResource(R.string.studio_sections), style = MaterialTheme.typography.titleSmall)
                 book.recipe.cover?.get("title")?.let { Text(stringResource(R.string.studio_cover, it.toString())) }
                 book.recipe.sections.forEach { section ->
-                    Text(stringResource(when (section.kind) { "pdf" -> R.string.studio_section_pdf; "blank" -> R.string.studio_section_blank; else -> R.string.studio_section_template }, section.label.ifBlank { section.kind }))
+                    val fallbackLabel = if (section.kind == "template" && section.config?.get("template") == "blank") {
+                        stringResource(R.string.studio_blank_sheet)
+                    } else section.kind
+                    Text(stringResource(when (section.kind) { "pdf" -> R.string.studio_section_pdf; "blank" -> R.string.studio_section_blank; else -> R.string.studio_section_template }, section.label.ifBlank { fallbackLabel }))
                     if (section.kind == "pdf") Text(stringResource(R.string.studio_import_range, section.fromPage ?: 1, section.toPage ?: 1))
                     if (section.kind == "blank") Text(stringResource(R.string.studio_blank_count, section.pageCount ?: 0))
                 }

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: neopen API
-  version: "0.25.0"
+  version: "0.26.0"
   description: |
     Contrato de la API del servidor neopen, pensado como **fuente de verdad para
     clientes nativos** (companion Android/iOS) además del frontend web.
@@ -3413,6 +3413,11 @@ components:
           config:
             type: object
             description: StudioConfig completo, con fechas o cantidad, idioma, márgenes y estilo. Se congela al reservar.
+            properties:
+              template:
+                type: string
+                enum: [daily, dayPlanner, weekly, weeklyLined, monthly, todo, blank, lined, grid, dots, music]
+                description: blank genera hojas sin diseño ni numeración, conservando el patrón Ncode del libro.
       - type: object
         required:
         - id

@@ -431,4 +431,5 @@
     <string name="studio_created_books">Llibres creats: %1$d (inclosos els arxivats)</string>
     <string name="studio_capacity_help">Diversos llibres poden compartir codi en bolígrafs diferents. Arxivar conserva el codi ocupat.</string>
     <string name="studio_server_suspended">Algunes operacions pendents necessiten una funció que el servidor no té habilitada. Les dades es conserven i les altres notes continuen sincronitzant-se.</string>
+    <string name="studio_blank_sheet">Full en blanc</string>
 </resources>

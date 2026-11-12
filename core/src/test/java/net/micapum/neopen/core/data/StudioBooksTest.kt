@@ -42,11 +42,15 @@ class StudioBooksTest {
         assertEquals(8, books.count { it.status != "deleted" })
     }
     @Test fun recipesPreserveMixedSectionsAndEpochThroughJson() {
-        val json = """{"id":"b","rev":4,"name":"Book","profileId":"p","section":3,"owner":27,"book":512,"format":"a5","recipe":{"version":1,"format":"a5","sections":[{"id":"pdf","kind":"pdf","fromPage":2,"toPage":5,"assetId":"asset"},{"id":"blank","kind":"blank","pageCount":3}],"borderSeed":4294967295},"pageCount":7,"status":"ready","createdAt":"now","updatedAt":"now","assignmentId":"binding","assignmentRevision":42}"""
+        val json = """{"id":"b","rev":4,"name":"Book","profileId":"p","section":3,"owner":27,"book":512,"format":"a5","recipe":{"version":1,"format":"a5","sections":[{"id":"pdf","kind":"pdf","fromPage":2,"toPage":5,"assetId":"asset"},{"id":"blank","kind":"blank","pageCount":3},{"id":"blank-template","kind":"template","config":{"template":"blank"}}],"borderSeed":4294967295},"pageCount":7,"status":"ready","createdAt":"now","updatedAt":"now","assignmentId":"binding","assignmentRevision":42}"""
         val adapter = apiMoshi().adapter(StudioBookDto::class.java)
         val book = requireNotNull(adapter.fromJson(json))
         assertEquals(4294967295L, book.recipe.borderSeed)
         assertEquals(42L, book.assignmentRevision)
-        assertEquals(2, requireNotNull(adapter.fromJson(adapter.toJson(book))).recipe.sections.first().fromPage)
+        val restored = requireNotNull(adapter.fromJson(adapter.toJson(book)))
+        assertEquals(2, restored.recipe.sections.first().fromPage)
+        assertEquals("template", restored.recipe.sections.last().kind)
+        assertEquals("", restored.recipe.sections.last().label)
+        assertEquals("blank", restored.recipe.sections.last().config?.get("template"))
     }
 }

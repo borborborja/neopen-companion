@@ -1,0 +1,1 @@
+Recognizes “Blank sheet” in synced book sections and displays its translated name. Create the template in Studio web with server 0.26.0: A4/A5, configurable page count, no lines or numbering. Ncode output retains its microdots. No data migrations.

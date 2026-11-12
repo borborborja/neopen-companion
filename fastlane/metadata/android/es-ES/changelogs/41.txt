@@ -1,0 +1,1 @@
+Reconoce «Hoja en blanco» en las secciones de los libros sincronizados y muestra su nombre traducido. La plantilla se crea en Studio web con servidor 0.26.0: A4/A5, cantidad configurable y sin líneas ni numeración. Conserva los micropuntos al generar con Ncode. Sin migraciones de datos.
