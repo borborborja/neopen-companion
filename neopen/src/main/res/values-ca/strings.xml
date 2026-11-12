@@ -367,4 +367,5 @@
     <string name="offline_reimport_action_new_capture">Nova edició</string>
     <string name="offline_reimport_action_merge">Fusionar</string>
     <string name="vm_offline_reimport_merge_failed">No s\'ha pogut fusionar aquesta reimportació.</string>
+    <string name="vm_server_change_blocked">No s’ha canviat el servidor: aquesta biblioteca té dades o canvis pendents. Sincronitza o exporta les dades i tanca la sessió abans d’utilitzar un altre servidor.</string>
 </resources>

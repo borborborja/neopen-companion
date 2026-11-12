@@ -150,6 +150,7 @@ class PenManager(
     private val strokeDots = ArrayList<Dot>()
     private val pageStrokes = ArrayList<Stroke>()
     private var pageSobp: Sobp? = null
+    private var pagePenMac: String? = null
     private val idleFlush = Runnable { flushPage() }
 
     private val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
@@ -280,6 +281,7 @@ class PenManager(
     }
 
     private fun connect(device: BluetoothDevice) {
+        finishOnlineSession()
         if (target?.address != device.address) {
             // Las intenciones de recuperación pertenecen al boli anterior, no al
             // siguiente dispositivo que aparezca durante un escaneo manual.
@@ -311,6 +313,7 @@ class PenManager(
 
     /** Cierra el GATT actual y reintenta (hasta 3 veces) ante un fallo de conexión (133). */
     private fun retryOrFail() {
+        finishOnlineSession()
         gatt?.close()
         gatt = null
         resetTransport()
@@ -334,6 +337,7 @@ class PenManager(
     fun disconnect() {
         if (Looper.myLooper() != main.looper) { main.post { disconnect() }; return }
         log("Detener / desconectar solicitado")
+        finishOnlineSession()
         connecting = false
         target = null
         main.removeCallbacksAndMessages(null)
@@ -460,6 +464,7 @@ class PenManager(
                 main.postDelayed({ if (gatt === g) g.discoverServices() }, 250)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 log("GATT desconectado")
+                finishOnlineSession()
                 connecting = false
                 g.close()
                 if (gatt === g) gatt = null
@@ -743,6 +748,7 @@ class PenManager(
         // Cambio de página → cierra la anterior antes de acumular en la nueva.
         if (sobp != null && pageSobp != null && pageSobp != sobp) flushPage()
         if (sobp != null) pageSobp = sobp
+        if (pageStrokes.isEmpty()) pagePenMac = _state.value.mac
         pageStrokes.add(stroke)
         log("✏ Trazo: ${strokeDots.size} dots (página ${pageStrokes.size}, sobp ${sobp?.section}.${sobp?.owner}.${sobp?.book}.${sobp?.page})")
         strokeDots.clear()
@@ -757,9 +763,25 @@ class PenManager(
         val sobp = pageSobp ?: return
         if (pageStrokes.isEmpty()) return
         log("📄 Página completa sobp ${sobp.section}.${sobp.owner}.${sobp.book}.${sobp.page}: ${pageStrokes.size} trazos → subiendo al servidor…")
-        onPage(StrokePage(sobp, "realtime", iso.format(System.currentTimeMillis()), pageStrokes.toList(), _state.value.mac))
+        onPage(StrokePage(sobp, "realtime", iso.format(System.currentTimeMillis()), pageStrokes.toList(), pagePenMac))
         pageStrokes.clear()
         pageSobp = null
+        pagePenMac = null
+        update { it.copy(capturedPages = 0) }
+    }
+
+    /** Entrega la tinta antes de cerrar/cambiar el GATT; nada se hereda al siguiente boli. */
+    private fun finishOnlineSession() {
+        if (strokeDots.isNotEmpty()) endStroke()
+        flushPage()
+        main.removeCallbacks(idleFlush)
+        currentSobp = null
+        strokeDots.clear()
+        strokeStart = 0L
+        penTime = 0L
+        pageStrokes.clear()
+        pageSobp = null
+        pagePenMac = null
         update { it.copy(capturedPages = 0) }
     }
 

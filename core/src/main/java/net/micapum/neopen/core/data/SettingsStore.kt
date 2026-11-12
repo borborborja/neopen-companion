@@ -19,6 +19,7 @@ import net.micapum.neopen.core.pen.StrokeStyle
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyStore
+import java.net.URI
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -91,8 +92,22 @@ enum class OfflineReimportPolicy { ASK, DISCARD, NEW_CAPTURE, MERGE }
  */
 enum class AppMode { BRIDGE, FULL, LOCAL }
 
+/** Identidad del servidor: el host y la barra final no crean bibliotecas distintas. */
+fun normalizedServerUrl(url: String): String = runCatching {
+    val uri = URI(url.trim())
+    val scheme = uri.scheme?.lowercase()
+    val port = when {
+        scheme == "https" && uri.port == 443 -> -1
+        scheme == "http" && uri.port == 80 -> -1
+        else -> uri.port
+    }
+    URI(scheme, uri.userInfo, uri.host?.lowercase(), port, uri.path.orEmpty().trimEnd('/'), uri.query, uri.fragment).toString()
+}.getOrDefault(url.trim().trimEnd('/'))
+
 data class AppSettings(
     val serverUrl: String = "",
+    /** Propietario de Room/cursor/outbox; solo SyncEngine puede cambiar este vínculo. */
+    val syncServerUrl: String = "",
     val password: String = "",
     /** Mantener la conexión al boli en segundo plano (servicio en primer plano). */
     val backgroundEnabled: Boolean = false,
@@ -184,6 +199,7 @@ data class AppSettings(
 class SettingsStore(private val context: Context) {
     private object Keys {
         val url = stringPreferencesKey("server_url")
+        val syncServer = stringPreferencesKey("sync_server_url")
         val pw = stringPreferencesKey("password")
         val bg = booleanPreferencesKey("background")
         val mode = stringPreferencesKey("sync_mode")
@@ -231,6 +247,7 @@ class SettingsStore(private val context: Context) {
         val pw = PwCrypto.decrypt(p[Keys.pw] ?: "")
         AppSettings(
             serverUrl = url,
+            syncServerUrl = p[Keys.syncServer] ?: "",
             password = pw,
             backgroundEnabled = p[Keys.bg] ?: false,
             syncMode = runCatching { SyncMode.valueOf(p[Keys.mode] ?: "MANUAL") }.getOrDefault(SyncMode.MANUAL),
@@ -314,6 +331,14 @@ class SettingsStore(private val context: Context) {
             p[Keys.ltLocal] = encodeLtLocal(s.ltLocal)
             p[Keys.webdavLocal] = encodeWebdavLocal(s.webdavLocal)
             p[Keys.ftpLocal] = encodeFtpLocal(s.ftpLocal)
+        }
+    }
+
+    /** Separado de update: guardar un formulario antiguo no puede borrar el vínculo. */
+    suspend fun bindSyncServer(serverUrl: String) {
+        context.dataStore.edit { p ->
+            if (serverUrl.isBlank()) p.remove(Keys.syncServer)
+            else p[Keys.syncServer] = normalizedServerUrl(serverUrl)
         }
     }
 

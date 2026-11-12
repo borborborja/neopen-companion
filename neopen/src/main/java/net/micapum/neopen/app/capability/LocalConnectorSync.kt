@@ -3,7 +3,6 @@ package net.micapum.neopen.app.capability
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import net.micapum.neopen.app.Graph
 import net.micapum.neopen.app.data.Capture
@@ -11,6 +10,7 @@ import net.micapum.neopen.app.data.Json
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.data.toDomain
 import net.micapum.neopen.app.db.ConnectorSyncStateEntity
+import net.micapum.neopen.app.db.NeopenDb
 import net.micapum.neopen.app.render.rasterizePng
 import net.micapum.neopen.app.render.renderNotebookPdf
 import net.micapum.neopen.app.render.renderPagePdf
@@ -20,6 +20,7 @@ import net.micapum.neopen.core.capability.FtpConnector
 import net.micapum.neopen.core.capability.WebdavConnector
 import net.micapum.neopen.core.data.AppSettings
 import net.micapum.neopen.core.data.CapabilitySource
+import net.micapum.neopen.core.data.SettingsStore
 import java.security.MessageDigest
 import kotlin.math.roundToInt
 
@@ -33,7 +34,11 @@ import kotlin.math.roundToInt
  * hace el motor del servidor; el repliegue de conectores no aplica al failover de
  * la transcripción que pidió el usuario).
  */
-class LocalConnectorSync(private val graph: Graph) {
+class LocalConnectorSync internal constructor(
+    private val db: NeopenDb,
+    private val settings: SettingsStore,
+) {
+    constructor(graph: Graph) : this(graph.db, graph.settings)
 
     private val mutex = Mutex()
 
@@ -48,13 +53,11 @@ class LocalConnectorSync(private val graph: Graph) {
     }
 
     private suspend fun reconcile() {
-        val s = graph.settings.flow.first()
+        val s = settings.flow.first()
         if (s.connectorSyncSource != CapabilitySource.PHONE) return
         val connectors = buildConnectors(s)
         if (connectors.isEmpty()) return
-        val connectorById = connectors.associateBy { it.id }
 
-        val db = graph.db
         val captures = db.captures().getAll().map { it.toDomain() }
         val notebooks = db.notebooks().getAll().map { it.toDomain() }
         val nbById = notebooks.associateBy { it.id }
@@ -69,8 +72,15 @@ class LocalConnectorSync(private val graph: Graph) {
             s.pressureWidthEnabled,
             s.pressureWidthContrast,
         )
+        reconcileFiles(desired, connectors)
+    }
+
+    /** Se retiran rutas antiguas solo cuando ninguna otra fila las sigue usando. */
+    internal suspend fun reconcileFiles(desired: Map<String, Desired>, connectors: List<FileConnector>) {
+        val connectorById = connectors.associateBy { it.id }
         val stateRows = db.connectorSyncState().all()
         val stateByKey = stateRows.associateBy { fileKey(it.itemId, it.connectorId, it.format) }
+        val retiredPaths = LinkedHashSet<Pair<String, String>>()
 
         // Altas / cambios / movimientos.
         for ((key, d) in desired) {
@@ -80,9 +90,6 @@ class LocalConnectorSync(private val graph: Graph) {
             runCatching {
                 val (bytes, contentType) = d.render()
                 val remotePath = connector.putPath(d.relativePath, bytes, contentType)
-                if (prev != null && prev.remotePath != remotePath) {
-                    runCatching { connector.delete(prev.remotePath) }
-                }
                 db.connectorSyncState().upsert(
                     ConnectorSyncStateEntity(
                         itemId = d.itemId,
@@ -93,6 +100,9 @@ class LocalConnectorSync(private val graph: Graph) {
                         syncedAt = System.currentTimeMillis(),
                     ),
                 )
+                if (prev != null && prev.remotePath != remotePath) {
+                    retiredPaths += d.connectorId to prev.remotePath
+                }
             }
         }
 
@@ -101,22 +111,27 @@ class LocalConnectorSync(private val graph: Graph) {
             if (desired.containsKey(fileKey(r.itemId, r.connectorId, r.format))) continue
             val connector = connectorById[r.connectorId]
             if (connector == null) {
+                // Destino anterior o estado legado sin huella: nunca borrar sus rutas
+                // usando las credenciales de un destino distinto.
                 db.connectorSyncState().delete(r.itemId, r.connectorId, r.format)
                 continue
             }
             runCatching {
-                connector.delete(r.remotePath)
+                val shared = db.connectorSyncState().all().any {
+                    it.connectorId == r.connectorId && it.remotePath == r.remotePath &&
+                        fileKey(it.itemId, it.connectorId, it.format) != fileKey(r.itemId, r.connectorId, r.format)
+                }
+                if (!shared) connector.delete(r.remotePath)
                 db.connectorSyncState().delete(r.itemId, r.connectorId, r.format)
             }
         }
+        for ((connectorId, path) in retiredPaths) {
+            val referenced = db.connectorSyncState().all().any { it.connectorId == connectorId && it.remotePath == path }
+            if (!referenced) runCatching { connectorById[connectorId]?.delete(path) }
+        }
     }
 
-    private fun buildConnectors(s: AppSettings): List<FileConnector> = buildList {
-        if (s.webdavLocal.isUsable) add(WebdavConnector(s.webdavLocal))
-        if (s.ftpLocal.isUsable) add(FtpConnector(s.ftpLocal))
-    }
-
-    private fun computeDesired(
+    internal fun computeDesired(
         captures: List<Capture>,
         notebooks: List<Notebook>,
         nbById: Map<String, Notebook>,
@@ -157,8 +172,8 @@ class LocalConnectorSync(private val graph: Graph) {
                 .filter { it.destination == "notebook" && it.notebookId == nb.id }
                 .sortedBy { it.position }
             if (pages.isEmpty()) continue
-            val folder = slug(nb.name)
-            val relativePath = "$folder/${slug(nb.name)}.pdf"
+            val folder = notebookFolder(nb)
+            val relativePath = "$folder/${slug(nb.name).take(80)}.pdf"
             val hash = notebookHash(nb, pages, relativePath, pressureWidthEnabled, pressureWidthContrast)
             for (cid in connectorIds) {
                 desired[fileKey("nb:${nb.id}", cid, "pdf")] = Desired(
@@ -181,11 +196,17 @@ class LocalConnectorSync(private val graph: Graph) {
     private fun folderFor(cap: Capture, nbById: Map<String, Notebook>): String = when (cap.destination) {
         "inbox" -> FOLDER_INBOX
         "loose" -> FOLDER_LOOSE
-        else -> slug(nbById[cap.notebookId]?.name ?: "cuaderno")
+        else -> nbById[cap.notebookId]?.let(::notebookFolder) ?: "cuaderno"
     }
 
-    /** Nombre de fichero de una hoja: slug del nombre + SOBP para evitar colisiones. */
-    private fun pageBaseName(cap: Capture): String = "${slug(cap.name)}-${cap.sobpLabel}"
+    /** El SOBP se reutiliza al partir/finalizar hojas; la identidad la da el id. */
+    private fun pageBaseName(cap: Capture): String = "${slug(cap.name).take(80)}-${cap.sobpLabel}-${safeId(cap.id)}"
+
+    private fun notebookFolder(nb: Notebook): String = "${slug(nb.name).take(80)}-${safeId(nb.id)}"
+
+    private fun safeId(id: String): String =
+        if (id.length <= 80 && id.matches(Regex("[A-Za-z0-9_-]+"))) id
+        else "~" + MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) }
 
     private fun renderFormat(
         cap: Capture,
@@ -238,12 +259,12 @@ class LocalConnectorSync(private val graph: Graph) {
     private fun pageHash(cap: Capture, format: String, path: String, pressureWidthEnabled: Boolean, pressureWidthContrast: Float): String =
         sha1(
             Json.strokesJson(cap.strokes) + "|" + cap.name + "|" + (Json.ocrJson(cap.transcription) ?: "") +
-                "|" + format + "|" + path + "|pw=$pressureWidthEnabled:${pressureWidthKey(pressureWidthContrast)}",
+                "|" + Json.paperJson(cap.paper) + "|" + format + "|" + path + "|pw=$pressureWidthEnabled:${pressureWidthKey(pressureWidthContrast)}",
         )
 
     private fun notebookHash(nb: Notebook, pages: List<Capture>, path: String, pressureWidthEnabled: Boolean, pressureWidthContrast: Float): String =
         sha1(
-            pages.joinToString("|") { it.id + ":" + it.position + ":" + Json.strokesJson(it.strokes) } +
+            pages.joinToString("|") { it.id + ":" + it.position + ":" + Json.strokesJson(it.strokes) + ":" + Json.paperJson(it.paper) } +
                 "||" + nb.name + "|" + path + "|pw=$pressureWidthEnabled:${pressureWidthKey(pressureWidthContrast)}",
         )
 
@@ -258,7 +279,7 @@ class LocalConnectorSync(private val graph: Graph) {
     private fun sha1(s: String): String =
         MessageDigest.getInstance("SHA-1").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    private data class Desired(
+    internal data class Desired(
         val itemId: String,
         val connectorId: String,
         val format: String,
@@ -274,6 +295,31 @@ class LocalConnectorSync(private val graph: Graph) {
 
         /** Formatos por hoja. png alimenta el embed del .md; pdf/md según reglas. */
         private val PAGE_FORMATS = listOf("png", "pdf", "md")
+
+        private fun buildConnectors(s: AppSettings): List<FileConnector> = buildList {
+            if (s.webdavLocal.isUsable) {
+                val c = s.webdavLocal
+                add(forDestination(WebdavConnector(c), c.url, c.username, c.basePath))
+            }
+            if (s.ftpLocal.isUsable) {
+                val c = s.ftpLocal
+                add(forDestination(FtpConnector(c), c.url, c.username, c.basePath))
+            }
+        }
+
+        /** Huella no secreta: rotar la contraseña conserva el mismo destino. */
+        internal fun destinationId(type: String, url: String, username: String, basePath: String): String {
+            val directory = ("/" + basePath).replace(Regex("/+"), "/").trimEnd('/').ifEmpty { "/" }
+            val identity = Json.stringList.toJson(listOf(url.trimEnd('/'), username, directory))
+            val hash = MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+            return "$type:$hash"
+        }
+
+        private fun forDestination(connector: FileConnector, url: String, username: String, basePath: String): FileConnector =
+            object : FileConnector by connector {
+                override val id = destinationId(connector.id, url, username, basePath)
+            }
     }
 }
 

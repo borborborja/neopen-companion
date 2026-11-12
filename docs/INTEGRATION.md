@@ -53,6 +53,24 @@ así que un desajuste **falla en silencio** (no rompe el build, pero el dato se 
   por SOBP ni borrado de Room. Los reintentos vuelven a tomar un snapshot local,
   incluyendo las ediciones hechas después de un fallo. Requiere servidor
   **v0.23.4 o posterior**; no usa `/api/import`.
+  La ingesta BLE comparte un bloqueo con la migración: las páginas que lleguen
+  durante el snapshot esperan hasta terminar la transición a FULL y entonces se
+  guardan con outbox. El primer pull nunca puede sobrescribir esos trazos. Un
+  error o cancelación libera el bloqueo y conserva el modo y los datos locales.
+- **Cambio de servidor**: Room, cursor y outbox conservan un vínculo persistido
+  al servidor propietario. Si existen capturas, cuadernos o escrituras pendientes,
+  Ajustes rechaza otra URL y conserva la configuración y los datos actuales; hay
+  que sincronizar/exportar y cerrar sesión explícitamente antes de cambiar. El
+  motor también rechaza una URL distinta introducida por otra vía, incluso tras
+  reiniciar, sin enviar pendientes ni hacer pull del servidor equivocado. Volver
+  a la URL original permite continuar. Con biblioteca vacía se reinician cursor,
+  cachés y contadores; cambiar contraseña, mayúsculas del host o barra final no
+  cambia la identidad del servidor.
+- **Decisiones de reimportación**: el DTO Android envía `mergeMode: forceNew`
+  cuando se pide otra captura, o `mergeMode: mergeTarget` con `targetCaptureId`
+  cuando se elige fusionar. Esos campos ya existían en el OpenAPI canónico; no
+  requieren cambiar la versión del contrato. Los IDs del payload se repuntan al
+  confirmar una captura temporal.
 - **Reintentos**: no se elimina ningún rechazo HTTP del outbox. Solo DELETE+404
   cuenta como éxito idempotente. `Retry-After` queda persistido junto al error;
   no se realiza pull mientras haya escrituras pendientes. El modo LOCAL no

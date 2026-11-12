@@ -367,4 +367,5 @@
     <string name="offline_reimport_action_new_capture">New edit</string>
     <string name="offline_reimport_action_merge">Merge</string>
     <string name="vm_offline_reimport_merge_failed">This reimport could not be merged.</string>
+    <string name="vm_server_change_blocked">The server was not changed: this library has data or pending changes. Sync or export your data and sign out before using another server.</string>
 </resources>

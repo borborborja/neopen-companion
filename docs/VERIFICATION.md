@@ -15,6 +15,7 @@ arriba es la que está verificada que funciona con Gradle.)
 ./gradlew :neopen:compileDebugKotlin :core:compileDebugKotlin   # check rápido de compilación
 ./gradlew :neopen:assembleDebug                                 # APK completo (incluye Room/KSP, dex, recursos)
 ./gradlew :core:testDebugUnitTest                               # tests unitarios de lógica pura (:core)
+./gradlew :neopen:testDebugUnitTest                             # regresiones de app con Room/HTTP y Robolectric
 ./gradlew checkApiContract checkFileModes                      # OpenAPI/Retrofit, Room 2..9 y permisos Git
 ./gradlew :neopen:connectedDebugAndroidTest                     # migraciones + outbox/delta en emulador API 34
 ./gradlew :live:compileDebugKotlin                              # :live también depende de :core
@@ -23,6 +24,14 @@ arriba es la que está verificada que funciona con Gradle.)
 `assembleDebug` es la verificación fuerte: valida KSP (Room), el merge de recursos
 (strings de los 3 idiomas) y el dexing de las dependencias. Hazlo siempre antes de
 publicar.
+
+Las regresiones de app incluyen `SyncBoundaryRegressionTest` (vinculación con
+escritura concurrente, cancelación, aislamiento de servidor, reimportación y
+reinicio del gate offline), `PenSessionPersistenceTest` (tinta pendiente al
+desconectar/cambiar de boli, conservando la MAC original) y
+`LocalConnectorSyncRegressionTest` (rutas independientes, cambios de papel/destino
+y limpieza segura de rutas compartidas o heredadas). Se ejecutan con
+`:neopen:testDebugUnitTest`, sin dispositivo BLE.
 
 ## Por tipo de cambio
 
