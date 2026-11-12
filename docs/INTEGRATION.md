@@ -20,7 +20,8 @@ El ecosistema son **dos repos** que evolucionan juntos:
   `./gradlew checkApiContract` comprueba checksum, versiones y que toda anotación
   Retrofit exista en la especificación.
 
-  La corrección de sincronización se publica conjuntamente en **v0.23.4**:
+  Las correcciones de captura y sincronización se publican conjuntamente en
+  **v0.23.5**:
   el manifiesto fija el tag de esa versión y el SHA de la copia canónica.
 
 - **Cliente Android**: `core/src/main/java/net/micapum/neopen/core/data/Api.kt`

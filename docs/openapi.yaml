@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: neopen API
-  version: "0.23.4"
+  version: "0.23.5"
   description: |
     Contrato de la API del servidor neopen, pensado como **fuente de verdad para
     clientes nativos** (companion Android/iOS) además del frontend web.
@@ -58,7 +58,7 @@ paths:
                 required: [ok, version]
                 properties:
                   ok: { type: boolean, const: true }
-                  version: { type: string, example: 0.23.4 }
+                  version: { type: string, example: 0.23.5 }
 
   /api/capabilities:
     get:

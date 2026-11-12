@@ -64,6 +64,12 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 
 ## Historial de releases relevantes
 
+- **v0.23.5** — Conserva la tinta al desconectar o cambiar de boli y durante la
+  vinculación con el servidor; protege los datos y operaciones pendientes al
+  cambiar de URL. Reimportaciones explícitas, contadores offline reiniciados al
+  vaciar datos y exportaciones independientes por hoja, cuaderno y destino.
+  Sin cambio de esquema Room ni ruptura de API; `versionCode=38`.
+
 - **v0.23.3** — Sanea el contrato cross-repo: snapshot OpenAPI canónico con
   checksum, tests Moshi de DTOs críticos, esquemas Room históricos 2..9 y pruebas
   instrumentadas de migraciones y outbox/delta-sync en Android 14. Sin cambio
