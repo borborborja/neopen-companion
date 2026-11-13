@@ -19,8 +19,8 @@ android {
         applicationId = "net.micapum.neopen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 41
-        versionName = "0.26.0"
+        versionCode = 42
+        versionName = "0.26.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-test-rules.pro")
         vectorDrawables { useSupportLibrary = true }

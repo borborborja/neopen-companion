@@ -15,7 +15,7 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
 2. **Verifica en local**:
    ```bash
    export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-   ./gradlew checkApiContract checkFileModes :core:testDebugUnitTest :neopen:assembleDebug
+   ./gradlew checkApiContract checkFileModes :core:testDebugUnitTest :neopen:testDebugUnitTest :neopen:assembleDebug :neopen:assembleGithub
    ```
 
 3. **Rama → commit → push → PR → merge** (dos commits: feature + `release: vX.Y.Z`):
@@ -34,7 +34,7 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
    ```
 
 5. **Tag** (apuntando a `main` ya actualizado). El push del tag dispara
-   `build-apk.yml`, que compila `neopen-debug.apk` y **publica la release** (no hay
+   `build-apk.yml`, que compila el APK optimizado `neopen.apk` y **publica la release** (no hay
    que crearla a mano):
    ```bash
    git checkout main && git pull --ff-only origin main
@@ -46,16 +46,27 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
    ```bash
    gh run watch <run-id-del-tag> --exit-status
    gh release view vX.Y.Z --json isDraft,assets --jq '{draft:.isDraft, assets:[.assets[].name]}'
-   # -> { "draft": false, "assets": ["neopen-debug.apk"] }
+   # -> { "draft": false, "assets": ["neopen.apk"] }
    ```
 
 ## Notas
+
+- GitHub distribuye la variante `github`, no depurable y optimizada con R8.
+  Conserva el identificador y el certificado de los APK anteriores, de modo que
+  se puede actualizar sin reinstalar. `debug` sigue disponible para desarrollo;
+  las rutas de firma de Play y del candidato F-Droid no cambian.
+- La CI comprueba el APK minificado en un job separado con
+  `-PinstrumentedBuildType=github :neopen:connectedGithubAndroidTest`.
 
 - **No tagear por debajo del último tag** (`git tag --sort=-v:refname | head`): GitHub
   podría no marcar la release como «Latest».
 - **Cliente vs servidor**: si la versión añade campos al contrato, el **servidor debe
   estar al día** o no sincroniza. Destaca los **breaking changes** en las notas de la
   release. Ver [INTEGRATION.md](INTEGRATION.md) y `neopen/docs/DESPLIEGUE.md`.
+- Las correcciones exclusivas de Android tienen versión propia. El manifiesto
+  OpenAPI conserva el tag del contrato del servidor utilizado; no se sube su
+  versión solo para igualarla con `versionName`. Android v0.26.1 sigue siendo
+  compatible con el contrato de servidor v0.26.0.
 - La release "latest" (prerelease) se actualiza en cada push a `main`; las versionadas
   (`vX.Y.Z`) son las estables.
 - **Servidor (repo `neopen`)**: su release es aparte (tag `v*` → imagen Docker;
@@ -63,6 +74,15 @@ repos está en `neopen/docs/DESPLIEGUE.md`; aquí va el lado Android.
   del servidor, publica también el servidor.
 
 ## Historial de releases relevantes
+
+- **v0.26.1** — Arranque y scroll optimizados: miniaturas preparadas fuera del
+  hilo principal, caché de 24 MiB, listas ligeras y menos cargas repetidas de
+  ajustes y sincronización. GitHub distribuye `neopen.apk`, no depurable y
+  optimizado con R8, con el mismo identificador y certificado de los APK
+  anteriores. Actualización comprobada conservando tinta y ajustes cifrados.
+  Sin migraciones de datos ni cambios de contrato; compatible con servidor
+  v0.26.0; `versionCode=42`. Las mejoras medidas corresponden al emulador API 34;
+  la validación física de fluidez en el Pixel 8a permanece pendiente.
 
 - **v0.26.0** — Reconoce la plantilla «Hoja en blanco» de Ncode Studio y muestra
   su nombre traducido en las secciones sincronizadas. La creación y generación
