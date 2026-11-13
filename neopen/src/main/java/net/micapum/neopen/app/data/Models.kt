@@ -42,9 +42,49 @@ data class Capture(
     val bookInstanceId: String? = null,
     val assignmentId: String? = null,
     val assignmentRevision: Long? = null,
+    /** Huella de la tinta y formato originales; nunca depende solo de la revisión remota. */
+    val visualFingerprint: String = "",
 ) {
     val sobpLabel get() = "$section.$owner.$book.$page"
     val writingPageKey get() = bookInstanceId?.let { "$it:$page" } ?: sobpLabel
+}
+
+/** Metadatos para listas: no carga ni deserializa la tinta o la transcripción completa. */
+data class CaptureSummary(
+    val id: String,
+    val rev: Long,
+    val section: Int,
+    val owner: Int,
+    val book: Int,
+    val page: Int,
+    val source: String,
+    val capturedAt: String,
+    val importedAt: String,
+    val updatedAt: String,
+    val name: String,
+    val tags: List<String>,
+    val destination: String,
+    val notebookId: String?,
+    val position: Int,
+    val paper: PaperDto?,
+    val kind: String?,
+    val sealed: Boolean,
+    val overlap: OverlapDto?,
+    val clonedFrom: String?,
+    val penId: String?,
+    val bookInstanceId: String?,
+    val assignmentId: String?,
+    val assignmentRevision: Long?,
+) {
+    val sobpLabel get() = "$section.$owner.$book.$page"
+    val writingPageKey get() = bookInstanceId?.let { "$it:$page" } ?: sobpLabel
+
+    /** Solo para acciones basadas en metadatos. Visor, miniatura y solapamientos leen el detalle. */
+    fun asMetadataCapture() = Capture(
+        id, rev, section, owner, book, page, source, capturedAt, importedAt, updatedAt,
+        name, tags, emptyList(), null, destination, notebookId, position, paper, kind,
+        sealed, overlap, clonedFrom, penId, bookInstanceId, assignmentId, assignmentRevision,
+    )
 }
 
 /** Aviso de trazos reimportados desde la memoria del boli que requieren decisión. */
@@ -101,6 +141,8 @@ data class PageBackground(
     val remote: Boolean,
     val bookInstanceId: String? = null,
     val assignmentId: String? = null,
+    /** Versión de la imagen: su ruta puede mantenerse al sustituir el fichero. */
+    val createdAt: String = "",
 )
 
 /** Adaptadores Moshi compartidos para (de)serializar los campos JSON de Room. */

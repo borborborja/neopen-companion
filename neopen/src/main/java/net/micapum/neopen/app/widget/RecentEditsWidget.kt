@@ -40,7 +40,7 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import net.micapum.neopen.app.MainActivity
 import net.micapum.neopen.app.R
-import net.micapum.neopen.app.data.Capture
+import net.micapum.neopen.app.data.CaptureSummary
 import net.micapum.neopen.app.graph
 
 private val RecentSmall = DpSize(180.dp, 110.dp)
@@ -58,10 +58,10 @@ class RecentEditsWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Responsive(setOf(RecentSmall, RecentLarge))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val flow = context.graph.repo.recent()
+        val flow = context.graph.repo.recentSummaries(8)
         provideContent {
             val recent by flow.collectAsState(emptyList())
-            RecentWidgetUi(context, recent.take(8))
+            RecentWidgetUi(context, recent)
         }
     }
 
@@ -75,7 +75,7 @@ class RecentEditsWidgetReceiver : GlanceAppWidgetReceiver() {
 }
 
 @Composable
-private fun RecentWidgetUi(context: Context, recent: List<Capture>) {
+private fun RecentWidgetUi(context: Context, recent: List<CaptureSummary>) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -108,7 +108,7 @@ private fun RecentWidgetUi(context: Context, recent: List<Capture>) {
 }
 
 @Composable
-private fun RecentRow(cap: Capture) {
+private fun RecentRow(cap: CaptureSummary) {
     Row(
         modifier = GlanceModifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

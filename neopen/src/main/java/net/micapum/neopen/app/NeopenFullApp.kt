@@ -22,6 +22,7 @@ import androidx.work.workDataOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,8 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import net.micapum.neopen.app.capability.CapabilityDispatcher
@@ -60,7 +63,6 @@ class NeopenFullApp : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = Graph(this)
-        graph.scheduleFromSettings()
         createChannel()
     }
 
@@ -254,6 +256,7 @@ class Graph(app: Application) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val penPersistence = PenPersistenceQueue(scope)
     @Volatile private var libraryGeneration = 0L
+    val previewLibraryGeneration: Long get() = libraryGeneration
     private data class BindingsSnapshot(val books: List<StudioBookDto> = emptyList(), val pens: List<PenInfoDto> = emptyList())
     @Volatile private var currentBindings = BindingsSnapshot()
     @Volatile private var offlineBindings: BindingsSnapshot? = null
@@ -264,6 +267,7 @@ class Graph(app: Application) {
     /** Debounce del espejo a conectores (colapsa ráfagas de cambios). */
     @Volatile
     private var connectorSyncJob: Job? = null
+    private var immediateSyncJob: Job? = null
 
     /** Modo local activo (sin servidor): el archivado se hace en el dispositivo. */
     @Volatile
@@ -418,12 +422,16 @@ class Graph(app: Application) {
         }
         // En cuanto se conoce la lista de notas del boli, carga sus contadores guardados
         // (por MAC) para que el gate pueda omitir las notas sin cambios al re-volcar.
+        @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
         scope.launch {
             pen.state
                 .map { it.mac }
                 .distinctUntilChanged()
-                .combine(db.offlineNoteState().observeAll()) { mac, rows ->
-                    rows.filter { it.mac == mac }.associate { "${it.section}.${it.owner}.${it.note}" to it.strokeCount }
+                .flatMapLatest { mac ->
+                    if (mac == null) flowOf(emptyList()) else db.offlineNoteState().observeByMac(mac)
+                }
+                .map { rows ->
+                    rows.associate { "${it.section}.${it.owner}.${it.note}" to it.strokeCount }
                 }
                 .collect { counts ->
                     pen.knownOfflineCounts = counts
@@ -431,12 +439,13 @@ class Graph(app: Application) {
         }
         // Mantén al día el flag de auto-volcado y el modo local desde los ajustes.
         scope.launch {
+            var scheduled = false
             settings.flow.collect {
-                val scheduleChanged = lastSettings.appMode != it.appMode || lastSettings.syncMode != it.syncMode || lastSettings.syncIntervalMin != it.syncIntervalMin
+                val scheduleChanged = !scheduled || lastSettings.appMode != it.appMode || lastSettings.syncMode != it.syncMode || lastSettings.syncIntervalMin != it.syncIntervalMin
                 lastSettings = it
                 pen.autoImportOnConnect = it.importOnConnect
                 localMode = it.appMode == AppMode.LOCAL
-                if (scheduleChanged) applySyncSchedule(it.syncMode, it.syncIntervalMin)
+                if (scheduleChanged) { applySyncSchedule(it.syncMode, it.syncIntervalMin); scheduled = true }
                 if (localMode) workManager.cancelUniqueWork("neopen-sync-now")
                 // El umbral de superposición lo lee la ingesta local (modo local).
                 repo.overlapConfig = OverlapConfig(
@@ -450,8 +459,10 @@ class Graph(app: Application) {
         _online.value = cm?.activeNetwork != null
         cm?.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                val recovered = !_online.value
                 _online.value = true
-                syncNow() // recuperamos red → sincroniza
+                // El callback inicial de una red ya disponible no duplica el sync de la UI.
+                if (recovered) syncNow()
             }
 
             override fun onLost(network: Network) {
@@ -478,14 +489,6 @@ class Graph(app: Application) {
         }
     }
 
-    /** Lee el modo de sync persistido y aplica el calendario (al arrancar). */
-    fun scheduleFromSettings() {
-        scope.launch {
-            val s = settings.flow.first()
-            applySyncSchedule(s.syncMode, s.syncIntervalMin)
-        }
-    }
-
     /** Encola la subida de una transcripción hecha en el teléfono y sincroniza. */
     fun enqueueTranscriptionSync(captureId: String) {
         scope.launch {
@@ -495,9 +498,12 @@ class Graph(app: Application) {
     }
 
     /** Sincronización inmediata (al abrir la app, recuperar red o editar). */
+    @Synchronized
     fun syncNow() {
         scheduleConnectorSync()
-        scope.launch {
+        immediateSyncJob?.cancel()
+        immediateSyncJob = scope.launch {
+            delay(250)
             // El collector de localMode puede ir detrás de la transición de vinculación.
             if (settings.flow.first().appMode == AppMode.LOCAL) return@launch
             val once = OneTimeWorkRequestBuilder<SyncWorker>()

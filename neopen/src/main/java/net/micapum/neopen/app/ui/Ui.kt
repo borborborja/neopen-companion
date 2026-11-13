@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.annotation.StringRes
+import androidx.activity.compose.ReportDrawn
+import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -119,6 +121,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -128,6 +131,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -146,8 +150,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import net.micapum.neopen.app.R
 import net.micapum.neopen.app.data.Capture
+import net.micapum.neopen.app.data.CaptureSummary
 import net.micapum.neopen.app.data.Notebook
 import net.micapum.neopen.app.data.OfflineImportWarning
 import net.micapum.neopen.app.data.PAPER_PRESETS
@@ -216,9 +222,15 @@ fun AppRoot(
     initialTab: String? = null,
     initialNotebookId: String? = null,
 ) {
-    val settings by vm.settings.collectAsStateWithLifecycle()
+    val loadedSettings by vm.initialSettings.collectAsStateWithLifecycle()
+    val settings = loadedSettings
+    if (settings == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
     val studioEnabled by vm.studioEnabled.collectAsStateWithLifecycle()
     if (!settings.setupComplete) {
+        ReportDrawn()
         SetupWizard(vm)
         return
     }
@@ -289,8 +301,6 @@ fun AppRoot(
     val pending by vm.pending.collectAsStateWithLifecycle()
     val offlineWarningCount by vm.pendingOfflineImportWarnings.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
-    val penState by vm.penState.collectAsStateWithLifecycle()
-
     Scaffold(
         topBar = { HomeBar(stringResource(activeTab.titleRes), syncing, pending, status != null, onSync = vm::syncNow) },
         floatingActionButton = {
@@ -308,7 +318,7 @@ fun AppRoot(
                             if (t == HomeTab.PEN) {
                                 Box {
                                     Icon(t.icon, null)
-                                    StatusDot(penDotColor(penState.status), Modifier.align(Alignment.TopEnd))
+                                    PenConnectionDot(vm, Modifier.align(Alignment.TopEnd))
                                 }
                             } else if (t == HomeTab.INBOX && offlineWarningCount > 0) {
                                 Box {
@@ -385,6 +395,12 @@ private fun HomeBar(
             }
         },
     )
+}
+
+@Composable
+private fun PenConnectionDot(vm: MainViewModel, modifier: Modifier) {
+    val status by vm.penConnectionStatus.collectAsStateWithLifecycle()
+    StatusDot(penDotColor(status), modifier)
 }
 
 @Composable
@@ -526,10 +542,15 @@ private fun NotebooksScreen(
     onOpenPage: (String) -> Unit,
     onEdit: (String) -> Unit,
 ) {
+    val ready by vm.notebooksLoaded.collectAsStateWithLifecycle()
+    ReportDrawnWhen { ready }
     val settings by vm.settings.collectAsStateWithLifecycle()
     val mode = runCatching { NotebookView.valueOf(settings.notebookView) }.getOrDefault(NotebookView.Mosaic)
     // Qué cuadernos están desplegados en la vista lista (se pierde al cerrar la app).
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
+    val expandedIds = if (mode == NotebookView.List) expanded.filterValues { it }.keys.toSet() else emptySet()
+    val expandedPages by remember(expandedIds) { vm.expandedSummaries(expandedIds) }
+        .collectAsStateWithLifecycle(initialValue = emptyMap())
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp),
@@ -563,22 +584,28 @@ private fun NotebooksScreen(
             NotebookView.Compact -> NotebookGrid(groups, hasCategories, 104.dp, true, vm, onOpen, onEdit)
             NotebookView.List -> LazyColumn(
                 contentPadding = PaddingValues(bottom = 12.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().testTag("notebook-list"),
             ) {
                 groups.forEach { (category, list) ->
                     if (hasCategories) item(key = "cat-$category") {
                         CategoryHeader(category ?: stringResource(R.string.category_none), list.size, Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                     }
-                    items(list, key = { it.id }) { nb ->
-                        NotebookTreeRow(
-                            vm = vm,
-                            nb = nb,
-                            notebooks = notebooks,
-                            expanded = expanded[nb.id] == true,
-                            onToggle = { expanded[nb.id] = !(expanded[nb.id] == true) },
-                            onOpenPage = onOpenPage,
-                            onEdit = onEdit,
-                        )
+                    list.forEach { nb ->
+                        item(key = "notebook-${nb.id}", contentType = "notebook") {
+                            NotebookTreeRow(vm, nb, expanded[nb.id] == true,
+                                onToggle = { expanded[nb.id] = !(expanded[nb.id] == true) }, onEdit = onEdit)
+                        }
+                        if (expanded[nb.id] == true) {
+                            val pages = expandedPages[nb.id]
+                            if (pages != null && pages.isEmpty()) item(key = "empty-${nb.id}") {
+                                Text(stringResource(R.string.notebook_no_sheets), modifier = Modifier.padding(start = 40.dp, bottom = 10.dp))
+                            }
+                            items(pages.orEmpty(), key = { "notebook-${nb.id}-page-${it.id}" }, contentType = { "page" }) { page ->
+                                Box(Modifier.padding(start = 24.dp, end = 8.dp, bottom = 8.dp)) {
+                                    PageListRow(vm, page, notebooks) { onOpenPage(page.id) }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -737,10 +764,8 @@ private fun NotebookCard(
 private fun NotebookTreeRow(
     vm: MainViewModel,
     nb: Notebook,
-    notebooks: List<Notebook>,
     expanded: Boolean,
     onToggle: () -> Unit,
-    onOpenPage: (String) -> Unit,
     onEdit: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
@@ -771,25 +796,6 @@ private fun NotebookTreeRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (!nb.unclassified) NotebookMenu(vm, nb, onEdit)
-        }
-        if (expanded) {
-            val pages by vm.capturesIn(nb.id).collectAsStateWithLifecycle(initialValue = emptyList())
-            if (pages.isEmpty()) {
-                Text(
-                    stringResource(R.string.notebook_no_sheets),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 40.dp, bottom = 10.dp),
-                )
-            } else {
-                Column(
-                    Modifier.padding(start = 24.dp, end = 8.dp, bottom = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    pages.forEach { p -> PageListRow(vm, p, notebooks, onClick = { onOpenPage(p.id) }) }
-                }
-            }
-            HorizontalDivider()
         }
     }
 }
@@ -878,7 +884,10 @@ private fun NotebookScreen(
     onOpenPage: (String) -> Unit,
     onBack: () -> Unit,
 ) {
-    val pages by vm.capturesIn(notebookId).collectAsStateWithLifecycle(initialValue = emptyList())
+    val loadedPages by remember(notebookId) { vm.captureSummariesIn(notebookId) }
+        .collectAsStateWithLifecycle(initialValue = null)
+    val pages = loadedPages.orEmpty()
+    ReportDrawnWhen { loadedPages != null }
     var mode by rememberSaveable { mutableStateOf(PageView.Grid) }
     Scaffold(
         topBar = {
@@ -902,7 +911,7 @@ private fun NotebookScreen(
         when (mode) {
             PageView.Grid -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(120.dp),
-                modifier = Modifier.padding(padding).fillMaxSize(),
+                modifier = Modifier.padding(padding).fillMaxSize().testTag("notebook-pages"),
                 contentPadding = PaddingValues(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -910,14 +919,14 @@ private fun NotebookScreen(
                 gridItems(pages, key = { it.id }) { p -> PageGridItem(vm, p, onClick = { onOpenPage(p.id) }) }
             }
             PageView.List -> LazyColumn(
-                modifier = Modifier.padding(padding).fillMaxSize(),
+                modifier = Modifier.padding(padding).fillMaxSize().testTag("notebook-pages"),
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(pages, key = { it.id }) { p -> PageListRow(vm, p, notebooks, onClick = { onOpenPage(p.id) }) }
             }
             PageView.Large -> LazyColumn(
-                modifier = Modifier.padding(padding).fillMaxSize(),
+                modifier = Modifier.padding(padding).fillMaxSize().testTag("notebook-pages"),
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -928,9 +937,9 @@ private fun NotebookScreen(
 }
 
 @Composable
-private fun PageGridItem(vm: MainViewModel, page: Capture, onClick: () -> Unit) {
+private fun PageGridItem(vm: MainViewModel, page: CaptureSummary, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
-        PageCanvas(vm, page, Modifier.fillMaxWidth().aspectRatio(0.8f).background(Color.White))
+        PageThumbnail(vm, page, Modifier.fillMaxWidth().aspectRatio(0.8f).background(Color.White))
         Text(
             page.name,
             style = MaterialTheme.typography.bodySmall,
@@ -942,10 +951,10 @@ private fun PageGridItem(vm: MainViewModel, page: Capture, onClick: () -> Unit) 
 }
 
 @Composable
-private fun PageListRow(vm: MainViewModel, page: Capture, notebooks: List<Notebook>, onClick: () -> Unit) {
+private fun PageListRow(vm: MainViewModel, page: CaptureSummary, notebooks: List<Notebook>, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
         Row(Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            PageCanvas(vm, page, Modifier.size(64.dp).background(Color.White, RoundedCornerShape(8.dp)))
+            PageThumbnail(vm, page, Modifier.size(64.dp).background(Color.White, RoundedCornerShape(8.dp)))
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(page.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -954,16 +963,16 @@ private fun PageListRow(vm: MainViewModel, page: Capture, notebooks: List<Notebo
                     Text(stringResource(R.string.page_no_format), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
             }
-            CaptureActions(vm, page, notebooks, asRow = false)
+            CaptureActions(vm, page.asMetadataCapture(), notebooks, asRow = false)
         }
     }
 }
 
 @Composable
-private fun PageLargeCard(vm: MainViewModel, page: Capture, notebooks: List<Notebook>) {
+private fun PageLargeCard(vm: MainViewModel, page: CaptureSummary, notebooks: List<Notebook>) {
     Card(Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(1.dp)) {
         Column {
-            PageCanvas(vm, page, Modifier.fillMaxWidth().height(360.dp).background(Color.White))
+            PageThumbnail(vm, page, Modifier.fillMaxWidth().height(360.dp).background(Color.White))
             Text(
                 page.name,
                 style = MaterialTheme.typography.titleSmall,
@@ -972,7 +981,7 @@ private fun PageLargeCard(vm: MainViewModel, page: Capture, notebooks: List<Note
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
             if (page.tags.isNotEmpty()) TagChips(page.tags, Modifier.padding(horizontal = 12.dp))
-            CaptureActions(vm, page, notebooks, asRow = true)
+            CaptureActions(vm, page.asMetadataCapture(), notebooks, asRow = true)
         }
     }
 }
@@ -982,7 +991,7 @@ private fun PageLargeCard(vm: MainViewModel, page: Capture, notebooks: List<Note
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Notebook>, onBack: () -> Unit) {
-    val capture by vm.captureFlow(captureId).collectAsStateWithLifecycle(initialValue = null)
+    val capture by remember(captureId) { vm.captureFlow(captureId) }.collectAsStateWithLifecycle(initialValue = null)
     val c = capture
     val books by vm.studioBooks.collectAsStateWithLifecycle()
     val studioEnabled by vm.studioEnabled.collectAsStateWithLifecycle()
@@ -1034,7 +1043,7 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
                     shadowElevation = 4.dp,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
-                    PageCanvas(vm, c, Modifier.fillMaxSize())
+                    PageCanvas(vm, c, Modifier.fillMaxSize().testTag("page-viewer"))
                 }
             }
             CaptureActions(vm, c, notebooks, asRow = true, onAfterDelete = onBack)
@@ -1068,26 +1077,18 @@ private fun PageViewer(vm: MainViewModel, captureId: String, notebooks: List<Not
 
 @Composable
 private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage: (String) -> Unit) {
-    val items by vm.recent.collectAsStateWithLifecycle()
     val warnings by vm.offlineImportWarnings.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    val searching = terms.isNotEmpty()
-    val matched = if (!searching) items else items.filter { c ->
-        val hay = buildString {
-            append(c.name.lowercase())
-            c.transcription?.let {
-                append(' ').append(it.title?.lowercase() ?: "").append(' ').append(it.text?.lowercase() ?: "")
-            }
-            c.tags.forEach { append(' ').append(it.lowercase()) }
-        }
-        terms.all { hay.contains(it) }
+    val debouncedQuery by produceState("", query) { delay(200); value = query.trim() }
+    val searching = debouncedQuery.isNotEmpty()
+    val source = remember(debouncedQuery, settings.recentShowCount, settings.recentClearedAt) {
+        if (searching) vm.searchCaptureSummaries(debouncedQuery)
+        else vm.recentSummaries(settings.recentShowCount, settings.recentClearedAt)
     }
-    // Sin búsqueda: oculta lo "limpiado" (por última edición) y limita a N.
-    val cleared = settings.recentClearedAt
-    val shown = if (searching) matched
-    else (if (cleared.isNotEmpty()) items.filter { it.updatedAt > cleared } else items).take(settings.recentShowCount)
+    val loaded by source.collectAsStateWithLifecycle(initialValue = null)
+    val shown = loaded.orEmpty()
+    ReportDrawnWhen { loaded != null }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -1115,12 +1116,12 @@ private fun InboxScreen(vm: MainViewModel, notebooks: List<Notebook>, onOpenPage
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         )
         if (shown.isEmpty() && warnings.isEmpty()) {
-            EmptyHint(if (items.isEmpty()) stringResource(R.string.inbox_empty) else stringResource(R.string.inbox_no_results))
+            EmptyHint(if (!searching && settings.recentClearedAt.isEmpty()) stringResource(R.string.inbox_empty) else stringResource(R.string.inbox_no_results))
         } else {
             LazyColumn(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().testTag("inbox-list"),
             ) {
                 items(warnings, key = { "offline-warning-${it.id}" }) { warning ->
                     OfflineImportWarningCard(vm, warning)
@@ -1370,7 +1371,8 @@ private fun CaptureActions(
         )
     }
     if (resolvingOverlap) {
-        OverlapResolverDialog(c, vm, onDismiss = { resolvingOverlap = false })
+        val full by remember(c.id) { vm.captureFlow(c.id) }.collectAsStateWithLifecycle(initialValue = null)
+        full?.let { OverlapResolverDialog(it, vm, onDismiss = { resolvingOverlap = false }) }
     }
     if (finalizing) {
         ConfirmDialog(

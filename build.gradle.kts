@@ -4,6 +4,7 @@ import java.security.MessageDigest
 plugins {
     id("com.android.application") version "8.5.2" apply false
     id("com.android.library") version "8.5.2" apply false
+    id("com.android.test") version "8.5.2" apply false
     id("org.jetbrains.kotlin.android") version "1.9.24" apply false
     id("com.google.devtools.ksp") version "1.9.24-1.0.20" apply false
 }
@@ -65,15 +66,21 @@ tasks.register("checkApiContract") {
         val contractVersion = Regex("""(?m)^  version: \"([^\"]+)\"$""")
             .find(specFile.readText())?.groupValues?.get(1)
             ?: error("No se encontró info.version en OpenAPI")
-        check(serverTag == "v$appVersion" && contractVersion == appVersion) {
-            "Versiones desalineadas: app=$appVersion, tag=$serverTag, OpenAPI=$contractVersion"
+        val stableVersion = Regex("""(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)""")
+        check(appVersion.matches(stableVersion)) {
+            "versionName debe ser una versión estable X.Y.Z: $appVersion"
+        }
+        // Un arreglo exclusivo de Android no cambia el contrato del servidor.
+        // El manifiesto identifica la versión exacta del snapshot, no la app.
+        check(contractVersion.matches(stableVersion) && serverTag == "v$contractVersion") {
+            "Snapshot desalineado: tag=$serverTag, OpenAPI=$contractVersion"
         }
 
         val schemaDir = file("neopen/schemas/net.micapum.neopen.app.db.NeopenDb")
         val missingSchemas = (2..10).filterNot { schemaDir.resolve("$it.json").isFile }
         check(missingSchemas.isEmpty()) { "Faltan esquemas Room: $missingSchemas" }
         logger.lifecycle(
-            "Contrato válido: ${retrofitOperations.size} operaciones Retrofit, snapshot $actualSha, Room 2..10.",
+            "Contrato válido: app $appVersion, servidor $serverTag, ${retrofitOperations.size} operaciones Retrofit, snapshot $actualSha, Room 2..10.",
         )
     }
 }

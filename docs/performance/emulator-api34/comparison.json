@@ -1,0 +1,324 @@
+{
+  "baseline_context": {
+    "build": {
+      "brand": "Android",
+      "device": "emu64x",
+      "fingerprint": "Android/sdk_phone64_x86_64/emu64x:14/UE1A.230829.036.A1/11228894:userdebug/test-keys",
+      "id": "UE1A.230829.036.A1",
+      "model": "Android SDK built for x86_64",
+      "type": "userdebug",
+      "version": {
+        "codename": "REL",
+        "sdk": 34
+      }
+    },
+    "cpuCoreCount": 2,
+    "cpuLocked": false,
+    "cpuMaxFreqHz": 2000,
+    "memTotalBytes": 2595381248,
+    "sustainedPerformanceModeEnabled": false,
+    "artMainlineVersion": 342090000,
+    "osCodenameAbbreviated": "U",
+    "compilationMode": "run-from-apk"
+  },
+  "after_context": {
+    "build": {
+      "brand": "Android",
+      "device": "emu64x",
+      "fingerprint": "Android/sdk_phone64_x86_64/emu64x:14/UE1A.230829.036.A1/11228894:userdebug/test-keys",
+      "id": "UE1A.230829.036.A1",
+      "model": "Android SDK built for x86_64",
+      "type": "userdebug",
+      "version": {
+        "codename": "REL",
+        "sdk": 34
+      }
+    },
+    "cpuCoreCount": 2,
+    "cpuLocked": false,
+    "cpuMaxFreqHz": 2000,
+    "memTotalBytes": 2595381248,
+    "sustainedPerformanceModeEnabled": false,
+    "artMainlineVersion": 342090000,
+    "osCodenameAbbreviated": "U",
+    "compilationMode": "run-from-apk"
+  },
+  "comparison": [
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.coldStart11Notes",
+      "metric": "memoryHeapSizeMaxKb.median",
+      "baseline": 61118.0,
+      "after": 41238.0,
+      "delta": -19880.0,
+      "change_percent": -32.52724238358585
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.coldStart11Notes",
+      "metric": "memoryRssAnonMaxKb.median",
+      "baseline": 183808.0,
+      "after": 110348.0,
+      "delta": -73460.0,
+      "change_percent": -39.965616295264624
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.coldStart11Notes",
+      "metric": "memoryRssFileMaxKb.median",
+      "baseline": 96984.0,
+      "after": 97152.0,
+      "delta": 168.0,
+      "change_percent": 0.17322444939371442
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.coldStart11Notes",
+      "metric": "timeToFullDisplayMs.median",
+      "baseline": 1203.342196,
+      "after": 809.675852,
+      "delta": -393.6663440000001,
+      "change_percent": -32.71441368121027
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.coldStart11Notes",
+      "metric": "timeToInitialDisplayMs.median",
+      "baseline": 460.135953,
+      "after": 358.355583,
+      "delta": -101.78036999999995,
+      "change_percent": -22.119629934677143
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameCount.median",
+      "baseline": 74.0,
+      "after": 109.0,
+      "delta": 35.0,
+      "change_percent": 47.2972972972973
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameDurationCpuMs.p50",
+      "baseline": 34.168159,
+      "after": 9.472975,
+      "delta": -24.695184000000005,
+      "change_percent": -72.27543046729559
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameDurationCpuMs.p90",
+      "baseline": 113.726816,
+      "after": 11.542896200000001,
+      "delta": -102.1839198,
+      "change_percent": -89.85033028621851
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameDurationCpuMs.p95",
+      "baseline": 130.0683,
+      "after": 13.253609299999999,
+      "delta": -116.8146907,
+      "change_percent": -89.81026945074242
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameDurationCpuMs.p99",
+      "baseline": 182.17497480000006,
+      "after": 18.81127794,
+      "delta": -163.36369686000006,
+      "change_percent": -89.67406035837146
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameOverrunMs.p50",
+      "baseline": 25.137682,
+      "after": -6.424901,
+      "delta": -31.562583000000004,
+      "change_percent": null
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameOverrunMs.p90",
+      "baseline": 141.27409,
+      "after": -4.143204799999999,
+      "delta": -145.4172948,
+      "change_percent": null
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameOverrunMs.p95",
+      "baseline": 160.306971,
+      "after": -2.631062100000002,
+      "delta": -162.9380331,
+      "change_percent": null
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "frameOverrunMs.p99",
+      "baseline": 269.56394820000094,
+      "after": 2.3475285,
+      "delta": -267.2164197000009,
+      "change_percent": -99.12913855295729
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "memoryHeapSizeMaxKb.median",
+      "baseline": 20153.0,
+      "after": 39051.0,
+      "delta": 18898.0,
+      "change_percent": 93.77263930928397
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "memoryRssAnonMaxKb.median",
+      "baseline": 160516.0,
+      "after": 111532.0,
+      "delta": -48984.0,
+      "change_percent": -30.516584016546638
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll11Notes",
+      "metric": "memoryRssFileMaxKb.median",
+      "baseline": 97276.0,
+      "after": 100752.0,
+      "delta": 3476.0,
+      "change_percent": 3.5733377194785967
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameCount.median",
+      "baseline": 152.0,
+      "after": 146.0,
+      "delta": -6.0,
+      "change_percent": -3.9473684210526314
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameDurationCpuMs.p50",
+      "baseline": 19.772499,
+      "after": 11.38109,
+      "delta": -8.391409,
+      "change_percent": -42.43979984522947
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameDurationCpuMs.p90",
+      "baseline": 30.608185999999996,
+      "after": 13.1124622,
+      "delta": -17.495723799999997,
+      "change_percent": -57.160276665856635
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameDurationCpuMs.p95",
+      "baseline": 35.52509529999999,
+      "after": 13.7294431,
+      "delta": -21.795652199999992,
+      "change_percent": -61.35283245812996
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameDurationCpuMs.p99",
+      "baseline": 40.975485660000004,
+      "after": 15.55462724,
+      "delta": -25.420858420000002,
+      "change_percent": -62.03918760337152
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameOverrunMs.p50",
+      "baseline": 6.746803,
+      "after": -4.647797,
+      "delta": -11.3946,
+      "change_percent": null
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameOverrunMs.p90",
+      "baseline": 18.0433438,
+      "after": -2.7345539999999997,
+      "delta": -20.777897799999998,
+      "change_percent": null
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameOverrunMs.p95",
+      "baseline": 27.40846619999999,
+      "after": -1.9948569000000012,
+      "delta": -29.40332309999999,
+      "change_percent": null
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "frameOverrunMs.p99",
+      "baseline": 40.152849520000004,
+      "after": -0.8371824600000026,
+      "delta": -40.990031980000005,
+      "change_percent": null
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "memoryHeapSizeMaxKb.median",
+      "baseline": 39482.0,
+      "after": 21356.0,
+      "delta": -18126.0,
+      "change_percent": -45.909528392685274
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "memoryRssAnonMaxKb.median",
+      "baseline": 108464.0,
+      "after": 149152.0,
+      "delta": 40688.0,
+      "change_percent": 37.51290750848208
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.scroll512PageNotebook",
+      "metric": "memoryRssFileMaxKb.median",
+      "baseline": 98748.0,
+      "after": 99560.0,
+      "delta": 812.0,
+      "change_percent": 0.8222951350913437
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.warmStart11Notes",
+      "metric": "memoryHeapSizeMaxKb.median",
+      "baseline": 49061.0,
+      "after": 54806.0,
+      "delta": 5745.0,
+      "change_percent": 11.709912150180388
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.warmStart11Notes",
+      "metric": "memoryRssAnonMaxKb.median",
+      "baseline": 172068.0,
+      "after": 127912.0,
+      "delta": -44156.0,
+      "change_percent": -25.661947602110796
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.warmStart11Notes",
+      "metric": "memoryRssFileMaxKb.median",
+      "baseline": 97448.0,
+      "after": 99256.0,
+      "delta": 1808.0,
+      "change_percent": 1.8553484935555375
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.warmStart11Notes",
+      "metric": "timeToFullDisplayMs.median",
+      "baseline": 511.601518,
+      "after": 132.935059,
+      "delta": -378.66645900000003,
+      "change_percent": -74.01589824837073
+    },
+    {
+      "scenario": "net.micapum.neopen.benchmarks.LoadingBenchmark.warmStart11Notes",
+      "metric": "timeToInitialDisplayMs.median",
+      "baseline": 66.882905,
+      "after": 60.542133,
+      "delta": -6.340771999999994,
+      "change_percent": -9.480407586961114
+    }
+  ],
+  "unmatched_scenarios": {
+    "only_baseline": [],
+    "only_after": []
+  }
+}

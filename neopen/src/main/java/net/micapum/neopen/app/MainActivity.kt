@@ -16,6 +16,8 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -28,6 +30,7 @@ class MainActivity : ComponentActivity() {
     private val permsLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Edge-to-edge: barras transparentes; los iconos los ajustamos según el tema.
@@ -38,8 +41,8 @@ class MainActivity : ComponentActivity() {
         val openNotebook = intent?.getStringExtra(EXTRA_OPEN_NOTEBOOK)
         setContent {
             val vm: MainViewModel = viewModel()
-            val settings by vm.settings.collectAsStateWithLifecycle()
-            val dark = when (settings.themeMode) {
+            val settings by vm.initialSettings.collectAsStateWithLifecycle()
+            val dark = when (settings?.themeMode) {
                 "dark" -> true
                 "light" -> false
                 else -> isSystemInDarkTheme()
@@ -51,7 +54,7 @@ class MainActivity : ComponentActivity() {
                 controller.isAppearanceLightNavigationBars = !dark
             }
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
                     AppRoot(vm = vm, initialTab = openTab, initialNotebookId = openNotebook)
                 }
             }

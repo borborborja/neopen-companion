@@ -70,6 +70,38 @@ class SyncEngineRegressionTest {
     private fun entity(id: String = "server-cap") = CaptureEntity(id, 1, 3, 27, 388, 1, null, "realtime", now, now, now, "Original")
     private fun input() = CreateCaptureInput(SobpDto(3, 27, 388, 1), "realtime", now, "Original", strokes = emptyList())
 
+    @Test fun editArrivingDuringPullIsPushedBeforeSharedSyncCompletes() = runBlocking {
+        db.captures().upsertOne(entity())
+        var pulls = 0
+        var patches = 0
+        val api = object : NeopenApi by enabledApi(server.url("/").toString()) {
+            override suspend fun capabilitiesInfo(password: String) = CapabilitiesDto(StudioCapDto(false))
+            override suspend fun changes(password: String, since: Long, limit: Int): ChangesResponseDto {
+                pulls++
+                if (pulls == 1) repo.renameCapture("server-cap", "During pull")
+                return ChangesResponseDto(cursor = pulls.toLong())
+            }
+            override suspend fun patchCapture(password: String, id: String, body: CapturePatchDto): CaptureDto {
+                patches++
+                assertEquals("During pull", body.name)
+                return requireNotNull(apiMoshi().adapter(CaptureDto::class.java).fromJson(capture(name = "During pull")))
+            }
+            override suspend fun unclassifiedNotebook(password: String): NotebookDto = throw UnsupportedOperationException()
+            override suspend fun listAnchors(password: String) = emptyList<AnchorDto>()
+            override suspend fun pens(password: String) = PensResponseDto()
+            override suspend fun renderSettings(password: String) = RenderSettingsDto()
+        }
+        engine = SyncEngine(repo, settings) { api }
+        val result = engine.sync()
+        assertTrue(result.toString(), result.ok)
+        assertEquals(1, result.pushed)
+        assertEquals(1, patches)
+        assertEquals(2, pulls)
+        assertTrue(repo.outboxPeek(10).isEmpty())
+        assertEquals("During pull", repo.capture("server-cap")!!.name)
+        assertEquals(0, server.requestCount)
+    }
+
     @Test fun temporaryCaptureEditUsesAcknowledgedId() = runBlocking {
         repo.enqueueCreateCapture(input(), entity("local-cap"))
         repo.renameCapture("local-cap", "Offline edit")

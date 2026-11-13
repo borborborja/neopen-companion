@@ -2,10 +2,16 @@ package net.micapum.neopen.app.data
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.micapum.neopen.app.db.CaptureEntity
@@ -121,8 +127,40 @@ class NeopenRepository(private val db: NeopenDb) {
     fun recent(): Flow<List<Capture>> =
         db.captures().observeAll().map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
+    /** El límite y el corte se aplican antes de leer los datos de las filas. */
+    fun recentSummaries(limit: Int, clearedAt: String = ""): Flow<List<CaptureSummary>> =
+        db.captures().observeRecentSummaries(limit.coerceAtLeast(1), clearedAt)
+            .map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
+
+    fun captureSummariesIn(notebookId: String): Flow<List<CaptureSummary>> =
+        db.captures().observeSummariesByNotebook(notebookId)
+            .map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
+
+    /** Todos los términos deben coincidir. La búsqueda ignora el corte de recientes. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun searchCaptureSummaries(query: String): Flow<List<CaptureSummary>> =
+        db.captures().observeSearchRows().mapLatest { rows ->
+            val terms = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            buildList {
+                for (row in rows) {
+                    currentCoroutineContext().ensureActive()
+                    val tags = Json.tags(row.summary.tagsJson)
+                    val ocr = Json.ocrOf(row.transcriptionJson)
+                    val haystack = buildString {
+                        append(row.summary.name.lowercase())
+                        ocr?.let { append(' ').append(it.title?.lowercase().orEmpty()).append(' ').append(it.text?.lowercase().orEmpty()) }
+                        for (tag in tags) append(' ').append(tag.lowercase())
+                    }
+                    if (terms.all { haystack.contains(it) }) add(row.summary.toDomain())
+                }
+            }
+        }.flowOn(Dispatchers.Default)
+
+    fun supersededWritingPages(): Flow<Set<String>> =
+        db.captures().observeSupersededWritingPages().map { it.toSet() }.flowOn(Dispatchers.Default)
+
     fun offlineImportWarnings(): Flow<List<OfflineImportWarning>> =
-        db.offlineImportWarnings().observePending().map { rows -> rows.map { it.toDomain() } }
+        db.offlineImportWarnings().observePending().map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
     fun pendingOfflineImportWarningCount(): Flow<Int> =
         db.offlineImportWarnings().observePendingCount()
@@ -130,9 +168,9 @@ class NeopenRepository(private val db: NeopenDb) {
     fun capturesIn(notebookId: String): Flow<List<Capture>> =
         db.captures().observeByNotebook(notebookId).map { rows -> rows.map { it.toDomain() } }.flowOn(Dispatchers.Default)
 
-    suspend fun capture(id: String): Capture? = db.captures().getById(id)?.toDomain()
+    suspend fun capture(id: String): Capture? = withContext(Dispatchers.Default) { db.captures().getById(id)?.toDomain() }
 
-    fun captureFlow(id: String): Flow<Capture?> = db.captures().observeById(id).map { it?.toDomain() }
+    fun captureFlow(id: String): Flow<Capture?> = db.captures().observeById(id).distinctUntilChanged().map { it?.toDomain() }.flowOn(Dispatchers.Default)
 
     suspend fun notebook(id: String): Notebook? = db.notebooks().getById(id)?.toDomain()
 
@@ -144,7 +182,7 @@ class NeopenRepository(private val db: NeopenDb) {
 
     /** Aplica un lote de cambios del servidor a Room y avanza el cursor. */
     suspend fun applyChanges(resp: ChangesResponseDto, now: Long) = db.withTransaction {
-        check(db.outbox().peek(Int.MAX_VALUE).all { StudioOutbox.requiresStudio(it.kind) }) { "Hay cambios locales pendientes" }
+        if (db.outbox().peek(Int.MAX_VALUE).any { !StudioOutbox.requiresStudio(it.kind) }) throw LocalChangesPendingException()
         if (resp.reset) {
             db.captures().clear()
             db.notebooks().clear()

@@ -12,8 +12,11 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import net.micapum.neopen.core.pen.KnownPen
 import net.micapum.neopen.core.pen.StrokeStyle
 import org.json.JSONArray
@@ -41,6 +44,8 @@ internal object PwCrypto {
     private const val TRANSFORM = "AES/GCM/NoPadding"
     private const val IV_LEN = 12
     private const val TAG_BITS = 128
+
+    fun encryptedOrEmpty(value: String): Boolean = value.isEmpty() || value.startsWith(PREFIX)
 
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -242,10 +247,16 @@ class SettingsStore(private val context: Context) {
     private fun capSource(raw: String?, default: CapabilitySource): CapabilitySource =
         runCatching { CapabilitySource.valueOf(raw ?: default.name) }.getOrDefault(default)
 
-    val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
+    private val decoded = SnapshotCache<Preferences, AppSettings>(::decode)
+
+    // Cada first() vuelve a leer DataStore. Solo se reutiliza la decodificación,
+    // evitando snapshots antiguos tras update/bindSyncServer y trabajo de Keystore en Main.
+    val flow: Flow<AppSettings> = context.dataStore.data.map { decoded.get(it) }.flowOn(Dispatchers.IO)
+
+    private fun decode(p: Preferences): AppSettings {
         val url = p[Keys.url] ?: ""
         val pw = PwCrypto.decrypt(p[Keys.pw] ?: "")
-        AppSettings(
+        return AppSettings(
             serverUrl = url,
             syncServerUrl = p[Keys.syncServer] ?: "",
             password = pw,
@@ -292,10 +303,11 @@ class SettingsStore(private val context: Context) {
         )
     }
 
-    suspend fun update(s: AppSettings) {
+    suspend fun update(s: AppSettings): Unit = withContext(Dispatchers.IO) {
         context.dataStore.edit { p ->
+            val previous = decoded.get(p.toPreferences())
             p[Keys.url] = s.serverUrl.trim()
-            p[Keys.pw] = PwCrypto.encrypt(s.password)
+            if (s.password != previous.password || !PwCrypto.encryptedOrEmpty(p[Keys.pw].orEmpty())) p[Keys.pw] = PwCrypto.encrypt(s.password)
             p[Keys.bg] = s.backgroundEnabled
             p[Keys.mode] = s.syncMode.name
             p[Keys.interval] = s.syncIntervalMin
@@ -318,7 +330,7 @@ class SettingsStore(private val context: Context) {
             p[Keys.pressureWidthContrast] = s.pressureWidthContrast.coerceIn(0.5f, 3f)
             s.serverPressureWidthEnabled?.let { p[Keys.serverPwEnabled] = it } ?: p.remove(Keys.serverPwEnabled)
             s.serverPressureWidthContrast?.let { p[Keys.serverPwContrast] = it.coerceIn(0.5f, 3f) } ?: p.remove(Keys.serverPwContrast)
-            p[Keys.knownPens] = encodeKnownPens(s.knownPens)
+            if (s.knownPens != previous.knownPens || hasPlainPins(p[Keys.knownPens])) p[Keys.knownPens] = encodeKnownPens(s.knownPens)
             p[Keys.forgottenPens] = encodeStringList(s.forgottenPens)
             p[Keys.lockedPenMac] = s.lockedPenMac
             p[Keys.defaultColor] = s.defaultStyle.color
@@ -327,15 +339,15 @@ class SettingsStore(private val context: Context) {
             p[Keys.ltSource] = s.languageToolSource.name
             p[Keys.markerSource] = s.markerDetectionSource.name
             p[Keys.connectorSource] = s.connectorSyncSource.name
-            p[Keys.ocrLocal] = encodeOcrLocal(s.ocrLocal)
-            p[Keys.ltLocal] = encodeLtLocal(s.ltLocal)
-            p[Keys.webdavLocal] = encodeWebdavLocal(s.webdavLocal)
-            p[Keys.ftpLocal] = encodeFtpLocal(s.ftpLocal)
+            if (s.ocrLocal != previous.ocrLocal || hasPlainSecret(p[Keys.ocrLocal], "apiKey")) p[Keys.ocrLocal] = encodeOcrLocal(s.ocrLocal)
+            if (s.ltLocal != previous.ltLocal || hasPlainSecret(p[Keys.ltLocal], "apiKey")) p[Keys.ltLocal] = encodeLtLocal(s.ltLocal)
+            if (s.webdavLocal != previous.webdavLocal || hasPlainSecret(p[Keys.webdavLocal], "password")) p[Keys.webdavLocal] = encodeWebdavLocal(s.webdavLocal)
+            if (s.ftpLocal != previous.ftpLocal || hasPlainSecret(p[Keys.ftpLocal], "password")) p[Keys.ftpLocal] = encodeFtpLocal(s.ftpLocal)
         }
     }
 
     /** Separado de update: guardar un formulario antiguo no puede borrar el vínculo. */
-    suspend fun bindSyncServer(serverUrl: String) {
+    suspend fun bindSyncServer(serverUrl: String): Unit = withContext(Dispatchers.IO) {
         context.dataStore.edit { p ->
             if (serverUrl.isBlank()) p.remove(Keys.syncServer)
             else p[Keys.syncServer] = normalizedServerUrl(serverUrl)
@@ -343,6 +355,14 @@ class SettingsStore(private val context: Context) {
     }
 
     // --- Credenciales de capacidades (JSON; solo el campo secreto va cifrado) ---
+
+    private fun hasPlainSecret(json: String?, field: String): Boolean =
+        !json.isNullOrBlank() && runCatching { !PwCrypto.encryptedOrEmpty(JSONObject(json).optString(field)) }.getOrDefault(false)
+
+    private fun hasPlainPins(json: String?): Boolean = !json.isNullOrBlank() && runCatching {
+        val rows = JSONArray(json)
+        (0 until rows.length()).any { !PwCrypto.encryptedOrEmpty(rows.getJSONObject(it).optString("pin")) }
+    }.getOrDefault(false)
 
     private fun encodeOcrLocal(c: OcrLocalConfig): String = JSONObject()
         .put("baseUrl", c.baseUrl)
