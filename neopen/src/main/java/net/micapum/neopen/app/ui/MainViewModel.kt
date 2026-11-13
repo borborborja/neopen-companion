@@ -7,8 +7,6 @@ import android.os.Build
 import android.net.Uri
 import java.io.File
 import android.graphics.Bitmap
-import android.graphics.pdf.PdfRenderer
-import android.os.ParcelFileDescriptor
 import net.micapum.neopen.core.data.StudioBookDto
 import net.micapum.neopen.core.data.StudioPenScopeDto
 import net.micapum.neopen.core.data.normalizedServerUrl
@@ -16,15 +14,19 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,6 +38,8 @@ import net.micapum.neopen.app.data.PageBackground
 import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.app.graph
 import net.micapum.neopen.app.render.ExportFormat
+import net.micapum.neopen.app.render.PreviewAssetStore
+import net.micapum.neopen.app.render.PagePreviewCache
 import net.micapum.neopen.app.sync.PenService
 import net.micapum.neopen.app.sync.SyncEngine
 import net.micapum.neopen.app.capability.OcrOutcome
@@ -91,65 +95,77 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun cancelStudioChange(id: String) { viewModelScope.launch { graph.repo.studio.cancelPending(id); syncNow() } }
     fun linkStudioPen(id: String, identifier: String) { if (!canUseStudio()) return; viewModelScope.launch { graph.repo.studio.linkAlias(id, identifier); syncNow() } }
 
-    /** Assets privados en almacenamiento de la aplicación, nunca URLs públicas con contraseña. */
+    private val previewAssets by lazy { PreviewAssetStore(getApplication<Application>()) }
+    private var previewIdentity: List<Any?>? = null
+    private var previewEpoch = java.util.UUID.randomUUID().toString()
+
+    /** La identidad de caché no contiene contraseñas ni se publica en URLs. */
+    @Synchronized
+    fun thumbnailNamespace(): String {
+        val s = settings.value
+        val identity = listOf(normalizedServerUrl(s.serverUrl), s.syncServerUrl, s.password, s.appMode, graph.previewLibraryGeneration)
+        if (identity != previewIdentity) {
+            previewIdentity = identity
+            previewEpoch = java.util.UUID.randomUUID().toString()
+            PagePreviewCache.clear()
+        }
+        return previewEpoch
+    }
+    private fun privateAssetNamespace(): String {
+        val s = settings.value
+        // Persiste entre procesos. clearLocal elimina estos archivos; el contador
+        // de biblioteca solo pertenece a las imágenes en memoria.
+        return normalizedServerUrl(s.syncServerUrl.ifBlank { s.serverUrl })
+    }
+    private fun legacyAsset(key: String): File {
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
+        return File(getApplication<Application>().filesDir, "studio-assets/$hash")
+    }
+    /** Assets privados compartidos entre las páginas del mismo PDF. */
     private suspend fun studioAssetFile(id: String): File = withContext(Dispatchers.IO) {
         check(canUseStudio())
-        val dir = File(getApplication<Application>().filesDir, "studio-assets").apply { mkdirs() }
-        // Nombre hash para impedir segmentos de ruta del servidor en el sistema de archivos.
-        val file = File(dir, java.security.MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) })
-        if (!file.exists()) {
-            val s = settings.value
-            val temp = File.createTempFile("asset", ".part", dir)
-            try {
-                ApiFactory.create(s.serverUrl).studioAsset(s.password, id).use { body -> body.byteStream().use { input -> temp.outputStream().use { input.copyTo(it) } } }
-                check(temp.renameTo(file))
-            } finally { temp.delete() }
+        val s = settings.value
+        val scope = thumbnailNamespace()
+        previewAssets.file(privateAssetNamespace(), "asset:$id", listOf(legacyAsset(id))) { temporary ->
+            ApiFactory.create(s.serverUrl).studioAsset(s.password, id).use { body ->
+                body.byteStream().use { input -> temporary.outputStream().use { input.copyTo(it) } }
+            }
+            if (scope != thumbnailNamespace() || !canUseStudio()) throw CancellationException("Preview context changed")
         }
-        file
     }
     suspend fun studioPreview(book: StudioBookDto, page: Int = 0): Bitmap? =
         if (!canUseStudio()) null else book.designAssetId?.let { renderStudioAsset(it, page) }
 
-    /** Histórico ordinario: usa el recurso de captura aun cuando Studio esté apagado. */
-    suspend fun capturePreview(capture: Capture): Bitmap? = withContext(Dispatchers.IO) {
-        if (capture.bookInstanceId == null) return@withContext null
-        runCatching {
-            val dir = File(getApplication<Application>().filesDir, "studio-assets").apply { mkdirs() }
-            // Reutiliza también recursos históricos descargados por versiones anteriores.
-            val cachedAsset = graph.repo.studio.designAsset(capture.bookInstanceId)?.let { id ->
-                val hash = java.security.MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) }
-                File(dir, hash).takeIf { it.exists() }
+    /** El histórico sigue disponible aun con Studio apagado; la red no bloquea las listas. */
+    suspend fun capturePreview(capture: Capture, widthPx: Int = 1000): Bitmap? = withContext(Dispatchers.IO) {
+        val instance = capture.bookInstanceId ?: return@withContext null
+        val scope = thumbnailNamespace()
+        try {
+            val s = settings.value
+            val key = "capture-design:$instance"
+            val legacy = buildList {
+                graph.repo.studio.designAsset(instance)?.let { add(legacyAsset(it)) }
+                add(legacyAsset(key))
             }
-            if (cachedAsset != null) return@runCatching renderPdfFile(cachedAsset, capture.page)
-            val key = "capture-design:${capture.bookInstanceId}"
-            val name = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
-            val file = File(dir, name)
-            if (!file.exists()) {
-                val s = settings.value
-                if (!hasServer() || (s.syncServerUrl.isNotBlank() && normalizedServerUrl(s.syncServerUrl) != normalizedServerUrl(s.serverUrl))) return@runCatching null
-                val temp = File.createTempFile("capture", ".part", dir)
-                try {
-                    ApiFactory.create(s.serverUrl).captureDesign(s.password, capture.id).use { body -> body.byteStream().use { input -> temp.outputStream().use { input.copyTo(it) } } }
-                    check(temp.renameTo(file))
-                } finally { temp.delete() }
+            val file = previewAssets.file(privateAssetNamespace(), key, legacy) { temporary ->
+                if (!hasServer() || (s.syncServerUrl.isNotBlank() && normalizedServerUrl(s.syncServerUrl) != normalizedServerUrl(s.serverUrl)))
+                    throw IllegalStateException("No bound server")
+                ApiFactory.create(s.serverUrl).captureDesign(s.password, capture.id).use { body ->
+                    body.byteStream().use { input -> temporary.outputStream().use { input.copyTo(it) } }
+                }
+                if (scope != thumbnailNamespace()) throw CancellationException("Preview context changed")
             }
-            renderPdfFile(file, capture.page)
-        }.getOrNull()
+            val bitmap = previewAssets.render(file, capture.page, widthPx)
+            if (scope != thumbnailNamespace()) throw CancellationException("Preview context changed")
+            bitmap
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (_: Exception) { null }
     }
     private suspend fun renderStudioAsset(id: String, index: Int): Bitmap? = withContext(Dispatchers.IO) {
-        runCatching { renderPdfFile(studioAssetFile(id), index) }.onFailure(::invalidateStudioOnRejection).getOrNull()
+        try { previewAssets.render(studioAssetFile(id), index, 1000) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { invalidateStudioOnRejection(error); null }
     }
-    private fun renderPdfFile(file: File, index: Int): Bitmap? =
-        PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
-            if (index !in 0 until renderer.pageCount) return@use null
-            renderer.openPage(index).use { page ->
-                val width = 1000
-                Bitmap.createBitmap(width, (width * page.height.toFloat() / page.width).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also { bitmap ->
-                    bitmap.eraseColor(android.graphics.Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                }
-            }
-        }
     suspend fun downloadStudioBook(book: StudioBookDto, recipe: Boolean = false): File? = withContext(Dispatchers.IO) {
         if (!canUseStudio()) return@withContext null
         runCatching {
@@ -163,11 +179,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
 
-    val settings: StateFlow<AppSettings> =
-        graph.settings.flow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppSettings())
+    private val _settings = MutableStateFlow(AppSettings())
+    val settings: StateFlow<AppSettings> = _settings.asStateFlow()
+    private val _initialSettings = MutableStateFlow<AppSettings?>(null)
+    /** null hasta leer los ajustes reales; nunca decide el wizard con valores provisionales. */
+    val initialSettings: StateFlow<AppSettings?> = _initialSettings.asStateFlow()
 
+    private val _notebooksLoaded = MutableStateFlow(false)
+    val notebooksLoaded: StateFlow<Boolean> = _notebooksLoaded.asStateFlow()
     val notebooks: StateFlow<List<Notebook>> =
-        graph.repo.notebooks().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        graph.repo.notebooks().onEach { _notebooksLoaded.value = true }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val inbox: StateFlow<List<Capture>> =
         graph.repo.inbox().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -182,15 +204,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * dónde van los trazos del boli. La UI lo usa para ocultar el botón "Reabrir".
      */
     val supersededSobps: StateFlow<Set<String>> =
-        graph.repo.recent()
-            .map { caps ->
-                caps.filter { it.clonedFrom == null }
-                    .groupingBy { it.writingPageKey }
-                    .eachCount()
-                    .filterValues { it > 1 }
-                    .keys
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+        graph.repo.supersededWritingPages().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    fun recentSummaries(limit: Int, clearedAt: String) = graph.repo.recentSummaries(limit, clearedAt)
+    fun searchCaptureSummaries(query: String) = graph.repo.searchCaptureSummaries(query)
+    fun captureSummariesIn(notebookId: String) = graph.repo.captureSummariesIn(notebookId)
+    fun expandedSummaries(ids: Set<String>): Flow<Map<String, List<net.micapum.neopen.app.data.CaptureSummary>>> =
+        if (ids.isEmpty()) kotlinx.coroutines.flow.flowOf(emptyMap()) else kotlinx.coroutines.flow.combine(
+            ids.sorted().map { id -> graph.repo.captureSummariesIn(id).map { id to it } },
+        ) { it.toMap() }
 
     val pending: StateFlow<Int> =
         graph.repo.pendingCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
@@ -221,7 +243,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun serverUrl(): String = settings.value.serverUrl
 
     fun syncNow() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _syncing.value = true
             val r = graph.sync.sync()
             _syncing.value = false
@@ -461,6 +483,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // --- Boli (BLE) ---
 
     val penState: StateFlow<PenState> = graph.pen.state
+    val penConnectionStatus = graph.pen.state.map { it.status }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), graph.pen.state.value.status)
+    val pressureStyle = settings.map { it.effectivePressureWidthEnabled to it.effectivePressureWidthContrast }
+        .distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false to 2f)
     val online: StateFlow<Boolean> = graph.online
     /** Registro de diagnóstico BLE (panel de debug). */
     val penLogs: StateFlow<List<String>> = graph.pen.logs
@@ -632,7 +658,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun startStudioChecks() {
         if (studioChecks?.isActive == true) return
         graph.sync.studioAccess.invalidate()
-        studioChecks = viewModelScope.launch {
+        studioChecks = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) { graph.sync.refreshCapabilities(); delay(30_000) }
         }
     }
@@ -641,6 +667,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         graph.sync.studioAccess.invalidate()
     }
     init {
+        viewModelScope.launch {
+            graph.settings.flow.collect { loaded ->
+                _settings.value = loaded
+                _initialSettings.value = loaded
+            }
+        }
         viewModelScope.launch { studioEnabled.collect { enabled ->
             if (!enabled) { _recents.value = emptyList(); _presets.value = emptyList() }
         } }

@@ -1,12 +1,14 @@
 package net.micapum.neopen.app.data
 
 import net.micapum.neopen.app.db.CaptureEntity
+import net.micapum.neopen.app.db.CaptureSummaryRow
 import net.micapum.neopen.app.db.NotebookEntity
 import net.micapum.neopen.app.db.OfflineImportWarningEntity
 import net.micapum.neopen.app.db.PageBackgroundEntity
 import net.micapum.neopen.core.data.AnchorDto
 import net.micapum.neopen.core.data.CaptureDto
 import net.micapum.neopen.core.data.NotebookDto
+import java.security.MessageDigest
 
 // --- DTO (servidor) → Entity (Room) ---
 
@@ -35,6 +37,27 @@ fun CaptureDto.toEntity(): CaptureEntity = CaptureEntity(
     overlapJson = Json.overlapJson(overlap),
     clonedFrom = clonedFrom,
     penId = penId, bookInstanceId = bookInstanceId, assignmentId = assignmentId, assignmentRevision = assignmentRevision,
+)
+
+/** Se calcula en las lecturas de detalle, fuera de Main, sin usar equals de miles de puntos. */
+internal fun captureVisualFingerprint(strokesJson: String, paperJson: String?): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    digest.update(strokesJson.toByteArray(Charsets.UTF_8))
+    digest.update(0.toByte())
+    digest.update((paperJson ?: "null").toByteArray(Charsets.UTF_8))
+    val hex = "0123456789abcdef"
+    return buildString(64) {
+        for (byte in digest.digest()) {
+            val value = byte.toInt() and 0xff
+            append(hex[value ushr 4]); append(hex[value and 15])
+        }
+    }
+}
+
+fun CaptureSummaryRow.toDomain() = CaptureSummary(
+    id, rev, section, owner, book, page, source, capturedAt, importedAt, updatedAt,
+    name, Json.tags(tagsJson), destination, notebookId, position, Json.paperOf(paperJson), kind,
+    sealed, Json.overlapOf(overlapJson), clonedFrom, penId, bookInstanceId, assignmentId, assignmentRevision,
 )
 
 fun NotebookDto.toEntity(): NotebookEntity = NotebookEntity(
@@ -97,6 +120,7 @@ fun CaptureEntity.toDomain(): Capture = Capture(
     overlap = Json.overlapOf(overlapJson),
     clonedFrom = clonedFrom,
     penId = penId, bookInstanceId = bookInstanceId, assignmentId = assignmentId, assignmentRevision = assignmentRevision,
+    visualFingerprint = captureVisualFingerprint(strokesJson, paperJson),
 )
 
 fun OfflineImportWarningEntity.toDomain(): OfflineImportWarning = OfflineImportWarning(
@@ -128,6 +152,7 @@ fun PageBackgroundEntity.toDomain(): PageBackground = PageBackground(
     source = source,
     remote = remote,
     bookInstanceId = bookInstanceId, assignmentId = assignmentId,
+    createdAt = createdAt,
 )
 
 /** DesignAnchor del servidor → fila local (remote=true). El ámbito "page" deduce

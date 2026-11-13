@@ -3,6 +3,7 @@ package net.micapum.neopen.app.db
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Embedded
 import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -193,6 +194,39 @@ interface StudioDao {
 
 // --- DAOs --------------------------------------------------------------------
 
+/** Proyección de listas: excluye deliberadamente strokesJson y transcriptionJson. */
+data class CaptureSummaryRow(
+    val id: String,
+    val rev: Long,
+    val section: Int,
+    val owner: Int,
+    val book: Int,
+    val page: Int,
+    val source: String,
+    val capturedAt: String,
+    val importedAt: String,
+    val updatedAt: String,
+    val name: String,
+    val tagsJson: String,
+    val destination: String,
+    val notebookId: String?,
+    val position: Int,
+    val paperJson: String?,
+    val kind: String?,
+    val sealed: Boolean,
+    val overlapJson: String?,
+    val clonedFrom: String?,
+    val penId: String?,
+    val bookInstanceId: String?,
+    val assignmentId: String?,
+    val assignmentRevision: Long?,
+)
+
+/** La búsqueda lee OCR solo cuando hay una consulta; tampoco lee tinta. */
+data class CaptureSearchRow(@Embedded val summary: CaptureSummaryRow, val transcriptionJson: String?)
+
+private const val CAPTURE_SUMMARY_COLUMNS = "id, rev, section, owner, book, page, source, capturedAt, importedAt, updatedAt, name, tagsJson, destination, notebookId, position, paperJson, kind, sealed, overlapJson, clonedFrom, penId, bookInstanceId, assignmentId, assignmentRevision"
+
 @Dao
 interface CaptureDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -212,6 +246,18 @@ interface CaptureDao {
 
     @Query("SELECT * FROM captures ORDER BY importedAt DESC")
     fun observeAll(): Flow<List<CaptureEntity>>
+
+    @Query("SELECT $CAPTURE_SUMMARY_COLUMNS FROM captures WHERE (:clearedAt = '' OR updatedAt > :clearedAt) ORDER BY importedAt DESC LIMIT :limit")
+    fun observeRecentSummaries(limit: Int, clearedAt: String): Flow<List<CaptureSummaryRow>>
+
+    @Query("SELECT $CAPTURE_SUMMARY_COLUMNS FROM captures WHERE notebookId = :notebookId ORDER BY position ASC, importedAt ASC")
+    fun observeSummariesByNotebook(notebookId: String): Flow<List<CaptureSummaryRow>>
+
+    @Query("SELECT $CAPTURE_SUMMARY_COLUMNS, transcriptionJson FROM captures ORDER BY importedAt DESC")
+    fun observeSearchRows(): Flow<List<CaptureSearchRow>>
+
+    @Query("SELECT CASE WHEN bookInstanceId IS NULL THEN section || '.' || owner || '.' || book || '.' || page ELSE bookInstanceId || ':' || page END AS writingPageKey FROM captures WHERE clonedFrom IS NULL GROUP BY writingPageKey HAVING COUNT(*) > 1")
+    fun observeSupersededWritingPages(): Flow<List<String>>
 
     @Query("SELECT * FROM captures WHERE destination = 'inbox' ORDER BY importedAt DESC")
     fun observeInbox(): Flow<List<CaptureEntity>>
@@ -419,6 +465,9 @@ interface OfflineNoteStateDao {
 
     @Query("SELECT * FROM offline_note_state WHERE mac = :mac")
     suspend fun forPen(mac: String): List<OfflineNoteStateEntity>
+
+    @Query("SELECT * FROM offline_note_state WHERE mac = :mac")
+    fun observeByMac(mac: String): Flow<List<OfflineNoteStateEntity>>
 
     @Query("SELECT * FROM offline_note_state")
     fun observeAll(): Flow<List<OfflineNoteStateEntity>>

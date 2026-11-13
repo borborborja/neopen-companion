@@ -19,12 +19,14 @@ El ecosistema son **dos repos** que evolucionan juntos:
   contrato canónico indicado en `docs/openapi.snapshot.json`. El manifiesto fija
   su SHA-256; `sourceState: working-tree` identifica cambios conjuntos aún sin
   publicar sobre la versión base indicada por `serverTag`.
-  `./gradlew checkApiContract` comprueba checksum, versiones y que toda anotación
-  Retrofit exista en la especificación.
+  `./gradlew checkApiContract` comprueba checksum, que `serverTag` corresponda a
+  `info.version` del snapshot y que toda anotación Retrofit exista en la
+  especificación. También comprueba el formato estable `X.Y.Z` de la app.
 
-  Las correcciones de captura y sincronización se publican conjuntamente en
-  **v0.23.5**:
-  el manifiesto fija el tag de esa versión y el SHA de la copia canónica.
+  La versión de Android es independiente de la versión de su contrato de
+  servidor: una corrección exclusiva del cliente puede publicarse sin cambiar
+  el snapshot ni publicar el servidor. **Android v0.26.1** mantiene el contrato
+  **servidor v0.26.0**, sin cambios de endpoints, DTOs ni esquema Room.
 
 - **Cliente Android**: `core/src/main/java/net/micapum/neopen/core/data/Api.kt`
   (interfaz Retrofit `NeopenApi` + DTOs Moshi). `ApiFactory.create(baseUrl)` lo

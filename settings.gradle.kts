@@ -20,4 +20,5 @@ rootProject.name = "neopen-companion"
 include(":core", ":neopen")
 if (!providers.gradleProperty("fdroid").isPresent) {
     include(":live")
+    if (providers.gradleProperty("performance").isPresent) include(":benchmark")
 }

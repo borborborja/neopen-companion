@@ -1,0 +1,1 @@
+Faster startup and scrolling with cached thumbnails, lightweight lists and fewer repeated loads. New optimized neopen.apk keeps the same signing certificate and preserves data during updates. Compatible with server 0.26.0; no data migration. Improvements measured on an emulator; Pixel 8a validation is pending.

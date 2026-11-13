@@ -4,6 +4,7 @@ import android.os.Build
 import com.squareup.moshi.Json
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
@@ -595,6 +596,12 @@ interface NeopenApi {
 }
 
 object ApiFactory {
+    private val converter by lazy { MoshiConverterFactory.create(apiMoshi()) }
+    private val sharedClient by lazy { configureClient(OkHttpClient.Builder()) }
+    // La contraseña pertenece a cada petición, nunca al servicio almacenado.
+    private val services = object : LinkedHashMap<String, NeopenApi>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, NeopenApi>?): Boolean = size > 4
+    }
     /** Nombre legible del dispositivo (p. ej. "Google Pixel 7") para X-Neopen-Device. */
     val deviceName: String by lazy {
         val maker = Build.MANUFACTURER?.replaceFirstChar { it.uppercase() }.orEmpty()
@@ -608,9 +615,13 @@ object ApiFactory {
     }
 
     fun create(serverUrl: String, baseClient: OkHttpClient? = null): NeopenApi {
-        val base = serverUrl.trim().let { if (it.endsWith("/")) it else "$it/" }
-        val moshi = apiMoshi()
-        val client = (baseClient?.newBuilder() ?: OkHttpClient.Builder())
+        val base = serverUrl.trim().let { if (it.endsWith("/")) it else "$it/" }.toHttpUrl().toString()
+        // Los clientes inyectados (TLS de pruebas, etc.) no comparten el caché global.
+        if (baseClient != null) return buildService(base, configureClient(baseClient.newBuilder()))
+        return synchronized(services) { services.getOrPut(base) { buildService(base, sharedClient) } }
+    }
+
+    private fun configureClient(builder: OkHttpClient.Builder): OkHttpClient = builder
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             // Identifica el dispositivo en cada petición; el servidor anota el
@@ -623,11 +634,11 @@ object ApiFactory {
                 )
             }
             .build()
-        return Retrofit.Builder()
+
+    private fun buildService(base: String, client: OkHttpClient): NeopenApi = Retrofit.Builder()
             .baseUrl(base)
             .client(client)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .addConverterFactory(converter)
             .build()
             .create(NeopenApi::class.java)
-    }
 }

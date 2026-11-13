@@ -19,9 +19,10 @@ android {
         applicationId = "net.micapum.neopen"
         minSdk = 26
         targetSdk = 34
-        versionCode = 41
-        versionName = "0.26.0"
+        versionCode = 42
+        versionName = "0.26.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testProguardFiles("proguard-test-rules.pro")
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -57,7 +58,27 @@ android {
             // Firma con la upload key solo si está configurada (env presente).
             signingConfig = signingConfigs.findByName("release")
         }
+        create("github") {
+            initWith(getByName("release"))
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            matchingFallbacks += "release"
+            // Actualizable sobre los APK de GitHub anteriores, con el mismo certificado.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        if (providers.gradleProperty("performance").isPresent && !providers.gradleProperty("fdroid").isPresent) {
+            create("benchmark") {
+                initWith(getByName("github"))
+                applicationIdSuffix = ".benchmark"
+                isDebuggable = false
+                matchingFallbacks += "release"
+            }
+        }
     }
+    // El job habitual conserva connectedDebugAndroidTest. Un job independiente
+    // prueba el código realmente minificado con -PinstrumentedBuildType=github.
+    testBuildType = providers.gradleProperty("instrumentedBuildType").getOrElse("debug")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -116,4 +137,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    if (providers.gradleProperty("performance").isPresent && !providers.gradleProperty("fdroid").isPresent) {
+        add("benchmarkImplementation", "androidx.profileinstaller:profileinstaller:1.3.1")
+    }
 }

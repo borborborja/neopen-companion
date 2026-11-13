@@ -63,9 +63,28 @@ y limpieza segura de rutas compartidas o heredadas). Se ejecutan con
 
 ```bash
 gh run watch <run-id> --exit-status        # el run del PR/main/tag (NO uses `timeout`, no existe en macOS)
-gh release view vX.Y.Z --json assets --jq '.assets[].name'   # -> neopen-debug.apk
+gh release view vX.Y.Z --json assets --jq '.assets[].name'   # -> neopen.apk
 ```
 
 El job `Migraciones Room y sync (emulador oficial)` debe estar verde: usa una
 imagen AOSP API 34, valida los esquemas históricos y recorre push/outbox + pull
 delta contra MockWebServer. No sustituye las pruebas BLE en hardware físico.
+
+## Distribución optimizada y rendimiento
+
+`./gradlew :neopen:assembleGithub` genera un APK no depurable y minificado con el
+mismo certificado de los APK de GitHub existentes. Antes de distribuirlo:
+
+```sh
+./gradlew -PinstrumentedBuildType=github :neopen:connectedGithubAndroidTest
+```
+
+Incluye pruebas sobre Room/outbox/Studio, serialización con valores nulos,
+exportación PNG/SVG/PDF, algoritmos SSH cargados por reflexión y WebDAV HTTPS.
+Las pruebas habituales de migración y sincronización también se ejecutan contra
+esta variante. El job debug conserva su selección predeterminada.
+
+La suite de caché comprueba el límite de 24 MiB, dos renderizados simultáneos,
+deduplicación, cancelación y cambios locales sin revisión del servidor. Véase
+[PERFORMANCE.md](PERFORMANCE.md) para medir arranque, frames y memoria con once
+notas y un cuaderno de 512 páginas, y comparar resultados en el mismo equipo.

@@ -1,0 +1,1 @@
+Arranque y scroll más rápidos con miniaturas en caché, listas ligeras y menos cargas repetidas. Nuevo APK optimizado neopen.apk, con la misma firma y actualización conservando datos. Compatible con servidor 0.26.0, sin migraciones. Mejoras medidas en emulador; validación en Pixel 8a pendiente.

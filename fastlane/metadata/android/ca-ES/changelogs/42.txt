@@ -1,0 +1,1 @@
+Arrencada i desplaçament més ràpids amb miniatures en memòria cau, llistes lleugeres i menys càrregues repetides. Nou APK optimitzat neopen.apk, amb la mateixa signatura i actualització conservant les dades. Compatible amb servidor 0.26.0, sense migracions. Millores mesurades en emulador; validació al Pixel 8a pendent.

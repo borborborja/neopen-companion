@@ -12,6 +12,7 @@ import android.os.ParcelFileDescriptor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,9 +41,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,24 +54,35 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.ImageLoader
+import coil.imageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.micapum.neopen.app.R
 import net.micapum.neopen.app.data.Capture
+import net.micapum.neopen.app.data.CaptureSummary
 import net.micapum.neopen.app.data.PageBackground
 import net.micapum.neopen.app.render.BgPresets
 import net.micapum.neopen.app.render.InkCanvas
+import net.micapum.neopen.app.render.PagePreviewCache
+import net.micapum.neopen.app.render.ThumbnailKey
+import net.micapum.neopen.app.render.rasterizeThumbnail
 
 /** "section.owner.book" de una hoja (sin la página). */
 private fun bookKeyOf(c: Capture): String = "${c.section}.${c.owner}.${c.book}"
@@ -88,22 +102,89 @@ private fun bgUrl(serverUrl: String, path: String): String =
 
 /** Carga el fondo (imagen) de un anclaje a un ImageBitmap, o null si es preset/sin imagen. */
 @Composable
-private fun rememberBgImage(vm: MainViewModel, bg: PageBackground?): ImageBitmap? {
+private fun rememberBgImage(vm: MainViewModel, bg: PageBackground?, size: IntSize): ImageBitmap? {
     val ctx = LocalContext.current
     val img = bg?.bgImage
     val server = vm.serverUrl()
-    return produceState<ImageBitmap?>(initialValue = null, img, server) {
-        value = if (img == null) null else withContext(Dispatchers.IO) {
-            runCatching {
-                if (img.startsWith("file://")) {
-                    BitmapFactory.decodeFile(img.removePrefix("file://"))?.asImageBitmap()
-                } else {
-                    val req = ImageRequest.Builder(ctx).data(bgUrl(server, img)).allowHardware(false).build()
-                    (ImageLoader(ctx).execute(req).drawable as? BitmapDrawable)?.bitmap?.asImageBitmap()
-                }
-            }.getOrNull()
+    val namespace = vm.thumbnailNamespace()
+    return produceState<ImageBitmap?>(initialValue = null, img, bg?.createdAt, namespace, size) {
+        value = null
+        if (img != null && size.width > 0 && size.height > 0) {
+            value = loadBackgroundBitmap(ctx, server, namespace, bg, size)?.asImageBitmap()
         }
     }.value
+}
+
+private suspend fun loadBackgroundBitmap(context: Context, server: String, namespace: String, bg: PageBackground?, size: IntSize): Bitmap? = withContext(Dispatchers.IO) {
+    val image = bg?.bgImage ?: return@withContext null
+    try {
+        val version = "$namespace:$image:${bg.createdAt}"
+        val request = ImageRequest.Builder(context.applicationContext)
+            .data(if (image.startsWith("file://")) image else bgUrl(server, image))
+            .size(size.width.coerceAtLeast(1), size.height.coerceAtLeast(1))
+            .memoryCacheKey("$version:${size.width}:${size.height}")
+            .diskCacheKey(version)
+            .allowHardware(false)
+            .build()
+        (context.applicationContext.imageLoader.execute(request).drawable as? BitmapDrawable)?.bitmap
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private data class ThumbnailStyle(val pressure: Boolean, val contrast: Float)
+// Evita comparar decenas de miles de puntos dentro de la política de igualdad de Compose.
+private class ThumbnailCapture(val capture: Capture)
+
+/** Una fila visible observa solo su captura; el dibujo durante scroll es una imagen. */
+@Composable
+fun PageThumbnail(vm: MainViewModel, summary: CaptureSummary, modifier: Modifier = Modifier) {
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val capture by remember(vm, summary.id) { vm.captureFlow(summary.id).map { it?.let(::ThumbnailCapture) } }
+        .collectAsStateWithLifecycle(initialValue = null)
+    val style by remember(vm) {
+        vm.settings.map { ThumbnailStyle(it.effectivePressureWidthEnabled, it.effectivePressureWidthContrast) }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = ThumbnailStyle(false, 2f))
+    val namespace by remember(vm) { vm.settings.map { vm.thumbnailNamespace() }.distinctUntilChanged() }
+        .collectAsStateWithLifecycle(initialValue = vm.thumbnailNamespace())
+    val online by vm.online.collectAsStateWithLifecycle()
+    val page = capture?.capture
+    val bookKey = page?.let(::bookKeyOf)
+    val backgroundFlow = remember(vm, bookKey, page?.page, page?.bookInstanceId) {
+        if (page == null || bookKey == null) kotlinx.coroutines.flow.flowOf(null)
+        else vm.observeSheetBackground(bookKey, page.page, page.bookInstanceId)
+    }
+    val bg by backgroundFlow.collectAsStateWithLifecycle(initialValue = null)
+    val context = LocalContext.current
+    val backgroundVersion = "${bg?.id}:${bg?.createdAt}:${bg?.bgImage}:${bg?.bgPreset}"
+    val key = page?.let { ThumbnailKey(namespace, it.id, it.visualFingerprint, size.width, size.height,
+        style.pressure, style.contrast, backgroundVersion, it.bookInstanceId, it.page) }
+    val image by produceState<ImageBitmap?>(null, key, online) {
+        value = null
+        val current = page
+        if (key == null || current == null || size.width <= 0 || size.height <= 0) return@produceState
+        PagePreviewCache.get(key)?.let { value = it.asImageBitmap(); return@produceState }
+        val needsImage = current.bookInstanceId != null || bg?.bgImage != null
+        val immediateKey: Any = if (needsImage) key.copy(background = "placeholder:$backgroundVersion") else key
+        value = PagePreviewCache.getOrRender(immediateKey) {
+            rasterizeThumbnail(current, size.width, size.height, style.pressure, style.contrast, preset = bg?.bgPreset)
+        }?.asImageBitmap()
+        if (!needsImage) return@produceState
+        // La tinta local aparece antes de cualquier espera de red o descarga de PDF.
+        val historical = if (current.bookInstanceId == null) null else vm.capturePreview(current, size.width)
+        val background = historical ?: loadBackgroundBitmap(context, vm.serverUrl(), namespace, bg, size)
+        if (background != null) {
+            currentCoroutineContext().ensureActive()
+            value = PagePreviewCache.getOrRender(key) {
+                rasterizeThumbnail(current, size.width, size.height, style.pressure, style.contrast, background = background)
+            }?.asImageBitmap()
+        }
+    }
+    Box(modifier.onSizeChanged { size = it }) {
+        image?.let { Image(it, contentDescription = null, modifier = Modifier.matchParentSize(), contentScale = ContentScale.FillBounds) }
+    }
 }
 
 /**
@@ -112,22 +193,27 @@ private fun rememberBgImage(vm: MainViewModel, bg: PageBackground?): ImageBitmap
  */
 @Composable
 fun PageCanvas(vm: MainViewModel, page: Capture, modifier: Modifier = Modifier) {
-    val settings by vm.settings.collectAsStateWithLifecycle()
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val style by remember(vm) {
+        vm.settings.map { ThumbnailStyle(it.effectivePressureWidthEnabled, it.effectivePressureWidthContrast) }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = ThumbnailStyle(false, 2f))
     val bk = bookKeyOf(page)
     val bg by remember(bk, page.page, page.bookInstanceId) { vm.observeSheetBackground(bk, page.page, page.bookInstanceId) }
         .collectAsStateWithLifecycle(initialValue = null)
-    val historical by produceState<ImageBitmap?>(null, page.bookInstanceId, page.page) {
-        value = page.bookInstanceId?.let { vm.capturePreview(page)?.asImageBitmap() }
+    val namespace = vm.thumbnailNamespace()
+    val historical by produceState<ImageBitmap?>(null, page.bookInstanceId, page.page, size.width, namespace) {
+        value = null
+        if (size.width > 0) value = page.bookInstanceId?.let { vm.capturePreview(page, size.width)?.asImageBitmap() }
     }
-    val bgImage = historical ?: rememberBgImage(vm, bg)
+    val bgImage = historical ?: rememberBgImage(vm, bg, size)
     InkCanvas(
         strokes = page.strokes,
         paper = page.paper,
-        modifier = modifier,
+        modifier = modifier.onSizeChanged { size = it },
         bgImage = bgImage,
         bgPreset = if (bgImage == null) bg?.bgPreset else null,
-        pressureWidthEnabled = settings.effectivePressureWidthEnabled,
-        pressureWidthContrast = settings.effectivePressureWidthContrast,
+        pressureWidthEnabled = style.pressure,
+        pressureWidthContrast = style.contrast,
     )
 }
 

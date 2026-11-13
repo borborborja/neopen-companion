@@ -43,8 +43,12 @@ private object CapturePatchAdapterFactory : JsonAdapter.Factory {
 }
 
 /** El almacenamiento del outbox y Retrofit deben usar exactamente el mismo contrato. */
-fun apiMoshi(): Moshi = Moshi.Builder()
-    .add(ArgbColorAdapter())
-    .add(CapturePatchAdapterFactory)
-    .addLast(KotlinJsonAdapterFactory())
-    .build()
+private val sharedApiMoshi: Moshi by lazy {
+    Moshi.Builder()
+        .add(ArgbColorAdapter())
+        .add(CapturePatchAdapterFactory)
+        .addLast(KotlinJsonAdapterFactory())
+        .build()
+}
+
+fun apiMoshi(): Moshi = sharedApiMoshi

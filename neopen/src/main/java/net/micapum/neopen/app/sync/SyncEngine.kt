@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.micapum.neopen.app.data.Json
+import net.micapum.neopen.app.data.LocalChangesPendingException
 import net.micapum.neopen.app.data.NeopenRepository
 import net.micapum.neopen.app.data.OutboxKind
 import net.micapum.neopen.app.data.StudioOutbox
@@ -29,23 +30,40 @@ class SyncEngine(
     private val apiFactory: (String) -> NeopenApi = { ApiFactory.create(it) },
 ) {
     private val mutex = Mutex()
-    private val capabilitiesMutex = Mutex()
+    private data class ServerIdentity(val url: String, val password: String, val mode: AppMode, val binding: String)
+    private fun AppSettings.identity() = ServerIdentity(normalizedServerUrl(serverUrl), password, appMode, normalizedServerUrl(syncServerUrl))
+    private val capabilitiesRequests = InFlightRequests<ServerIdentity, Unit>()
+    private val syncRequests = InFlightRequests<ServerIdentity, Result>()
     val studioAccess = StudioServerAccess()
     val studioEnabled = studioAccess.state.combine(settings.flow) { _, s -> studioAccess.allowedFor(s) }
 
     /** Revalidado al volver al primer plano y antes de cada sincronización. */
-    suspend fun refreshCapabilities() = capabilitiesMutex.withLock {
+    suspend fun refreshCapabilities() {
         val s = settings.flow.first()
-        if (s.appMode == AppMode.LOCAL || !s.configured || (s.syncServerUrl.isNotBlank() && normalizedServerUrl(s.syncServerUrl) != normalizedServerUrl(s.serverUrl))) { studioAccess.invalidate(); return@withLock }
-        try {
-            val enabled = apiFactory(s.serverUrl).capabilitiesInfo(s.password).studio?.enabled == true
-            val current = settings.flow.first()
-            if (current.appMode == AppMode.LOCAL || normalizedServerUrl(current.serverUrl) != normalizedServerUrl(s.serverUrl) || current.password != s.password) studioAccess.invalidate()
-            else studioAccess.confirmed(s, enabled)
-        } catch (e: CancellationException) { studioAccess.invalidate(); throw e
-        } catch (_: Exception) { studioAccess.invalidate() }
+        if (s.appMode == AppMode.LOCAL || !s.configured || (s.syncServerUrl.isNotBlank() && normalizedServerUrl(s.syncServerUrl) != normalizedServerUrl(s.serverUrl))) { studioAccess.invalidate(); return }
+        capabilitiesRequests.run(s.identity()) {
+            // Un waiter puede retomar una consulta cuyo propietario se canceló.
+            // No inicia otra petición con credenciales que ya hayan cambiado.
+            if (settings.flow.first().identity() != s.identity()) {
+                studioAccess.invalidate()
+                return@run
+            }
+            try {
+                val enabled = apiFactory(s.serverUrl).capabilitiesInfo(s.password).studio?.enabled == true
+                val current = settings.flow.first()
+                if (current.identity() != s.identity()) studioAccess.invalidate()
+                else studioAccess.confirmed(s, enabled)
+            } catch (e: CancellationException) { studioAccess.invalidate(); throw e
+            } catch (_: Exception) { studioAccess.invalidate() }
+        }
     }
-    data class Result(val ok: Boolean, val pulled: Int = 0, val pushed: Int = 0, val error: String? = null)
+    data class Result(
+        val ok: Boolean,
+        val pulled: Int = 0,
+        val pushed: Int = 0,
+        val error: String? = null,
+        internal val deferredByLocalWrite: Boolean = false,
+    )
 
     companion object {
         const val SERVER_CHANGE_BLOCKED = "server-change-blocked"
@@ -80,17 +98,30 @@ class SyncEngine(
         }
     }
 
-    suspend fun sync(): Result = mutex.withLock {
+    suspend fun sync(): Result = syncRequests.run(settings.flow.first().identity()) {
+        mutex.withLock {
+            var result = syncUnlocked()
+            // La UI y el worker comparten la pasada. Una edición que llega después
+            // del push inicial exige otra vuelta, no otro worker duplicado al abrir.
+            while ((result.ok || result.deferredByLocalWrite) && settings.flow.first().let { it.appMode != AppMode.LOCAL && it.configured } && repo.outboxPeek(1).isNotEmpty()) {
+                val next = syncUnlocked()
+                result = next.copy(pulled = result.pulled + next.pulled, pushed = result.pushed + next.pushed)
+            }
+            result
+        }
+    }
+
+    private suspend fun syncUnlocked(): Result {
         refreshCapabilities()
         val p = pushUnlocked()
         // Bajar sobre una escritura pendiente podría borrar la edición optimista.
         if (!p.ok) {
             val waiting = repo.outboxPeek(1).firstOrNull()
             if (waiting?.kind?.startsWith("studio") == true || waiting?.lastError?.contains("conflictId") == true) refreshStudioUnlocked()
-            return@withLock p
+            return p
         }
         val pulled = pullUnlocked().copy(pushed = p.pushed)
-        if (pulled.ok && p.error != null) pulled.copy(ok = false, error = p.error) else pulled
+        return if (pulled.ok && p.error != null) pulled.copy(ok = false, error = p.error) else pulled
     }
 
     suspend fun push(): Result = mutex.withLock { refreshCapabilities(); val result = pushUnlocked(); if (result.error != null) result.copy(ok = false) else result }
@@ -133,7 +164,7 @@ class SyncEngine(
         if (s.appMode == AppMode.LOCAL) return Result(true)
         if (!s.configured) return Result(false, error = "Sin servidor configurado")
         if (!ensureServer(s)) return Result(false, error = SERVER_CHANGE_BLOCKED)
-        if (repo.outboxPeek(Int.MAX_VALUE).any { !StudioOutbox.requiresStudio(it.kind) }) return Result(false, error = "Hay cambios pendientes de subir")
+        if (repo.outboxPeek(Int.MAX_VALUE).any { !StudioOutbox.requiresStudio(it.kind) }) return Result(false, error = "Hay cambios pendientes de subir", deferredByLocalWrite = true)
         val api = apiFactory(s.serverUrl)
         var pulled = 0
         return try {
@@ -163,6 +194,7 @@ class SyncEngine(
                 }
             }
             Result(true, pulled = pulled)
+        } catch (e: LocalChangesPendingException) { Result(false, pulled = pulled, error = e.message, deferredByLocalWrite = true)
         } catch (e: CancellationException) { throw e
         } catch (e: Exception) { Result(false, pulled = pulled, error = e.message ?: e.javaClass.simpleName) }
     }

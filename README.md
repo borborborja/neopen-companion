@@ -52,7 +52,7 @@ JAVA_HOME=/path/to/jdk-17 ./gradlew :neopen:assembleDebug
 
 ### APK (GitHub Actions)
 
-CI builds an installable **debug APK** on every push to `main` and on PRs:
+CI builds an installable **optimized APK** (`neopen.apk`, non-debuggable, R8) on every push to `main` and on PRs. It retains the signing certificate of previous GitHub APKs so existing installations can be updated:
 
 - **Artifact**: *Actions* tab → run → APK artifact.
 - **Release**: pushing a tag `vX.Y.Z` attaches the APK to the GitHub release.
