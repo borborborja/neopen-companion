@@ -5,6 +5,9 @@ AuthorName: neopen contributors
 SourceCode: https://github.com/borborborja/neopen-companion
 IssueTracker: https://github.com/borborborja/neopen-companion/issues
 Changelog: https://github.com/borborborja/neopen-companion/releases
+AntiFeatures:
+  NonFreeNet:
+    en-US: Notebook geometry lookup uses NeoLAB's public Firebase Storage service; capture works with fallback geometry when unavailable.
 
 AutoName: neopen
 Summary: Capture Neo smartpen handwriting locally or on your neopen server
@@ -19,9 +22,9 @@ RepoType: git
 Repo: https://github.com/borborborja/neopen-companion.git
 
 Builds:
-  - versionName: 0.24.0
-    versionCode: 39
-    commit: fdroid-v0.24.0
+  - versionName: 0.26.1
+    versionCode: 42
+    commit: fdroid-v0.26.1
     subdir: neopen
     gradle:
       - yes
@@ -41,12 +44,13 @@ MaintainerNotes: |-
   core/PaperLookup requests notebook geometry XML from NeoLAB's public Firebase
   Storage bucket using OkHttp. The request contains the paper section/owner/book
   identifiers, not handwriting, and local capture still works if it fails.
-  OCR, LanguageTool, server sync and storage connectors are optional services
-  configured by the user; they are not required for local capture or notebooks.
-  These network features should be considered during the AntiFeatures review.
+  OCR, LanguageTool, server sync and storage connectors are optional services;
+  they are not required for local capture or notebooks. LanguageTool is disabled
+  by default, offers api.languagetool.org as its default endpoint and supports
+  a user-configured self-hosted endpoint. Other endpoints are configured by the user.
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^fdroid-v[0-9]+\.[0-9]+\.[0-9]+$
 UpdateCheckData: neopen/build.gradle.kts|versionCode = (\d+)|.|versionName = "([^"]+)"
-CurrentVersion: 0.24.0
-CurrentVersionCode: 39
+CurrentVersion: 0.26.1
+CurrentVersionCode: 42

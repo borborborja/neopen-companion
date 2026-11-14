@@ -16,8 +16,8 @@ Normal GitHub releases keep using tags such as `v0.21.6`.
 F-Droid should only follow explicit tags:
 
 ```bash
-git tag -a fdroid-v0.24.0 -m "F-Droid candidate 0.24.0 (39)"
-git push origin fdroid-v0.24.0
+git tag -a fdroid-v0.26.1 -m "F-Droid candidate 0.26.1 (42)"
+git push origin fdroid-v0.26.1
 ```
 
 Use an `fdroid-vX.Y.Z` tag only for versions that are mature enough for F-Droid.
@@ -27,7 +27,7 @@ matching `versionName` and a new `versionCode`.
 ## fdroiddata metadata template
 
 The root `.fdroid.yml` is the build recipe. Its current candidate is
-**0.24.0 (version code 39)**, selected by `fdroid-v0.24.0`; automated updates
+**0.26.1 (version code 42)**, selected by `fdroid-v0.26.1`; automated updates
 follow only explicit `fdroid-v*` tags. This does not submit the app to F-Droid or create an F-Droid release.
 The repository must be publicly accessible before any F-Droid submission;
 publishing these files does not change its visibility.
@@ -44,6 +44,8 @@ The ready-to-submit recipe is
 [`.fdroid.yml`](../.fdroid.yml). Copy it to
 `fdroiddata/metadata/net.micapum.neopen.yml` when proposing inclusion. Descriptions,
 screenshots, icon and version changelogs are in `fastlane/metadata/android`.
+For the fdroiddata submission, replace the build tag with its full commit SHA and
+omit `Summary` and `Description`, which F-Droid imports from Fastlane.
 
 Submit the metadata through a merge request to
 [fdroiddata](https://gitlab.com/fdroid/fdroiddata), or request packaging through
@@ -68,10 +70,47 @@ The recipe discloses the following network features in `MaintainerNotes`:
   Firebase Storage bucket through ordinary HTTPS/OkHttp. It sends paper
   identifiers, not handwritten strokes. Capture works with fallback geometry
   when that service is unavailable.
-- OCR, LanguageTool, server synchronization and storage connectors are optional
-  and use endpoints configured by the user. Local capture and notebooks require
-  no account or server.
+- OCR, LanguageTool, server synchronization and storage connectors are optional.
+  LanguageTool is disabled by default and offers `api.languagetool.org` as its
+  default endpoint; users can configure a self-hosted endpoint instead. Other
+  endpoints are configured by the user. Local capture and notebooks require no
+  account or server.
 
-These disclosures let the F-Droid reviewers decide the appropriate AntiFeatures.
+The recipe declares `NonFreeNet` for the automatic NeoLAB geometry lookup.
+These disclosures let the F-Droid reviewers assess the network features.
 A compatible Neo smartpen and Ncode paper are needed to capture handwriting; this
 is an independent implementation, not an official NeoLAB application.
+
+## Verification and automated RFP reports
+
+The RFP bot can inspect all applications in the repository without `-Pfdroid`.
+Its report for `versionCode=18` describes `net.micapum.neopen.live`, not the
+F-Droid candidate `net.micapum.neopen`. A source scan of the unprepared repository
+therefore finds ML Kit. Keep the recipe's `rm` exclusions: F-Droid removes those
+paths before scanning and building the candidate. Do not suppress the finding
+with `scanignore` or remove ML Kit from the separate Live application.
+
+The Gradle wrapper pins the official SHA-256 for `gradle-8.9-bin.zip`. Test this
+using an empty Gradle user directory, since an already downloaded distribution
+does not exercise download verification:
+
+```bash
+GRADLE_USER_HOME="$(mktemp -d)" ./gradlew --version
+./gradlew -Pfdroid projects
+./gradlew -Pfdroid :neopen:dependencies --configuration releaseRuntimeClasspath
+./gradlew :neopen:assembleDebug :live:compileDebugKotlin
+```
+
+The F-Droid project list must exclude `:live`, and the release runtime dependency
+graph must contain no ML Kit, Firebase SDK or Google Play Services SDK. In a
+configured fdroiddata checkout, validate the submitted metadata and build the
+exact pinned commit with both source and APK scanning:
+
+```bash
+fdroid lint -f net.micapum.neopen
+fdroid build --server --test --scan-binary --refresh-scanner net.micapum.neopen:42
+```
+
+The resulting package must be `net.micapum.neopen`, version `0.26.1` / code `42`,
+and unsigned so F-Droid can sign it. Preserve existing `fdroid-v*` tags; future
+candidates must use new tags rather than moving previously submitted releases.
